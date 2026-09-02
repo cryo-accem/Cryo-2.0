@@ -9,40 +9,44 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 def init_mail(app):
-    """Configure email delivery through Resend's HTTPS API."""
-    app.config["RESEND_API_KEY"] = os.environ.get("RESEND_API_KEY", "").strip()
-    app.config["RESEND_FROM_EMAIL"] = (
-        os.environ.get("RESEND_FROM_EMAIL", "").strip()
-        or "onboarding@resend.dev"
-    )
-    if not app.config["RESEND_API_KEY"]:
-        app.logger.warning("Email is not configured; RESEND_API_KEY is missing")
+    """Configure email delivery through a Google Apps Script HTTPS relay."""
+    app.config["GOOGLE_APPS_SCRIPT_URL"] = os.environ.get(
+        "GOOGLE_APPS_SCRIPT_URL", ""
+    ).strip()
+    app.config["GOOGLE_APPS_SCRIPT_TOKEN"] = os.environ.get(
+        "GOOGLE_APPS_SCRIPT_TOKEN", ""
+    ).strip()
+    if not app.config["GOOGLE_APPS_SCRIPT_URL"] or not app.config["GOOGLE_APPS_SCRIPT_TOKEN"]:
+        app.logger.warning(
+            "Email is not configured; Google Apps Script URL or token is missing"
+        )
 
 
 def send_email(recipient: str, subject: str, body: str, cc=None, attachments=None):
-    """Send email asynchronously through Resend's HTTPS API."""
+    """Send email asynchronously through a Google Apps Script HTTPS relay."""
     from flask import current_app
 
     app = current_app._get_current_object()
 
     def _send():
         with app.app_context():
-            api_key = app.config.get("RESEND_API_KEY")
-            if not api_key:
+            relay_url = app.config.get("GOOGLE_APPS_SCRIPT_URL")
+            relay_token = app.config.get("GOOGLE_APPS_SCRIPT_TOKEN")
+            if not relay_url or not relay_token:
                 app.logger.error(
-                    "Email to %s was not sent because RESEND_API_KEY is not configured",
+                    "Email to %s was not sent because Google Apps Script email relay is not configured",
                     recipient,
                 )
                 return
 
             payload = {
-                "from": app.config["RESEND_FROM_EMAIL"],
-                "to": [recipient],
+                "token": relay_token,
+                "to": recipient,
                 "subject": subject,
-                "text": body,
+                "body": body,
             }
             if cc:
-                payload["cc"] = cc
+                payload["cc"] = ",".join(cc)
             if attachments:
                 payload["attachments"] = [
                     {
@@ -53,27 +57,32 @@ def send_email(recipient: str, subject: str, body: str, cc=None, attachments=Non
                 ]
 
             request = urllib.request.Request(
-                "https://api.resend.com/emails",
+                relay_url,
                 data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers={"Content-Type": "application/json"},
                 method="POST",
             )
             try:
                 with urllib.request.urlopen(request, timeout=15) as response:
-                    response.read()
-                app.logger.info("Email to %s sent through Resend", recipient)
+                    response_body = response.read().decode("utf-8", errors="replace")
+                app.logger.info(
+                    "Email to %s sent through Google Apps Script: %s",
+                    recipient,
+                    response_body,
+                )
             except urllib.error.HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
                 app.logger.error(
-                    "Email to %s failed through Resend (HTTP %s): %s",
+                    "Email to %s failed through Google Apps Script (HTTP %s): %s",
                     recipient,
                     exc.code,
                     details,
                 )
             except urllib.error.URLError as exc:
-                app.logger.error("Email to %s failed through Resend: %s", recipient, exc.reason)
+                app.logger.error(
+                    "Email to %s failed through Google Apps Script: %s",
+                    recipient,
+                    exc.reason,
+                )
 
     threading.Thread(target=_send, daemon=True).start()
