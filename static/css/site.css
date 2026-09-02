@@ -531,6 +531,9 @@ a { color: inherit; }
 .table-search input { padding-left: 35px; }
 .table-search input:focus, .table-tools select:focus { outline: 0; border-color: #62b8d0; box-shadow: 0 0 0 3px rgba(72, 200, 232, .14); }
 .table-tools select { width: 170px; color: #526b7d; }
+.history-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 2px; }
+.history-tab { border: 1px solid #cbdce5; border-radius: 999px; padding: 9px 15px; color: #526b7d; background: #fff; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.history-tab:hover, .history-tab.is-active { border-color: #167da5; color: #fff; background: #167da5; }
 .data-panel h2 { display: flex; align-items: center; gap: 9px; }
 .status-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 4px 8px; font-size: 9px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }
 .status-badge--pending { color: #9b3f48; background: #fff0f1; }

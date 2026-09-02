@@ -247,6 +247,24 @@ document.querySelectorAll('[data-admin-filter]').forEach((filter) => {
   search?.addEventListener('input', applyFilters);
   origin?.addEventListener('change', applyFilters);
 });
+
+document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
+  const stack = tabs.nextElementSibling;
+  const panels = stack?.querySelectorAll('[data-history-panel]') || [];
+  tabs.querySelectorAll('[data-history-tab]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      const selectedService = tab.dataset.historyTab;
+      tabs.querySelectorAll('[data-history-tab]').forEach((item) => {
+        const active = item === tab;
+        item.classList.toggle('is-active', active);
+        item.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      panels.forEach((panel) => {
+        panel.hidden = selectedService !== 'all' && panel.dataset.historyPanel !== selectedService;
+      });
+    });
+  });
+});
 </script>
 {% endif %}
 </body>

@@ -5,7 +5,7 @@
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>History, charge sheets and payment tracking.</p></div></header>
 
   {% macro completed_table(title, rows, service_key, service_label, has_days=False) %}
-  <section class="data-panel">
+  <section class="data-panel" data-history-panel="{{ service_key }}">
     <h2>{{ title }}</h2>
     {% if rows %}
     <div class="table-wrap"><table class="data-table">
@@ -63,6 +63,12 @@
   </section>
   {% endmacro %}
 
+  <div class="history-tabs" data-history-tabs role="tablist" aria-label="Completed booking service">
+    <button type="button" class="history-tab is-active" data-history-tab="all" role="tab" aria-selected="true">All services</button>
+    <button type="button" class="history-tab" data-history-tab="imaging" role="tab" aria-selected="false">Data Collection</button>
+    <button type="button" class="history-tab" data-history-tab="freezing" role="tab" aria-selected="false">Freezing</button>
+    <button type="button" class="history-tab" data-history-tab="screening" role="tab" aria-selected="false">Screening</button>
+  </div>
   <div class="data-stack">
     <div class="table-tools" data-admin-filter>
       <label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI, email, sample or status"></label>
