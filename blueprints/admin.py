@@ -1,8 +1,13 @@
 import datetime
 import csv
 import io
+import base64
+import json
 import os
 import re
+import urllib.error
+import urllib.parse
+import urllib.request
 import uuid
 import zipfile
 from decimal import Decimal, InvalidOperation
@@ -653,6 +658,54 @@ def _rows_csv(rows):
     return output.getvalue()
 
 
+def _commit_archive_to_github(filename, contents):
+    token = os.environ.get("GITHUB_TOKEN")
+    repository = os.environ.get("GITHUB_REPOSITORY", "cryo-accem/Cryo-2.0")
+    branch = os.environ.get("GITHUB_BRANCH", "main")
+    if not token:
+        raise RuntimeError("GITHUB_TOKEN is not configured")
+
+    path = f"instance/registration_archives/{filename}"
+    encoded_path = urllib.parse.quote(path, safe="/")
+    api_url = f"https://api.github.com/repos/{repository}/contents/{encoded_path}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    sha = None
+    try:
+        request = urllib.request.Request(
+            f"{api_url}?ref={urllib.parse.quote(branch)}",
+            headers=headers,
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            sha = json.load(response).get("sha")
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise RuntimeError(f"GitHub archive lookup failed with HTTP {error.code}") from error
+
+    payload = {
+        "message": f"Archive completed registrations: {filename}",
+        "content": base64.b64encode(contents.encode("utf-8")).decode("ascii"),
+        "branch": branch,
+    }
+    if sha:
+        payload["sha"] = sha
+    request = urllib.request.Request(
+        api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={**headers, "Content-Type": "application/json"},
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status not in (200, 201):
+                raise RuntimeError(f"GitHub archive commit failed with HTTP {response.status}")
+    except urllib.error.HTTPError as error:
+        raise RuntimeError(f"GitHub archive commit failed with HTTP {error.code}") from error
+
+
 @admin_bp.route("/database-backup.zip")
 def download_database_backup():
     if not session.get("admin_logged_in"):
@@ -686,9 +739,17 @@ def archive_completed_registrations():
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_dir = os.path.join(current_app.instance_path, "registration_archives")
     os.makedirs(backup_dir, exist_ok=True)
-    archive_path = os.path.join(backup_dir, f"completed-registrations-{timestamp}.csv")
+    archive_filename = f"completed-registrations-{timestamp}.csv"
+    archive_path = os.path.join(backup_dir, archive_filename)
+    archive_contents = _rows_csv(completed)
     with open(archive_path, "w", newline="", encoding="utf-8") as archive:
-        archive.write(_rows_csv(completed))
+        archive.write(archive_contents)
+
+    try:
+        _commit_archive_to_github(archive_filename, archive_contents)
+    except RuntimeError as error:
+        flash(f"Archive was not removed from the database: {error}", "error")
+        return redirect(url_for("admin.panel"))
 
     conn = get_db()
     cur = conn.cursor()

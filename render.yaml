@@ -22,3 +22,9 @@ services:
         sync: false
       - key: GOOGLE_APPS_SCRIPT_TOKEN
         sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: GITHUB_REPOSITORY
+        value: cryo-accem/Cryo-2.0
+      - key: GITHUB_BRANCH
+        value: main
