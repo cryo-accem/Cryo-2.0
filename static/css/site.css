@@ -300,6 +300,7 @@ a { color: inherit; }
 .admin-login-note { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 20px 0 0; color: #8294a3; font-size: 10px; }
 .admin-login-note i { color: #5daec5; }
 .prose { max-width: 900px; }
+.page-content > .prose { max-width: none; }
 .prose p { color: #43546a; margin: 0 0 18px; }
 .prose strong { color: var(--navy); }
 .prose a, .publication-list a { color: #167da5; }
