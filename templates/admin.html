@@ -12,7 +12,10 @@
         <p>Use your facility credentials to continue.</p>
       </div>
     </div>
-    {% with messages = get_flashed_messages() %}{% if messages %}{% for message in messages %}<div class="alert">{{ message }}</div>{% endfor %}{% endif %}{% endwith %}
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% set login_messages = messages | selectattr('0', 'equalto', 'login') | map(attribute='1') | list %}
+      {% if login_messages %}{% for message in login_messages %}<div class="alert">{{ message }}</div>{% endfor %}{% endif %}
+    {% endwith %}
     <form action="{{ url_for('admin.login') }}" method="post">
       <div class="admin-login-fields">
         <div class="form-field"><label for="username">Username</label><div class="admin-input"><i class="fa-regular fa-user" aria-hidden="true"></i><input type="text" id="username" name="username" autocomplete="username" required></div></div>

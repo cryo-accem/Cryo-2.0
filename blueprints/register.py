@@ -26,7 +26,7 @@ def register():
                 user_name, pi_name, email, origin, esm, sample_name, grids, days
             )
             if not success:
-                flash(message)
+                flash(message, "registration")
                 return redirect(url_for("register.register"))
             return redirect(url_for("imaging.list_view", success="datacollecting"))
 
@@ -40,7 +40,7 @@ def register():
                 user_name, pi_name, email, origin, esm, sample_name, grids, days
             )
             if not success:
-                flash(message)
+                flash(message, "registration")
                 return redirect(url_for("register.register"))
             return redirect(url_for("screening.screening_list", success="screening"))
 
@@ -53,7 +53,7 @@ def register():
                 user_name, pi_name, email, origin, sample_name, grids, freezing_date
             )
             if not success:
-                flash(message)
+                flash(message, "registration")
                 return redirect(url_for("register.register"))
             return redirect(url_for("freezing.freezing_schedule", success="freezing"))
 

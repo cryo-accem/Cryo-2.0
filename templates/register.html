@@ -5,8 +5,9 @@
   <section class="page-content">
     <header class="page-header page-header--portal"><div><div class="eyebrow">User portal</div><h1>Register for a Cryo-EM slot</h1><p>Tell us about your sample and preferred service. The facility team will follow up by email.</p></div></header>
     <div class="form-card">
-      {% with messages = get_flashed_messages() %}
-        {% if messages %}<div class="flash">{% for msg in messages %}<p>{{ msg }}</p>{% endfor %}</div>{% endif %}
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% set registration_messages = messages | selectattr('0', 'equalto', 'registration') | map(attribute='1') | list %}
+        {% if registration_messages %}<div class="flash">{% for msg in registration_messages %}<p>{{ msg }}</p>{% endfor %}</div>{% endif %}
       {% endwith %}
       <form action="{{ url_for('register.register') }}" method="post">
         <input type="hidden" id="reg_type" name="reg_type" required>

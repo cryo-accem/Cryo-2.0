@@ -74,7 +74,7 @@ def login():
             session["admin_logged_in"] = True
             return redirect(url_for("admin.panel"))
 
-        flash("Invalid username or password.")
+        flash("Invalid username or password.", "login")
     return render_template("admin.html")
 
 
