@@ -1,4 +1,5 @@
 from decimal import Decimal
+import re
 
 
 GST_RATE = Decimal("0.18")
@@ -16,7 +17,13 @@ NON_BILLABLE_PI_NAMES = {"somnath dutta"}
 
 
 def is_non_billable_booking(booking):
-    return (booking["pi_name"] or "").strip().casefold() in NON_BILLABLE_PI_NAMES
+    pi_name = re.sub(
+        r"^(?:dr|prof|professor|mr|mrs|ms)\.?\s+",
+        "",
+        (booking["pi_name"] or "").strip(),
+        flags=re.IGNORECASE,
+    )
+    return pi_name.casefold() in NON_BILLABLE_PI_NAMES
 
 
 def pricing_category(origin):
