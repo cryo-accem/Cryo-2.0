@@ -927,4 +927,5 @@ def history():
         completed_freezing=completed_freezing,
         completed_screening=completed_screening,
         charge_sheet_tables=_CHARGE_SHEET_TABLES,
+        is_non_billable_booking=is_non_billable_booking,
     )

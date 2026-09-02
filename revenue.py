@@ -13,17 +13,11 @@ SLOT_RATES = {
     "industrial": Decimal("50000"),
 }
 
-NON_BILLABLE_PI_NAMES = {"somnath dutta"}
+NON_BILLABLE_PI_PATTERN = re.compile(r"som(?:nath|anth)", re.IGNORECASE)
 
 
 def is_non_billable_booking(booking):
-    pi_name = re.sub(
-        r"^(?:dr|prof|professor|mr|mrs|ms)\.?\s+",
-        "",
-        (booking["pi_name"] or "").strip(),
-        flags=re.IGNORECASE,
-    )
-    return pi_name.casefold() in NON_BILLABLE_PI_NAMES
+    return bool(NON_BILLABLE_PI_PATTERN.search((booking["pi_name"] or "").strip()))
 
 
 def pricing_category(origin):
