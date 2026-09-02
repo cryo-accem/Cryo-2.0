@@ -1,8 +1,9 @@
 import datetime
+from decimal import Decimal
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
-from revenue import FREEZING_RATE
+from revenue import FREEZING_RATE, is_non_billable_booking
 
 freezing_bp = Blueprint("freezing", __name__)
 
@@ -18,7 +19,7 @@ def complete_freezing_booking(cur, booking_id, actual_grids):
     booking = cur.fetchone()
     if not booking:
         return None
-    freezing_charge = FREEZING_RATE * actual_grids
+    freezing_charge = Decimal("0") if is_non_billable_booking(booking) else FREEZING_RATE * actual_grids
     cur.execute(
         """INSERT INTO completed_freezing
            (user_name, pi_name, email, origin, sample_name, grids, freezing_date,

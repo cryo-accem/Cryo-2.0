@@ -19,11 +19,14 @@
           <td>{{ slot.actual_slots or 0 }} slots<br>{{ slot.actual_grids or 0 }} grids</td>
           <td>{{ slot.completion_date if service_key != 'freezing' else slot.completed_at }}</td>
           <td>
+            {% if slot.pi_name|trim|lower == 'somnath dutta' %}<span class="status-badge completed">Non-billable</span>
+            {% else %}
             {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
             <form method="post" action="{{ url_for('admin.send_charge_sheet', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
               {% if slot.origin|lower == 'internal' %}<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" placeholder="PI email (optional)" aria-label="PI email">{% endif %}
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
+            {% endif %}
           </td>
           <td>
             {% if slot.origin|lower == 'internal' %}

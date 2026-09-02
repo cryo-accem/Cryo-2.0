@@ -12,6 +12,12 @@ SLOT_RATES = {
     "industrial": Decimal("50000"),
 }
 
+NON_BILLABLE_PI_NAMES = {"somnath dutta"}
+
+
+def is_non_billable_booking(booking):
+    return (booking["pi_name"] or "").strip().casefold() in NON_BILLABLE_PI_NAMES
+
 
 def pricing_category(origin):
     normalized = (origin or "").strip().casefold()
@@ -29,10 +35,13 @@ def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_re
     actual_slots = Decimal(str(actual_slots))
     actual_grids = Decimal(str(actual_grids))
 
-    slot_charge = SLOT_RATES[category] * actual_slots
-    freezing_charge = FREEZING_RATE * actual_grids
-    clipping_charge = CLIPPING_RATE * actual_grids
-    processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
+    if is_non_billable_booking(booking):
+        slot_charge = freezing_charge = clipping_charge = processing_charge = Decimal("0")
+    else:
+        slot_charge = SLOT_RATES[category] * actual_slots
+        freezing_charge = FREEZING_RATE * actual_grids
+        clipping_charge = CLIPPING_RATE * actual_grids
+        processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
     subtotal = slot_charge + freezing_charge + clipping_charge + processing_charge
     gst = (slot_charge + processing_charge) * GST_RATE if category != "internal" else Decimal("0")
 

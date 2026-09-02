@@ -15,7 +15,7 @@ from werkzeug.utils import secure_filename
 from database import get_db
 from database import _is_sqlite_url
 from extensions import send_email
-from revenue import calculate_booking_revenue
+from revenue import calculate_booking_revenue, is_non_billable_booking
 from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 
@@ -183,24 +183,28 @@ def _revenue_dashboard(cur):
     rows = []
     for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
         cur.execute(
-            f"""SELECT origin, completion_date, actual_slots, actual_grids,
+            f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        slot_charge, freezing_charge, clipping_charge,
                        processing_charge, gst_amount, total_billed
                 FROM {table}
                 WHERE status='completed'"""
         )
         for row in cur.fetchall():
+            if is_non_billable_booking(row):
+                continue
             completion_date = _parse_date(str(row["completion_date"])[:10])
             if not completion_date or (start and completion_date < start) or (end and completion_date > end):
                 continue
             rows.append((row, service, completion_date))
     cur.execute(
-        """SELECT origin, completed_at AS completion_date, NULL AS actual_slots,
+        """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, slot_charge, freezing_charge, clipping_charge,
                   processing_charge, gst_amount, total_billed
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
+        if is_non_billable_booking(row):
+            continue
         completion_date = _parse_date(str(row["completion_date"])[:10])
         if not completion_date or (start and completion_date < start) or (end and completion_date > end):
             continue
@@ -742,6 +746,9 @@ def send_charge_sheet(service_key, booking_id):
         return redirect(url_for("admin.history"))
 
     row = dict(row)
+    if is_non_billable_booking(row):
+        flash("Charge sheets are not applicable for this PI.")
+        return redirect(url_for("admin.history"))
     pi_email = request.form.get("pi_email", "").strip()
     if pi_email and not _valid_email(pi_email):
         flash("Enter a valid PI email address.")
