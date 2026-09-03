@@ -3,14 +3,15 @@ from decimal import Decimal
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
-from revenue import FREEZING_RATE, is_non_billable_booking
+from revenue import calculate_charge_sheet, is_non_billable_booking
 
 freezing_bp = Blueprint("freezing", __name__)
 
 GRID_LIMIT_PER_DAY = 8
 
 
-def complete_freezing_booking(cur, booking_id, actual_grids):
+def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facility",
+                              grid_type="normal_holey_carbon", user_category=None):
     """Complete one freezing booking using the grids actually frozen."""
     cur.execute(
         "SELECT * FROM freezing_bookings WHERE id=? AND status='active'",
@@ -19,17 +20,31 @@ def complete_freezing_booking(cur, booking_id, actual_grids):
     booking = cur.fetchone()
     if not booking:
         return None
-    freezing_charge = Decimal("0") if is_non_billable_booking(booking) else FREEZING_RATE * actual_grids
+    charges = calculate_charge_sheet(
+        user_category or booking["origin"], "Freezing / Grid Registration", actual_grids,
+        grid_source, grid_type,
+    )
+    if is_non_billable_booking(booking):
+        for key in ("grid_charge", "handling_charge", "subtotal", "gst", "gst_amount",
+                   "grand_total", "total_billed", "freezing_charge"):
+           charges[key] = Decimal("0.00")
     cur.execute(
         """INSERT INTO completed_freezing
-           (user_name, pi_name, email, origin, sample_name, grids, freezing_date,
-            actual_grids, slot_charge, freezing_charge, clipping_charge,
-            processing_charge, gst_amount, total_billed, processing_requested)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, 0)""",
+          (user_name, pi_name, email, origin, sample_name, grids, freezing_date,
+            actual_grids, number_of_grids, service_stage, grid_source, grid_type,
+            grid_charge, handling_charge, clip_base_charge, slot_charge,
+            freezing_charge, clipping_charge, processing_charge, subtotal,
+            gst_amount, grand_total, total_billed, processing_requested,
+            bill_generated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
         (booking["user_name"], booking["pi_name"], booking["email"],
          booking["origin"], booking["sample_name"], booking["grids"],
-         booking["freezing_date"], actual_grids, 0, freezing_charge,
-         freezing_charge),
+         booking["freezing_date"], str(actual_grids), charges["number_of_grids"],
+         charges["service_stage"], charges["grid_source"], charges["grid_type"],
+         str(charges["grid_charge"]), str(charges["handling_charge"]), str(charges["clip_base_charge"]),
+         str(charges["slot_charge"]), str(charges["freezing_charge"]), str(charges["clipping_charge"]),
+         str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
+         str(charges["grand_total"]), str(charges["total_billed"]), 0),
     )
     cur.execute(
         "UPDATE freezing_bookings SET status='completed' WHERE id=?",

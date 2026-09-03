@@ -12,7 +12,7 @@ import uuid
 import zipfile
 from decimal import Decimal, InvalidOperation
 from flask import (
-    Blueprint, current_app, render_template, request, send_file, Response,
+    Blueprint, current_app, render_template, request, send_file, Response, jsonify,
     redirect, url_for, session, flash,
 )
 from werkzeug.security import check_password_hash
@@ -20,7 +20,10 @@ from werkzeug.utils import secure_filename
 from database import get_db
 from database import _is_sqlite_url
 from extensions import send_email
-from revenue import calculate_booking_revenue, is_non_billable_booking
+from revenue import (
+    calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
+    parse_number_of_grids,
+)
 from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 
@@ -46,6 +49,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_registrations_csv",
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
+    "admin.billing_preview",
     "static",
 }
 
@@ -87,6 +91,26 @@ def login():
 def logout():
     session.pop("admin_logged_in", None)
     return redirect(url_for("public.index"))
+
+
+@admin_bp.route("/billing/preview", methods=["GET", "POST"])
+def billing_preview():
+    """Return an authoritative preview for the admin billing form."""
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        charges = calculate_charge_sheet(
+            request.values.get("user_category", ""),
+            request.values.get("service_stage", ""),
+            request.values.get("number_of_grids", request.values.get("actual_grids", "")),
+            request.values.get("grid_source", ""),
+            request.values.get("grid_type", ""),
+            request.values.get("actual_slots", "1") or "1",
+            request.values.get("processing_requested") == "1",
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({key: str(value) for key, value in charges.items() if key not in {"user_category", "service_stage", "grid_source", "grid_type"}})
 
 
 # ── Main Dashboard ───────────────────────────────────────────────────────────
@@ -189,8 +213,9 @@ def _revenue_dashboard(cur):
     for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
         cur.execute(
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
-                       slot_charge, freezing_charge, clipping_charge,
-                       processing_charge, gst_amount, total_billed
+                       number_of_grids, slot_charge, freezing_charge, clipping_charge,
+                       handling_charge, subtotal, processing_charge, gst_amount,
+                       grand_total, total_billed
                 FROM {table}
                 WHERE status='completed'"""
         )
@@ -203,8 +228,9 @@ def _revenue_dashboard(cur):
             rows.append((row, service, completion_date))
     cur.execute(
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
-                  actual_grids, slot_charge, freezing_charge, clipping_charge,
-                  processing_charge, gst_amount, total_billed
+                  actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
+                  handling_charge, subtotal, processing_charge, gst_amount,
+                  grand_total, total_billed
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
@@ -221,27 +247,35 @@ def _revenue_dashboard(cur):
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
     by_service = {"Data Collection": Decimal("0"), "Screening": Decimal("0"),
-                  "Freezing": Decimal("0"), "Clipping": Decimal("0"), "Data Processing": Decimal("0")}
+                  "Freezing": Decimal("0"), "Clipping": Decimal("0"),
+                  "Handling Charge": Decimal("0"), "Data Processing": Decimal("0")}
     monthly = {}
     for row, service, completion_date in rows:
         slot = _money(row["slot_charge"])
         freezing = _money(row["freezing_charge"])
         clipping = _money(row["clipping_charge"])
+        handling = _money(row["handling_charge"])
         processing = _money(row["processing_charge"])
         gst = _money(row["gst_amount"])
-        gross = _money(row["total_billed"])
+        subtotal = _money(row["subtotal"])
+        gross = _money(row["grand_total"] or row["total_billed"])
+        if not subtotal:
+            subtotal = slot + freezing + clipping + handling + processing
+        if not gross:
+            gross = subtotal + gst
         net = gross - gst
         totals["net"] += net
         totals["gst"] += gst
         totals["gross"] += gross
         totals["slots"] += Decimal(str(row["actual_slots"] or 0))
-        totals["grids"] += Decimal(str(row["actual_grids"] or 0))
+        totals["grids"] += Decimal(str(row["number_of_grids"] or row["actual_grids"] or 0))
         origin = (row["origin"] or "").strip().casefold()
         category = "Internal" if origin == "internal" else "Industrial" if origin in {"industry", "industrial"} else "External/Academic"
         by_category[category] += net
         by_service[service] += slot
         by_service["Freezing"] += freezing
         by_service["Clipping"] += clipping
+        by_service["Handling Charge"] += handling
         by_service["Data Processing"] += processing
         month = completion_date.strftime("%Y-%m")
         monthly.setdefault(month, {"net": Decimal("0"), "slots": Decimal("0")})
@@ -322,19 +356,36 @@ def complete_dc(booking_id):
         return redirect(url_for("admin.login"))
 
     actual_slots = request.form.get("actual_slots", "").strip()
-    actual_grids = request.form.get("actual_grids", "").strip()
+    actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_source = request.form.get("grid_source", "").strip()
+    grid_type = request.form.get("grid_type", "").strip()
     processing_requested = request.form.get("processing_requested") == "1"
+    if not grid_source:
+        flash("Please select the grid source before generating the bill.")
+        return redirect(url_for("admin.datacollecting"))
+    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+        flash("Please select the grid type for facility-provided grids.")
+        return redirect(url_for("admin.datacollecting"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.datacollecting"))
+    user_category = request.form.get("user_category", "").strip() or None
+    service_stage = request.form.get("service_stage", "").strip() or "Data Collection"
+    if service_stage != "Data Collection":
+        flash("This booking can only be completed as Data Collection.")
+        return redirect(url_for("admin.datacollecting"))
     try:
         actual_slots_value = Decimal(actual_slots)
-        actual_grids_value = int(actual_grids)
         if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
-                or actual_grids_value <= 0 or "." in actual_grids):
+                ):
             raise ValueError
     except (InvalidOperation, ValueError):
         flash("Actual slots must be positive and grids must be a positive integer.")
+        return redirect(url_for("admin.datacollecting"))
+    try:
+        actual_grids_value = parse_number_of_grids(actual_grids)
+    except ValueError:
+        flash("Number of grids must be at least 1.")
         return redirect(url_for("admin.datacollecting"))
 
     conn = get_db()
@@ -346,17 +397,30 @@ def complete_dc(booking_id):
         conn.close()
         flash("That data collection booking is no longer ongoing.")
         return redirect(url_for("admin.datacollecting"))
-    charges = calculate_booking_revenue(
-        booking, actual_slots_value, actual_grids_value, processing_requested
-    )
+    try:
+        charges = calculate_booking_revenue(
+            booking, actual_slots_value, actual_grids_value, processing_requested,
+            grid_source, grid_type, "Data Collection", user_category,
+        )
+    except ValueError as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.datacollecting"))
     cur.execute(
         """UPDATE bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, slot_charge=?, freezing_charge=?,
-           clipping_charge=?, processing_charge=?, gst_amount=?, total_billed=?,
-           processing_requested=? WHERE id=?""",
-        (datetime.date.today(), charges["actual_slots"], charges["actual_grids"],
-         charges["slot_charge"], charges["freezing_charge"], charges["clipping_charge"],
-         charges["processing_charge"], charges["gst"], charges["total_billed"],
+           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
+           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
+           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
+           WHERE id=?""",
+        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
+         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
+         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
+         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), str(charges["total_billed"]),
          int(processing_requested), booking_id),
     )
     cur.execute("SELECT * FROM bookings WHERE id=?", [booking_id])
@@ -422,7 +486,16 @@ def complete_freezing(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
-    actual_grids = request.form.get("actual_grids", "").strip()
+    actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_source = request.form.get("grid_source", "").strip()
+    grid_type = request.form.get("grid_type", "").strip()
+    user_category = request.form.get("user_category", "").strip() or None
+    if not grid_source:
+        flash("Please select the grid source before generating the bill.")
+        return redirect(url_for("admin.freezing_admin"))
+    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+        flash("Please select the grid type for facility-provided grids.")
+        return redirect(url_for("admin.freezing_admin"))
     try:
         if not actual_grids or "." in actual_grids:
             raise ValueError
@@ -430,12 +503,18 @@ def complete_freezing(booking_id):
         if actual_grids_value <= 0 or actual_grids_value != actual_grids_value.to_integral_value():
             raise ValueError
     except (InvalidOperation, ValueError):
-        flash("Actual frozen grids must be a positive integer.")
+        flash("Number of grids must be at least 1.")
         return redirect(url_for("admin.freezing_admin"))
 
     conn = get_db()
     cur = conn.cursor()
-    booking = complete_freezing_booking(cur, booking_id, actual_grids_value)
+    try:
+        booking = complete_freezing_booking(cur, booking_id, actual_grids_value, grid_source, grid_type, user_category)
+    except ValueError as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.freezing_admin"))
     if not booking:
         cur.close()
         conn.close()
@@ -504,19 +583,36 @@ def complete_sc(booking_id):
         return redirect(url_for("admin.login"))
 
     actual_slots = request.form.get("actual_slots", "").strip()
-    actual_grids = request.form.get("actual_grids", "").strip()
+    actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_source = request.form.get("grid_source", "").strip()
+    grid_type = request.form.get("grid_type", "").strip()
+    user_category = request.form.get("user_category", "").strip() or None
+    service_stage = request.form.get("service_stage", "").strip() or "Screening / Clipping"
+    if service_stage != "Screening / Clipping":
+        flash("This booking can only be completed as Screening / Clipping.")
+        return redirect(url_for("admin.screening_admin"))
     processing_requested = request.form.get("processing_requested") == "1"
+    if not grid_source:
+        flash("Please select the grid source before generating the bill.")
+        return redirect(url_for("admin.screening_admin"))
+    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+        flash("Please select the grid type for facility-provided grids.")
+        return redirect(url_for("admin.screening_admin"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.screening_admin"))
     try:
         actual_slots_value = Decimal(actual_slots)
-        actual_grids_value = int(actual_grids)
         if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
-                or actual_grids_value <= 0 or "." in actual_grids):
+                ):
             raise ValueError
     except (InvalidOperation, ValueError):
         flash("Actual slots must be positive and grids must be a positive integer.")
+        return redirect(url_for("admin.screening_admin"))
+    try:
+        actual_grids_value = parse_number_of_grids(actual_grids)
+    except ValueError:
+        flash("Number of grids must be at least 1.")
         return redirect(url_for("admin.screening_admin"))
 
     conn = get_db()
@@ -528,17 +624,30 @@ def complete_sc(booking_id):
         conn.close()
         flash("That screening booking is no longer ongoing.")
         return redirect(url_for("admin.screening_admin"))
-    charges = calculate_booking_revenue(
-        booking, actual_slots_value, actual_grids_value, processing_requested
-    )
+    try:
+        charges = calculate_booking_revenue(
+            booking, actual_slots_value, actual_grids_value, processing_requested,
+            grid_source, grid_type, "Screening / Clipping", user_category,
+        )
+    except ValueError as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.screening_admin"))
     cur.execute(
         """UPDATE screening_bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, slot_charge=?, freezing_charge=?,
-           clipping_charge=?, processing_charge=?, gst_amount=?, total_billed=?,
-           processing_requested=? WHERE id=?""",
-        (datetime.date.today(), charges["actual_slots"], charges["actual_grids"],
-         charges["slot_charge"], charges["freezing_charge"], charges["clipping_charge"],
-         charges["processing_charge"], charges["gst"], charges["total_billed"],
+           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
+           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
+           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
+           WHERE id=?""",
+        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
+         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
+         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
+         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), str(charges["total_billed"]),
          int(processing_requested), booking_id),
     )
     cur.execute("SELECT * FROM screening_bookings WHERE id=?", [booking_id])
@@ -810,6 +919,25 @@ def send_charge_sheet(service_key, booking_id):
     if is_non_billable_booking(row):
         flash("Charge sheets are not applicable for this PI.")
         return redirect(url_for("admin.history"))
+    # Recalculate immediately before rendering/sending.  Stored totals and
+    # browser values are never treated as the financial source of truth.
+    grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
+    grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
+    if not grid_source:
+        flash("Please select the grid source before generating the bill.")
+        return redirect(url_for("admin.history"))
+    try:
+        charges = calculate_charge_sheet(
+            row.get("origin", ""), service,
+            row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
+            grid_source, grid_type,
+            row.get("actual_slots") or 1,
+            bool(row.get("processing_requested")),
+        )
+    except ValueError as exc:
+        flash(str(exc))
+        return redirect(url_for("admin.history"))
+    row.update(charges)
     pi_email = request.form.get("pi_email", "").strip()
     if pi_email and not _valid_email(pi_email):
         flash("Enter a valid PI email address.")
@@ -853,6 +981,19 @@ def send_charge_sheet(service_key, booking_id):
 
     conn = get_db()
     cur = conn.cursor()
+    cur.execute(
+        "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
+        "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
+        "freezing_charge=?, clipping_charge=?, processing_charge=?, subtotal=?, "
+        "gst_amount=?, grand_total=?, total_billed=?, bill_generated_at=CURRENT_TIMESTAMP "
+        "WHERE id=?".format(_CHARGE_SHEET_TABLES[service_key][0]),
+        [charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
+         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         str(charges["clip_base_charge"]), str(charges["slot_charge"]),
+         str(charges["freezing_charge"]), str(charges["clipping_charge"]),
+         str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
+         str(charges["grand_total"]), str(charges["total_billed"]), booking_id],
+    )
     if pi_email:
         cur.execute(
             "UPDATE {} SET pi_email=?, charge_sheet_sent_at=CURRENT_TIMESTAMP WHERE id=?".format(

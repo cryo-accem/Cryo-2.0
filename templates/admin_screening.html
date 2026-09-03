@@ -10,19 +10,29 @@
   </div>
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a></div>
 </section></main>
-<div class="completion-modal" id="completion-modal" hidden><div class="completion-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="completion-title"><button type="button" class="completion-modal__close" data-close-completion aria-label="Close">×</button><h2 id="completion-title">Calculate &amp; complete</h2><p>Enter actual usage. Requested values remain unchanged.</p><form id="completion-form" method="post"><label>Actual 24-hour slots<input name="actual_slots" type="number" min="1" step="1" required></label><label>Actual grids<input name="actual_grids" type="number" min="1" step="1" required></label><label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested</label><div class="completion-summary" id="completion-summary" hidden></div><div class="completion-modal__actions"><button type="button" class="button secondary" data-calculate-completion>Calculate</button><button type="submit" class="button" data-confirm-completion hidden>Confirm &amp; Complete</button></div></form></div></div>
+<div class="completion-modal" id="completion-modal" hidden><div class="completion-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="completion-title"><button type="button" class="completion-modal__close" data-close-completion aria-label="Close">×</button><h2 id="completion-title">Billing preview &amp; complete</h2><p>Enter actual usage and grid details. The preview updates automatically.</p><form id="completion-form" method="post"><label>User Category<select name="user_category" required><option value="internal">Internal</option><option value="academic">External Academic</option><option value="industry">External Industry</option></select></label><label>Service Stage<select name="service_stage" required><option value="Screening / Clipping">Screening / Clipping</option><option value="Data Collection">Data Collection</option><option value="Freezing / Grid Registration">Freezing / Grid Registration</option></select></label><label>Actual 24-hour slots<input name="actual_slots" type="number" min="1" step="1" required></label><label>Actual grids<input name="actual_grids" type="number" min="1" step="1" required></label><label>Grid source<select name="grid_source" required><option value="">Select source</option><option value="facility">Facility Provided</option><option value="self_owned">Self Owned / User Provided</option></select></label><label id="grid-type-label">Grid type<select name="grid_type"><option value="">Select type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select></label><label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested</label><div class="completion-summary" id="completion-summary" hidden></div><div class="completion-modal__actions"><button type="submit" class="button" data-confirm-completion disabled>Confirm &amp; Complete</button></div></form></div></div>
 <script>
 (() => {
   const modal = document.getElementById("completion-modal"), form = document.getElementById("completion-form"), summary = document.getElementById("completion-summary");
   let origin = "";
-  document.querySelectorAll(".completion-trigger").forEach((button) => button.addEventListener("click", () => { form.action = button.dataset.action; origin = button.dataset.origin; form.reset(); summary.hidden = true; document.querySelector("[data-confirm-completion]").hidden = true; modal.hidden = false; }));
-  document.querySelector("[data-close-completion]").addEventListener("click", () => { modal.hidden = true; });
-  document.querySelector("[data-calculate-completion]").addEventListener("click", () => {
+  const categoryFor = (value) => value === "Internal" ? "internal" : (value === "Industry" ? "industry" : "academic");
+  const updatePreview = async () => {
+    const source = form.grid_source.value;
+    document.getElementById("grid-type-label").hidden = source === "self_owned";
+    form.grid_type.disabled = source === "self_owned";
+    if (form.grid_type.disabled) form.grid_type.value = "";
+    form.grid_type.required = source === "facility";
     if (!form.reportValidity()) return;
-    const slots = Number(form.actual_slots.value), grids = Number(form.actual_grids.value), category = origin === "Internal" ? "internal" : (origin === "Industry" ? "industrial" : "academic"), rate = {internal: 3000, academic: 12000, industrial: 50000}[category], processing = form.processing_requested.checked && category !== "internal" ? 20000 : 0, slot = slots * rate, freezing = grids * 125, clipping = grids * 125, subtotal = slot + freezing + clipping + processing, gst = category === "internal" ? 0 : (slot + processing) * 0.18;
-    summary.innerHTML = `Actual 24-hour slots: ${slots}<br>Actual grids: ${grids}<br><br>Slot charge: ₹${slot.toFixed(2)}<br>Freezing: ₹${freezing.toFixed(2)}<br>Clipping: ₹${clipping.toFixed(2)}<br>Data processing: ₹${processing.toFixed(2)}<br>Net subtotal: ₹${subtotal.toFixed(2)}<br>GST: ₹${gst.toFixed(2)}<br><strong>Total billed: ₹${(subtotal + gst).toFixed(2)}</strong>`;
-    summary.hidden = false; document.querySelector("[data-confirm-completion]").hidden = false;
-  });
+    const response = await fetch("{{ url_for('admin.billing_preview') }}", {method: "POST", body: new URLSearchParams(new FormData(form))});
+    const data = await response.json();
+    if (!response.ok) { summary.textContent = data.error || "Complete the required billing fields."; summary.hidden = false; document.querySelector("[data-confirm-completion]").disabled = true; return; }
+    summary.innerHTML = `Grid Charge: ₹${Number(data.grid_charge).toFixed(2)}<br>Handling Charge: ₹${Number(data.handling_charge).toFixed(2)}<br>C-clip + Base ring: ₹${Number(data.clip_base_charge).toFixed(2)}<br>Slot Charge: ₹${Number(data.slot_charge).toFixed(2)}<br>Subtotal: ₹${Number(data.subtotal).toFixed(2)}<br>GST: ₹${Number(data.gst).toFixed(2)}<br><strong>Grand Total: ₹${Number(data.grand_total).toFixed(2)}</strong>`;
+    summary.hidden = false; document.querySelector("[data-confirm-completion]").disabled = false;
+  };
+  document.querySelectorAll(".completion-trigger").forEach((button) => button.addEventListener("click", () => { form.action = button.dataset.action; origin = button.dataset.origin; form.reset(); form.user_category.value = categoryFor(origin); summary.hidden = true; document.querySelector("[data-confirm-completion]").disabled = true; modal.hidden = false; }));
+  document.querySelector("[data-close-completion]").addEventListener("click", () => { modal.hidden = true; });
+  form.querySelectorAll("input, select").forEach((field) => field.addEventListener("input", updatePreview));
+  form.querySelectorAll("input, select").forEach((field) => field.addEventListener("change", updatePreview));
 })();
 </script>
 {% endblock %}

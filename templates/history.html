@@ -23,6 +23,8 @@
             {% else %}
             {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
             <form method="post" action="{{ url_for('admin.send_charge_sheet', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
+              <select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility" {{ 'selected' if slot.grid_source == 'facility' else '' }}>Facility Provided</option><option value="self_owned" {{ 'selected' if slot.grid_source == 'self_owned' else '' }}>Self Owned / User Provided</option></select>
+              <select name="grid_type" aria-label="Grid type"><option value="">Grid type</option><option value="normal_holey_carbon" {{ 'selected' if slot.grid_type == 'normal_holey_carbon' else '' }}>Normal Holey Carbon Grid</option><option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / Carbon Coated / Graphene Oxide Grid</option></select>
               {% if slot.origin|lower == 'internal' %}<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" placeholder="PI email (optional)" aria-label="PI email">{% endif %}
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
@@ -86,6 +88,13 @@
     {{ completed_table('Completed freezing slots', completed_freezing, 'freezing', 'Freezing') }}
     {{ completed_table('Completed screening slots', completed_screening, 'screening', 'Screening', True) }}
   </div>
-  <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a></div>
-</section></main>
+  <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a>  </div>
+</section>
+<script>
+document.querySelectorAll("form[action*='charge-sheet']").forEach((form) => {
+  const source = form.querySelector("[name=grid_source]"), type = form.querySelector("[name=grid_type]");
+  const update = () => { type.disabled = source.value === "self_owned"; type.required = source.value === "facility"; if (type.disabled) type.value = ""; };
+  source.addEventListener("change", update); update();
+});
+</script></main>
 {% endblock %}

@@ -95,21 +95,38 @@ def _paragraph(text, style):
     return Paragraph(escaped, style)
 
 
+def _value(row, key, default=None):
+    try:
+        value = row[key]
+    except (KeyError, IndexError):
+        return default
+    return default if value is None else value
+
+
 def _billing_lines(row, service):
+    stage = str(_value(row, "service_stage", service) or service)
+    if stage.casefold() in {"freezing", "grid registration"}:
+        stage = "Freezing / Grid Registration"
+    elif stage.casefold() in {"screening", "clipping"}:
+        stage = "Screening / Clipping"
+    grids = _value(row, "number_of_grids", _value(row, "actual_grids", _value(row, "grids", 0)))
+    source = str(_value(row, "grid_source", "") or "").casefold()
+    grid_amount = _value(row, "grid_charge", _value(row, "freezing_charge", 0))
+    handling_amount = _value(row, "handling_charge", 0)
+    clip_amount = _value(row, "clip_base_charge", _value(row, "clipping_charge", 0))
+    slot_amount = _value(row, "slot_charge", 0)
+    processing_amount = _value(row, "processing_charge", 0)
     lines = []
-    actual_slots = row.get("actual_slots") if hasattr(row, "get") else row["actual_slots"]
-    actual_grids = row.get("actual_grids") if hasattr(row, "get") else row["actual_grids"]
-    values = [
-        ("Cryo-Electron Microscopy Analysis" if service == "Data Collection" else service,
-         actual_slots, row["slot_charge"], "24-hour slot"),
-        ("Freezing", actual_grids, row["freezing_charge"], "grid"),
-        ("C-Clip", actual_grids, row["clipping_charge"], "grid"),
-        ("Data Processing", 1, row["processing_charge"], "service"),
-    ]
-    for description, quantity, amount, unit in values:
-        amount = _decimal(amount)
-        if amount:
-            lines.append((description, f"{quantity or 0} {unit}", amount))
+    # A self-owned grid is intentionally shown as a zero-valued line.
+    if stage == "Freezing / Grid Registration" or source == "self_owned":
+        lines.append(("Grid Charge", f"{grids or 0} grid(s)", _decimal(grid_amount)))
+    if stage in {"Freezing / Grid Registration", "Screening / Clipping", "Data Collection"}:
+        lines.append(("Handling Charge", f"{grids or 0} grid(s)", _decimal(handling_amount)))
+    if stage in {"Screening / Clipping", "Data Collection"}:
+        lines.append(("C-clip + Base ring", "1 service", _decimal(clip_amount)))
+        lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
+    if _decimal(processing_amount):
+        lines.append(("Data Processing / Image Analysis", "1 service", _decimal(processing_amount)))
     return lines
 
 
@@ -168,6 +185,8 @@ def _external_pdf(row, service):
     story.append(Spacer(1, 16))
 
     category = "Academic" if str(row["origin"]).casefold() == "external" else row["origin"]
+    source = str(_value(row, "grid_source", "") or "").casefold()
+    source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     info = [
         [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]), f"CS-{row['id']}",
          _paragraph("<b>Date:</b>", styles["Small"]), _display_date(row["completion_date"] if service != "Freezing" else row["completed_at"])],
@@ -177,7 +196,12 @@ def _external_pdf(row, service):
         [_paragraph("<b>Booking ID:</b>", styles["Small"]), str(row["id"]),
          _paragraph("<b>Service:</b>", styles["Small"]), service],
         [_paragraph("<b>User Category:</b>", styles["Small"]), category, "", ""],
+        [_paragraph("<b>Number of Grids:</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0),
+         _paragraph("<b>Grid Source:</b>", styles["Small"]), source_label],
     ]
+    grid_type = _value(row, "grid_type", "")
+    if source != "self_owned" and grid_type:
+        info.append([_paragraph("<b>Grid Type:</b>", styles["Small"]), str(grid_type).replace("_", " ").title(), "", ""])
     table = Table(info, colWidths=[30 * mm, 68 * mm, 30 * mm, 52 * mm])
     table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b8c5d0")),
@@ -207,11 +231,13 @@ def _external_pdf(row, service):
         ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(billing)
-    subtotal = sum((_decimal(row[field]) for field in ("slot_charge", "freezing_charge", "clipping_charge", "processing_charge")), Decimal("0"))
+    subtotal = _decimal(_value(row, "subtotal", None))
+    if not subtotal:
+        subtotal = sum((_decimal(_value(row, field, 0)) for field in ("slot_charge", "freezing_charge", "clipping_charge", "processing_charge")), Decimal("0"))
     summary = [
         ["Actual 24-hour slots", str(row["actual_slots"] or 0), "Subtotal", f"INR {subtotal:,.2f}"],
-        ["Actual grids", str(row["actual_grids"] or 0), "GST", f"INR {_decimal(row['gst_amount']):,.2f}"],
-        ["", "", "Grand Total", f"INR {_decimal(row['total_billed']):,.2f}"],
+        ["Actual grids", str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0), "GST", f"INR {_decimal(_value(row, 'gst_amount', 0)):,.2f}"],
+        ["", "", "Grand Total", f"INR {_decimal(_value(row, 'grand_total', _value(row, 'total_billed', 0))):,.2f}"],
     ]
     summary_table = Table(summary, colWidths=[42 * mm, 28 * mm, 42 * mm, 68 * mm])
     summary_table.setStyle(TableStyle([
@@ -222,7 +248,7 @@ def _external_pdf(row, service):
         ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story.append(summary_table)
-    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(row['total_billed'])}", styles["Small"]))
+    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(_value(row, 'grand_total', _value(row, 'total_billed', 0)))}", styles["Small"]))
     story.append(Spacer(1, 14))
     story.append(_paragraph("<b>PAYMENT INSTRUCTIONS</b>", styles["Section"]))
     story.append(_paragraph("Please make the payment using the bank details provided below. After completing the transaction, "
@@ -253,9 +279,15 @@ def _internal_pdf(row, service):
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET", styles["Institution"]))
     story.append(Spacer(1, 6))
+    source = str(_value(row, "grid_source", "") or "").casefold()
+    source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
+    grid_type = _value(row, "grid_type", "")
     story.append(_paragraph(f"<b>Date:</b> {_display_date(row['completion_date'] if service != 'Freezing' else row['completed_at'])}<br/>"
                             f"<b>TO:</b> {row['user_name']}<br/>Department/Unit: Indian Institute of Science<br/>Email: {row['email']}<br/>"
-                            f"<b>Booking ID:</b> {row['id']} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal", styles["Small"]))
+                            f"<b>Booking ID:</b> {row['id']} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal<br/>"
+                            f"<b>Number of Grids:</b> {_value(row, 'number_of_grids', _value(row, 'actual_grids', 0)) or 0}<br/>"
+                            f"<b>Grid Source:</b> {source_label}"
+                            f"{'<br/><b>Grid Type:</b> ' + str(grid_type).replace('_', ' ').title() if source != 'self_owned' and grid_type else ''}", styles["Small"]))
     story.append(Spacer(1, 8))
     rows = [[_paragraph("<b>S.No</b>", styles["Small"]), _paragraph("<b>Particulars</b>", styles["Small"]),
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
@@ -274,11 +306,16 @@ def _internal_pdf(row, service):
     ]))
     story.append(billing)
     story.append(Spacer(1, 8))
+    subtotal = _decimal(_value(row, "subtotal", 0))
+    gst = _decimal(_value(row, "gst_amount", 0))
+    total = _decimal(_value(row, "grand_total", _value(row, "total_billed", 0)))
     summary = [
-        [_paragraph("<b>Actual 24-hour slots</b>", styles["Small"]), str(row["actual_slots"] or 0),
-         _paragraph("<b>Actual grids</b>", styles["Small"]), str(row["actual_grids"] or 0)],
-        [_paragraph("<b>Grand Total</b>", styles["Small"]), f"INR {_decimal(row['total_billed']):,.2f}",
-         _paragraph("<b>Amount in words</b>", styles["Small"]), _amount_words(row["total_billed"])],
+        [_paragraph("<b>Actual 24-hour slots</b>", styles["Small"]), str(_value(row, "actual_slots", 0) or 0),
+         _paragraph("<b>Actual grids</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0)],
+        [_paragraph("<b>Subtotal</b>", styles["Small"]), f"INR {subtotal:,.2f}",
+         _paragraph("<b>GST</b>", styles["Small"]), f"INR {gst:,.2f}"],
+        [_paragraph("<b>Grand Total</b>", styles["Small"]), f"INR {total:,.2f}",
+         _paragraph("<b>Amount in words</b>", styles["Small"]), _amount_words(total)],
     ]
     summary_table = Table(summary, colWidths=[42 * mm, 24 * mm, 42 * mm, 72 * mm])
     summary_table.setStyle(TableStyle([
@@ -293,7 +330,7 @@ def _internal_pdf(row, service):
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 4))
-    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(row['total_billed'])}", styles["Small"]))
+    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(total)}", styles["Small"]))
     story.append(Spacer(1, 10))
     story.append(_paragraph("<b>Internal users are requested to provide the appropriate Debit Head for processing the charges "
                             "and copy their PI while submitting the Debit Head details.</b>", styles["Small"]))
