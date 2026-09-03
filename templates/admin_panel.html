@@ -44,7 +44,7 @@
     <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('This will save completed registrations to an archive and permanently remove them from the database. Continue?');">
       <button class="button archive-button" type="submit">Archive and remove completed</button>
     </form>
-    <strong class="archive-warning">WARNING: Completed records will be committed first to <code>instance/registration_archives/</code> in GitHub, then permanently deleted from the database.</strong>
+    <strong class="archive-warning">WARNING: Completed records are archived locally in <code>instance/registration_archives/</code> before being permanently deleted. GitHub synchronization is attempted when configured.</strong>
   </div>
 </section></main>
 {% endblock %}

@@ -854,11 +854,12 @@ def archive_completed_registrations():
     with open(archive_path, "w", newline="", encoding="utf-8") as archive:
         archive.write(archive_contents)
 
-    try:
-        _commit_archive_to_github(archive_filename, archive_contents)
-    except RuntimeError as error:
-        flash(f"Archive was not removed from the database: {error}", "error")
-        return redirect(url_for("admin.panel"))
+    github_error = None
+    if os.environ.get("GITHUB_TOKEN"):
+        try:
+            _commit_archive_to_github(archive_filename, archive_contents)
+        except RuntimeError as error:
+            github_error = str(error)
 
     conn = get_db()
     cur = conn.cursor()
@@ -868,7 +869,20 @@ def archive_completed_registrations():
     conn.commit()
     cur.close()
     conn.close()
-    flash(f"Archived {len(completed)} completed registrations, then removed them from the database.")
+    if github_error:
+        flash(
+            f"Archived {len(completed)} completed registrations locally and removed them from "
+            f"the database, but GitHub synchronization failed: {github_error}",
+            "warning",
+        )
+    elif not os.environ.get("GITHUB_TOKEN"):
+        flash(
+            f"Archived {len(completed)} completed registrations locally and removed them from "
+            "the database. GitHub synchronization is unavailable because GITHUB_TOKEN is not configured.",
+            "warning",
+        )
+    else:
+        flash(f"Archived {len(completed)} completed registrations, then removed them from the database.")
     return redirect(url_for("admin.panel"))
 
 
