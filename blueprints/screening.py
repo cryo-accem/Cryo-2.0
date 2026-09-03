@@ -32,6 +32,7 @@ def register_screening(user_name, pi_name, email, origin, esm, sample_name, grid
     Insert a new screening booking.
     Returns (success: bool, message: str).
     """
+    days = 1
     conn = get_db()
     cur = conn.cursor()
 

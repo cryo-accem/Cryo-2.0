@@ -865,6 +865,7 @@ def archive_completed_registrations():
     cur = conn.cursor()
     cur.execute("DELETE FROM bookings WHERE status='completed'")
     cur.execute("DELETE FROM screening_bookings WHERE status='completed'")
+    cur.execute("DELETE FROM freezing_bookings WHERE status='completed'")
     cur.execute("DELETE FROM completed_freezing")
     conn.commit()
     cur.close()

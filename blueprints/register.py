@@ -34,7 +34,7 @@ def register():
         elif reg_type == "screening":
             esm   = request.form.get("esm", "")
             grids = int(request.form.get("grids") or 0)
-            days  = int(request.form.get("days") or 0)
+            days  = 1
 
             success, message = register_screening(
                 user_name, pi_name, email, origin, esm, sample_name, grids, days
