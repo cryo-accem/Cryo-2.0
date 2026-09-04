@@ -1,0 +1,19 @@
+# Python
+.venv/
+venv/
+.venv-1/
+__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+instance/payment_proofs/
+
+# IDE
+.vscode/
+preview.db
