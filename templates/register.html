@@ -37,7 +37,9 @@
           <div class="form-field full"><label for="sample_name">Name of the Sample</label><input type="text" id="sample_name" name="sample_name" required></div>
           <div id="imaging_fields" class="form-grid full">
             <div class="form-field"><label for="grids">How Many Grids (Maximum 4)</label><input type="number" id="grids" name="grids" min="1" max="4"></div>
-            <div class="form-field" id="days_field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4"></div>
+          </div>
+          <div id="datacollecting_fields" class="form-grid full">
+            <div class="form-field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4"></div>
           </div>
           <div id="freezing_fields" class="form-grid full">
             <div class="form-field"><label for="freezing_date">Date for Registration</label><input type="date" id="freezing_date" name="freezing_date"></div>
@@ -76,14 +78,13 @@ function toggleRegType() {
   const type = document.getElementById('reg_type').value;
   const imaging = type === 'datacollecting' || type === 'screening';
   document.getElementById('imaging_fields').classList.toggle('hidden', !imaging);
+  const dataCollectingFields = document.getElementById('datacollecting_fields');
+  dataCollectingFields.classList.toggle('hidden', type !== 'datacollecting');
   document.getElementById('freezing_fields').classList.toggle('hidden', type !== 'freezing');
   document.getElementById('grids').required = imaging;
-  const daysField = document.getElementById('days_field');
   const days = document.getElementById('days');
   const dataCollecting = type === 'datacollecting';
-  daysField.classList.toggle('hidden', !dataCollecting);
   days.required = dataCollecting;
-  if (!dataCollecting) days.value = '1';
   document.getElementById('freezing_date').required = type === 'freezing';
   document.getElementById('grids_freezing').required = type === 'freezing';
 }
