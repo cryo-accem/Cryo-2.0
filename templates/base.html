@@ -47,7 +47,7 @@
       <a class="{% if request.path.startswith('/admin/freezing') %}active{% endif %}" href="{{ url_for('admin.freezing_admin') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i><span>Freezing</span></a>
       <a class="{% if request.path.startswith('/admin/history') %}active{% endif %}" href="{{ url_for('admin.history') }}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>History</span></a>
     </nav>
-    <a class="admin-sidebar__logout" href="{{ url_for('admin.logout') }}"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Logout</span></a>
+    <form class="admin-sidebar__logout" method="post" action="{{ url_for('admin.logout') }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button type="submit"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Logout</span></button></form>
   </aside>
   {% endif %}
   {% with messages = get_flashed_messages(with_categories=true) %}

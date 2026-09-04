@@ -1,15 +1,12 @@
 import datetime
 import csv
 import io
-import base64
-import json
 import os
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
 import uuid
 import zipfile
+import secrets
+import hmac
 from decimal import Decimal, InvalidOperation
 from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
@@ -50,14 +47,41 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
     "admin.billing_preview",
+    "admin.update_maintenance",
     "static",
 }
+
+_CSRF_ENDPOINTS = {
+    "admin.login", "admin.logout", "admin.load_dc", "admin.complete_dc",
+    "admin.delete_dc", "admin.complete_freezing", "admin.load_sc",
+    "admin.complete_sc", "admin.delete_sc", "admin.send_charge_sheet",
+    "admin.update_payment", "admin.archive_completed_registrations",
+    "admin.update_maintenance",
+}
+
+
+def csrf_token():
+    token = session.get("_csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+@admin_bp.app_context_processor
+def inject_csrf_token():
+    return {"csrf_token": csrf_token}
 
 
 # ── Session guard ────────────────────────────────────────────────────────────
 
 @admin_bp.before_app_request
 def check_admin_session():
+    if request.endpoint in _CSRF_ENDPOINTS and request.method == "POST":
+        supplied = request.form.get("_csrf_token", "")
+        if not supplied or not hmac.compare_digest(supplied, csrf_token()):
+            from flask import abort
+            abort(400, description="Invalid CSRF token.")
     if "admin_logged_in" in session and request.endpoint:
         if request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS:
             session.pop("admin_logged_in", None)
@@ -68,12 +92,12 @@ def check_admin_session():
 @admin_bp.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form["username"].strip().lower()
-        password = request.form["password"]
+        username = request.form.get("username", "").strip().lower()
+        password = request.form.get("password", "")
 
         conn = get_db()
         cur  = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE username=?", [username])
+        cur.execute("SELECT * FROM users WHERE username=? AND role='admin'", [username])
         user = cur.fetchone()
         cur.close()
         conn.close()
@@ -87,7 +111,7 @@ def login():
     return render_template("admin.html")
 
 
-@admin_bp.route("/logout")
+@admin_bp.route("/logout", methods=["POST"])
 def logout():
     session.pop("admin_logged_in", None)
     return redirect(url_for("public.index"))
@@ -142,6 +166,8 @@ def panel():
     cur.execute("SELECT COUNT(*) AS count FROM freezing_bookings WHERE status='active'")
     freezing_active = cur.fetchone()["count"]
     revenue = _revenue_dashboard(cur)
+    cur.execute("SELECT service, enabled, message FROM service_controls ORDER BY service")
+    maintenance = cur.fetchall()
     cur.close()
     conn.close()
     pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd"]
@@ -170,8 +196,56 @@ def panel():
         waiting_chart=waiting_chart,
         waiting_total=waiting_total,
         revenue=revenue,
+        maintenance=maintenance,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
+
+
+@admin_bp.route("/maintenance", methods=["POST"])
+def update_maintenance():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    service = request.form.get("service", "").strip().lower()
+    if service not in {"freezing", "screening", "datacollecting"}:
+        flash("Unknown service.")
+        return redirect(url_for("admin.panel"))
+    slot_date = request.form.get("slot_date", "").strip()
+    try:
+        datetime.date.fromisoformat(slot_date)
+    except ValueError:
+        flash("Select a valid maintenance date.")
+        return redirect(request.referrer or url_for("admin.panel"))
+    enabled = request.form.get("enabled") == "1"
+    message = request.form.get("message", "").strip()[:500]
+    conn = get_db()
+    cur = conn.cursor()
+    if enabled:
+        cur.execute(
+            "DELETE FROM maintenance_slots WHERE service=? AND slot_date=?",
+            [service, slot_date],
+        )
+    else:
+        if _is_sqlite_url():
+            cur.execute(
+                """INSERT INTO maintenance_slots (service, slot_date, reason)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(service, slot_date) DO UPDATE SET
+                   reason=excluded.reason, updated_at=CURRENT_TIMESTAMP""",
+                [service, slot_date, message or None],
+            )
+        else:
+            cur.execute(
+                """INSERT INTO maintenance_slots (service, slot_date, reason)
+                   VALUES (?, ?, ?)
+                   ON DUPLICATE KEY UPDATE reason=VALUES(reason),
+                   updated_at=CURRENT_TIMESTAMP""",
+                [service, slot_date, message or None],
+            )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(f"{service.title()} is {'available' if enabled else 'under maintenance'} on {slot_date}.")
+    return redirect(request.referrer or url_for("admin.panel"))
 
 
 def _money(value):
@@ -215,7 +289,7 @@ def _revenue_dashboard(cur):
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
                        handling_charge, subtotal, processing_charge, gst_amount,
-                       grand_total, total_billed
+                       grand_total, total_billed, amount_received
                 FROM {table}
                 WHERE status='completed'"""
         )
@@ -230,7 +304,7 @@ def _revenue_dashboard(cur):
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
                   handling_charge, subtotal, processing_charge, gst_amount,
-                  grand_total, total_billed
+                  grand_total, total_billed, amount_received
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
@@ -243,7 +317,8 @@ def _revenue_dashboard(cur):
 
     totals = {
         "net": Decimal("0"), "gst": Decimal("0"), "gross": Decimal("0"),
-        "slots": Decimal("0"), "grids": Decimal("0"),
+        "slots": Decimal("0"), "grids": Decimal("0"), "billed": Decimal("0"),
+        "received": Decimal("0"), "outstanding": Decimal("0"),
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
     by_service = {"Data Collection": Decimal("0"), "Screening": Decimal("0"),
@@ -267,6 +342,10 @@ def _revenue_dashboard(cur):
         totals["net"] += net
         totals["gst"] += gst
         totals["gross"] += gross
+        received = max(Decimal("0"), _money(row["amount_received"]))
+        totals["billed"] += gross
+        totals["received"] += min(received, gross)
+        totals["outstanding"] += max(Decimal("0"), gross - received)
         totals["slots"] += Decimal(str(row["actual_slots"] or 0))
         totals["grids"] += Decimal(str(row["number_of_grids"] or row["actual_grids"] or 0))
         origin = (row["origin"] or "").strip().casefold()
@@ -327,7 +406,7 @@ def datacollecting():
     )
 
 
-@admin_bp.route("/datacollecting/load/<int:booking_id>")
+@admin_bp.route("/datacollecting/load/<int:booking_id>", methods=["POST"])
 def load_dc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
@@ -369,7 +448,7 @@ def complete_dc(booking_id):
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.datacollecting"))
-    user_category = request.form.get("user_category", "").strip() or None
+    user_category = None
     service_stage = request.form.get("service_stage", "").strip() or "Data Collection"
     if service_stage != "Data Collection":
         flash("This booking can only be completed as Data Collection.")
@@ -397,6 +476,7 @@ def complete_dc(booking_id):
         conn.close()
         flash("That data collection booking is no longer ongoing.")
         return redirect(url_for("admin.datacollecting"))
+    user_category = booking["billing_category"] or booking["origin"]
     try:
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
@@ -442,7 +522,7 @@ def complete_dc(booking_id):
     return redirect(url_for("admin.datacollecting"))
 
 
-@admin_bp.route("/datacollecting/delete/<int:booking_id>")
+@admin_bp.route("/datacollecting/delete/<int:booking_id>", methods=["POST"])
 def delete_dc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
@@ -489,7 +569,7 @@ def complete_freezing(booking_id):
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
-    user_category = request.form.get("user_category", "").strip() or None
+    user_category = None
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.freezing_admin"))
@@ -554,7 +634,7 @@ def screening_admin():
     )
 
 
-@admin_bp.route("/screening/load/<int:booking_id>")
+@admin_bp.route("/screening/load/<int:booking_id>", methods=["POST"])
 def load_sc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
@@ -586,7 +666,7 @@ def complete_sc(booking_id):
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
-    user_category = request.form.get("user_category", "").strip() or None
+    user_category = None
     service_stage = request.form.get("service_stage", "").strip() or "Screening / Clipping"
     if service_stage != "Screening / Clipping":
         flash("This booking can only be completed as Screening / Clipping.")
@@ -624,6 +704,7 @@ def complete_sc(booking_id):
         conn.close()
         flash("That screening booking is no longer ongoing.")
         return redirect(url_for("admin.screening_admin"))
+    user_category = booking["billing_category"] or booking["origin"]
     try:
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
@@ -669,7 +750,7 @@ def complete_sc(booking_id):
     return redirect(url_for("admin.screening_admin"))
 
 
-@admin_bp.route("/screening/delete/<int:booking_id>")
+@admin_bp.route("/screening/delete/<int:booking_id>", methods=["POST"])
 def delete_sc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
@@ -767,54 +848,6 @@ def _rows_csv(rows):
     return output.getvalue()
 
 
-def _commit_archive_to_github(filename, contents):
-    token = os.environ.get("GITHUB_TOKEN")
-    repository = os.environ.get("GITHUB_REPOSITORY", "cryo-accem/Cryo-2.0")
-    branch = os.environ.get("GITHUB_BRANCH", "main")
-    if not token:
-        raise RuntimeError("GITHUB_TOKEN is not configured")
-
-    path = f"instance/registration_archives/{filename}"
-    encoded_path = urllib.parse.quote(path, safe="/")
-    api_url = f"https://api.github.com/repos/{repository}/contents/{encoded_path}"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-    sha = None
-    try:
-        request = urllib.request.Request(
-            f"{api_url}?ref={urllib.parse.quote(branch)}",
-            headers=headers,
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            sha = json.load(response).get("sha")
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise RuntimeError(f"GitHub archive lookup failed with HTTP {error.code}") from error
-
-    payload = {
-        "message": f"Archive completed registrations: {filename}",
-        "content": base64.b64encode(contents.encode("utf-8")).decode("ascii"),
-        "branch": branch,
-    }
-    if sha:
-        payload["sha"] = sha
-    request = urllib.request.Request(
-        api_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={**headers, "Content-Type": "application/json"},
-        method="PUT",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if response.status not in (200, 201):
-                raise RuntimeError(f"GitHub archive commit failed with HTTP {response.status}")
-    except urllib.error.HTTPError as error:
-        raise RuntimeError(f"GitHub archive commit failed with HTTP {error.code}") from error
-
-
 @admin_bp.route("/database-backup.zip")
 def download_database_backup():
     if not session.get("admin_logged_in"):
@@ -846,20 +879,17 @@ def archive_completed_registrations():
         return redirect(url_for("admin.panel"))
 
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir = os.path.join(current_app.instance_path, "registration_archives")
+    backup_dir = os.path.realpath(current_app.config["ARCHIVE_DIR"])
     os.makedirs(backup_dir, exist_ok=True)
     archive_filename = f"completed-registrations-{timestamp}.csv"
     archive_path = os.path.join(backup_dir, archive_filename)
     archive_contents = _rows_csv(completed)
     with open(archive_path, "w", newline="", encoding="utf-8") as archive:
         archive.write(archive_contents)
-
-    github_error = None
-    if os.environ.get("GITHUB_TOKEN"):
-        try:
-            _commit_archive_to_github(archive_filename, archive_contents)
-        except RuntimeError as error:
-            github_error = str(error)
+    try:
+        os.chmod(archive_path, 0o600)
+    except OSError:
+        current_app.logger.warning("Could not restrict archive permissions: %s", archive_path)
 
     conn = get_db()
     cur = conn.cursor()
@@ -870,20 +900,7 @@ def archive_completed_registrations():
     conn.commit()
     cur.close()
     conn.close()
-    if github_error:
-        flash(
-            f"Archived {len(completed)} completed registrations locally and removed them from "
-            f"the database, but GitHub synchronization failed: {github_error}",
-            "warning",
-        )
-    elif not os.environ.get("GITHUB_TOKEN"):
-        flash(
-            f"Archived {len(completed)} completed registrations locally and removed them from "
-            "the database. GitHub synchronization is unavailable because GITHUB_TOKEN is not configured.",
-            "warning",
-        )
-    else:
-        flash(f"Archived {len(completed)} completed registrations, then removed them from the database.")
+    flash(f"Archived {len(completed)} completed registrations locally and removed them from the database.")
     return redirect(url_for("admin.panel"))
 
 
@@ -895,12 +912,28 @@ _CHARGE_SHEET_TABLES = {
     "freezing": ("completed_freezing", "Freezing", "completed_at"),
 }
 _PAYMENT_PROOF_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
-_PAYMENT_PROOF_MIME_TYPES = {
-    "pdf": "application/pdf",
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-}
+
+
+def _valid_payment_proof(upload):
+    if not upload or not upload.filename:
+        return None, None
+    safe_name = secure_filename(upload.filename)
+    extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
+    if not safe_name or extension not in _PAYMENT_PROOF_EXTENSIONS:
+        raise ValueError("Payment proof must be a PDF, PNG, JPG, or JPEG file.")
+    data = upload.read(current_app.config["MAX_CONTENT_LENGTH"] + 1)
+    upload.seek(0)
+    if len(data) > current_app.config["MAX_CONTENT_LENGTH"]:
+        raise ValueError("Payment proof file is too large.")
+    signatures = {
+        "pdf": data.startswith(b"%PDF-"),
+        "png": data.startswith(b"\x89PNG\r\n\x1a\n"),
+        "jpg": data.startswith(b"\xff\xd8\xff"),
+        "jpeg": data.startswith(b"\xff\xd8\xff"),
+    }
+    if not signatures[extension]:
+        raise ValueError("The payment proof content does not match its extension.")
+    return safe_name, data
 
 
 def _charge_sheet_record(service_key, booking_id):
@@ -943,7 +976,7 @@ def send_charge_sheet(service_key, booking_id):
         return redirect(url_for("admin.history"))
     try:
         charges = calculate_charge_sheet(
-            row.get("origin", ""), service,
+            row.get("billing_category") or row.get("origin", ""), service,
             row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
             grid_source, grid_type,
             row.get("actual_slots") or 1,
@@ -1039,8 +1072,15 @@ def update_payment(service_key, booking_id):
         flash("Unknown booking type.")
         return redirect(url_for("admin.history"))
     table = table_info[0]
-    origin = request.form.get("origin", "").strip().casefold()
-    internal = origin == "internal"
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT billing_category, origin, grand_total, total_billed, payment_proof_path, payment_proof_original_name FROM {table} WHERE id=?", [booking_id])
+    booking = cur.fetchone()
+    if not booking:
+        cur.close(); conn.close()
+        flash("Booking not found.")
+        return redirect(url_for("admin.history"))
+    internal = (booking["billing_category"] or booking["origin"] or "").casefold() == "internal"
     status = request.form.get("status", "").strip()
     allowed = (
         {"Debit Head Pending", "Debit Head Received", "Debit Head Verified"}
@@ -1049,26 +1089,35 @@ def update_payment(service_key, booking_id):
     )
     if status not in allowed:
         flash("Invalid payment status.")
+        cur.close(); conn.close()
         return redirect(url_for("admin.history"))
+    amount_text = request.form.get("amount_received", "").strip()
+    if amount_text:
+        try:
+            amount = Decimal(amount_text)
+            billed = Decimal(str(booking["grand_total"] or booking["total_billed"] or 0))
+            if amount < 0 or amount > billed:
+                raise ValueError
+        except (InvalidOperation, ValueError):
+            cur.close(); conn.close()
+            flash("Amount received must be a non-negative value no greater than the billed total.")
+            return redirect(url_for("admin.history"))
     proof = request.files.get("payment_proof")
-    proof_path = None
-    proof_name = None
+    proof_path = booking["payment_proof_path"]
+    proof_name = booking["payment_proof_original_name"]
     if proof and proof.filename:
-        safe_name = secure_filename(proof.filename)
-        extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
-        if not safe_name or extension not in _PAYMENT_PROOF_EXTENSIONS:
-            flash("Payment proof must be a PDF, PNG, JPG, or JPEG file.")
+        try:
+            safe_name, _data = _valid_payment_proof(proof)
+        except ValueError as exc:
+            cur.close(); conn.close()
+            flash(str(exc))
             return redirect(url_for("admin.history"))
-        if proof.mimetype != _PAYMENT_PROOF_MIME_TYPES[extension]:
-            flash("The payment proof file type does not match its extension.")
-            return redirect(url_for("admin.history"))
+        extension = safe_name.rsplit(".", 1)[-1].lower()
         proof_directory = current_app.config["PAYMENT_PROOF_DIR"]
         os.makedirs(proof_directory, mode=0o700, exist_ok=True)
         proof_name = safe_name
         proof_path = f"{uuid.uuid4().hex}.{extension}"
         proof.save(os.path.join(proof_directory, proof_path))
-    conn = get_db()
-    cur = conn.cursor()
     if internal:
         cur.execute(
             f"UPDATE {table} SET debit_head_status=?, debit_head_details=?, admin_remarks=? WHERE id=?",

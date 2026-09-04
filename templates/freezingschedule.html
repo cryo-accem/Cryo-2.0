@@ -19,24 +19,16 @@
             <table class="data-table">
               <thead>
                 <tr>
-                  <th>Position</th>
-                  <th>Name of User</th>
-                  <th>Name of PI</th>
-                  <th>Origin</th>
+                  <th>Booking reference</th><th>Position</th>
                   <th>Registered At</th>
-                  <th>Number of Grids</th>
                   <th>Date for Freezing</th>
                 </tr>
               </thead>
               <tbody>
                 {% for slot in active_slots %}
                   <tr>
-                    <td>{{ loop.index }}</td>
-                    <td>{{ slot.user_name }}</td>
-                    <td>{{ slot.pi_name }}</td>
-                    <td>{{ slot.origin if slot.origin else slot.esm }}</td>
+                    <td>{{ slot.booking_ref or '—' }}</td><td>{{ loop.index }}</td>
                     <td>{{ slot.registered_at[:10] if slot.registered_at and slot.registered_at is string else slot.registered_at.strftime('%Y-%m-%d') if slot.registered_at else '' }}</td>
-                    <td>{{ slot.grids }}</td>
                     <td>{{ slot.freezing_date }}</td>
                   </tr>
                 {% endfor %}
