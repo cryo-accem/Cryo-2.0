@@ -50,6 +50,12 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
     "admin.billing_preview",
+    "admin.maintenance",
+    "admin.save_publication",
+    "admin.delete_publication",
+    "admin.save_instrument",
+    "admin.delete_instrument",
+    "admin.save_page",
     "static",
 }
 
@@ -108,6 +114,7 @@ def billing_preview():
             request.values.get("grid_type", ""),
             request.values.get("actual_slots", "1") or "1",
             request.values.get("processing_requested") == "1",
+            request.values.get("clipped_grids", "0") or "0",
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -173,6 +180,186 @@ def panel():
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
+
+
+def _content_url_is_safe(value):
+    if not value:
+        return True
+    parsed = urllib.parse.urlparse(value)
+    return parsed.scheme in {"http", "https"} or value.startswith("/static/")
+
+
+@admin_bp.route("/maintenance")
+def maintenance():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM managed_publications ORDER BY COALESCE(published_year, 0) DESC, id DESC")
+    publications = cur.fetchall()
+    cur.execute("SELECT * FROM managed_instruments ORDER BY id DESC")
+    instruments = cur.fetchall()
+    cur.execute("SELECT * FROM managed_pages ORDER BY id")
+    pages = cur.fetchall()
+    edit_publication = None
+    edit_instrument = None
+    publication_id = request.args.get("edit_publication", type=int)
+    instrument_id = request.args.get("edit_instrument", type=int)
+    if publication_id:
+        cur.execute("SELECT * FROM managed_publications WHERE id=?", [publication_id])
+        edit_publication = cur.fetchone()
+    if instrument_id:
+        cur.execute("SELECT * FROM managed_instruments WHERE id=?", [instrument_id])
+        edit_instrument = cur.fetchone()
+    cur.close()
+    conn.close()
+    return render_template(
+        "admin_maintenance.html",
+        publications=publications,
+        instruments=instruments,
+        edit_publication=edit_publication,
+        edit_instrument=edit_instrument,
+        pages=pages,
+    )
+
+
+@admin_bp.route("/maintenance/pages/save", methods=["POST"])
+def save_page():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    page_id = request.form.get("id", type=int)
+    title = request.form.get("title", "").strip()
+    eyebrow = request.form.get("eyebrow", "").strip()
+    intro = request.form.get("intro", "").strip()
+    additional_content = request.form.get("additional_content", "").strip()
+    if not page_id or not title:
+        flash("Page title is required.", "error")
+        return redirect(url_for("admin.maintenance"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """UPDATE managed_pages SET eyebrow=?, title=?, intro=?,
+           additional_content=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+        [eyebrow or None, title, intro or None, additional_content or None, page_id],
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("Page content updated.", "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/publications/save", methods=["POST"])
+def save_publication():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    citation = request.form.get("citation", "").strip()
+    doi_url = request.form.get("doi_url", "").strip()
+    year_text = request.form.get("published_year", "").strip()
+    publication_id = request.form.get("id", type=int)
+    if not citation:
+        flash("Publication citation is required.", "error")
+        return redirect(url_for("admin.maintenance"))
+    if not _content_url_is_safe(doi_url):
+        flash("Publication link must use HTTPS, HTTP, or a local /static/ path.", "error")
+        return redirect(url_for("admin.maintenance"))
+    try:
+        published_year = int(year_text) if year_text else None
+        if published_year is not None and not 1900 <= published_year <= 2200:
+            raise ValueError
+    except ValueError:
+        flash("Publication year must be between 1900 and 2200.", "error")
+        return redirect(url_for("admin.maintenance"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    if publication_id:
+        cur.execute(
+            "UPDATE managed_publications SET citation=?, doi_url=?, published_year=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            [citation, doi_url or None, published_year, publication_id],
+        )
+        message = "Publication updated."
+    else:
+        cur.execute(
+            "INSERT INTO managed_publications (citation, doi_url, published_year) VALUES (?, ?, ?)",
+            [citation, doi_url or None, published_year],
+        )
+        message = "Publication added."
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(message, "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/publications/<int:publication_id>/delete", methods=["POST"])
+def delete_publication(publication_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM managed_publications WHERE id=?", [publication_id])
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("Publication removed.", "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/instruments/save", methods=["POST"])
+def save_instrument():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    name = request.form.get("name", "").strip()
+    category = request.form.get("category", "").strip()
+    description = request.form.get("description", "").strip()
+    specifications = request.form.get("specifications", "").strip()
+    image_url = request.form.get("image_url", "").strip()
+    instrument_id = request.form.get("id", type=int)
+    if not name or not description:
+        flash("Instrument name and description are required.", "error")
+        return redirect(url_for("admin.maintenance"))
+    if not _content_url_is_safe(image_url):
+        flash("Image link must use HTTPS, HTTP, or a local /static/ path.", "error")
+        return redirect(url_for("admin.maintenance"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    if instrument_id:
+        cur.execute(
+            """UPDATE managed_instruments SET name=?, category=?, description=?,
+               specifications=?, image_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            [name, category or None, description, specifications or None, image_url or None, instrument_id],
+        )
+        message = "Instrument updated."
+    else:
+        cur.execute(
+            """INSERT INTO managed_instruments
+               (name, category, description, specifications, image_url)
+               VALUES (?, ?, ?, ?, ?)""",
+            [name, category or None, description, specifications or None, image_url or None],
+        )
+        message = "Instrument added."
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(message, "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/instruments/<int:instrument_id>/delete", methods=["POST"])
+def delete_instrument(instrument_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM managed_instruments WHERE id=?", [instrument_id])
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("Instrument removed.", "success")
+    return redirect(url_for("admin.maintenance"))
 
 
 def _money(value):
@@ -361,6 +548,7 @@ def complete_dc(booking_id):
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
     processing_requested = request.form.get("processing_requested") == "1"
+    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.datacollecting"))
@@ -388,6 +576,13 @@ def complete_dc(booking_id):
     except ValueError:
         flash("Number of grids must be at least 1.")
         return redirect(url_for("admin.datacollecting"))
+    try:
+        clipped_grids_value = int(clipped_grids)
+        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
+            raise ValueError
+    except ValueError:
+        flash("Clipped grids must be zero or no more than the actual grids.")
+        return redirect(url_for("admin.datacollecting"))
 
     conn = get_db()
     cur = conn.cursor()
@@ -402,6 +597,7 @@ def complete_dc(booking_id):
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Data Collection", user_category,
+            clipped_grids_value,
         )
     except ValueError as exc:
         cur.close()
@@ -414,6 +610,7 @@ def complete_dc(booking_id):
            grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
            clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
            processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           clipped_grids=?,
            total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
            WHERE id=?""",
         (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
@@ -421,7 +618,8 @@ def complete_dc(booking_id):
          charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
          str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
-         str(charges["gst_amount"]), str(charges["grand_total"]), str(charges["total_billed"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
+         str(charges["total_billed"]),
          int(processing_requested), booking_id),
     )
     cur.execute("SELECT * FROM bookings WHERE id=?", [booking_id])
@@ -593,6 +791,7 @@ def complete_sc(booking_id):
         flash("This booking can only be completed as Screening / Clipping.")
         return redirect(url_for("admin.screening_admin"))
     processing_requested = request.form.get("processing_requested") == "1"
+    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.screening_admin"))
@@ -615,6 +814,13 @@ def complete_sc(booking_id):
     except ValueError:
         flash("Number of grids must be at least 1.")
         return redirect(url_for("admin.screening_admin"))
+    try:
+        clipped_grids_value = int(clipped_grids)
+        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
+            raise ValueError
+    except ValueError:
+        flash("Clipped grids must be zero or no more than the actual grids.")
+        return redirect(url_for("admin.screening_admin"))
 
     conn = get_db()
     cur = conn.cursor()
@@ -629,6 +835,7 @@ def complete_sc(booking_id):
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Screening / Clipping", user_category,
+            clipped_grids_value,
         )
     except ValueError as exc:
         cur.close()
@@ -641,6 +848,7 @@ def complete_sc(booking_id):
            grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
            clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
            processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           clipped_grids=?,
            total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
            WHERE id=?""",
         (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
@@ -648,7 +856,8 @@ def complete_sc(booking_id):
          charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
          str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
-         str(charges["gst_amount"]), str(charges["grand_total"]), str(charges["total_billed"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
+         str(charges["total_billed"]),
          int(processing_requested), booking_id),
     )
     cur.execute("SELECT * FROM screening_bookings WHERE id=?", [booking_id])

@@ -140,6 +140,42 @@ def get_facility_metrics():
     }
 
 
+def get_managed_publications():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT citation, doi_url, published_year FROM managed_publications "
+        "WHERE is_visible=1 ORDER BY COALESCE(published_year, 0) DESC, id DESC"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_managed_instruments():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT name, category, description, specifications, image_url "
+        "FROM managed_instruments WHERE is_visible=1 ORDER BY id DESC"
+    )
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_managed_page(page_key):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM managed_pages WHERE page_key=?", [page_key])
+    page = cur.fetchone()
+    cur.close()
+    conn.close()
+    return page
+
+
 def get_publication_count():
     """Count unique OpenAlex works matching the facility acknowledgement terms."""
     if time.time() - _publication_cache["timestamp"] < 3600:
@@ -236,7 +272,7 @@ def index():
 @public_bp.route("/home")
 def home():
     slideshow_images = get_slideshow_images()
-    return render_template("home.html", slideshow_images=slideshow_images)
+    return render_template("home.html", slideshow_images=slideshow_images, page_content=get_managed_page("home"))
 
 
 @public_bp.route("/api/user-statistics")
@@ -295,37 +331,37 @@ def download_industry_users():
 
 @public_bp.route("/about")
 def about():
-    return render_template("about.html")
+    return render_template("about.html", page_content=get_managed_page("about"))
 
 
 @public_bp.route("/team")
 def team():
-    return render_template("team.html")
+    return render_template("team.html", page_content=get_managed_page("team"))
 
 
 @public_bp.route("/facility")
 def facility():
-    return render_template("facility.html")
+    return render_template("facility.html", page_content=get_managed_page("facility"))
 
 
 @public_bp.route("/workflow")
 def workflow():
-    return render_template("workflow.html")
+    return render_template("workflow.html", page_content=get_managed_page("workflow"))
 
 
 @public_bp.route("/equipments")
 def equipments():
-    return render_template("equipments.html")
+    return render_template("equipments.html", managed_instruments=get_managed_instruments(), page_content=get_managed_page("equipments"))
 
 
 @public_bp.route("/publication")
 def publications():
-    return render_template("pub.html")
+    return render_template("pub.html", managed_publications=get_managed_publications(), page_content=get_managed_page("publications"))
 
 
 @public_bp.route("/events")
 def events():
-    return render_template("events.html")
+    return render_template("events.html", page_content=get_managed_page("events"))
 
 
 @public_bp.route("/community-gallery")

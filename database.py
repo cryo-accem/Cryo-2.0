@@ -284,6 +284,110 @@ def init_db():
             )
         """)
 
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_publications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                citation TEXT NOT NULL,
+                doi_url TEXT,
+                published_year INTEGER,
+                is_visible INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_instruments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(180) NOT NULL,
+                category VARCHAR(120),
+                description TEXT NOT NULL,
+                specifications TEXT,
+                image_url VARCHAR(500),
+                is_visible INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_key VARCHAR(40) NOT NULL UNIQUE,
+                page_name VARCHAR(100) NOT NULL,
+                eyebrow VARCHAR(120),
+                title VARCHAR(240) NOT NULL,
+                intro TEXT,
+                additional_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_publications (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                citation TEXT NOT NULL,
+                doi_url VARCHAR(500),
+                published_year INT,
+                is_visible TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_instruments (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(180) NOT NULL,
+                category VARCHAR(120),
+                description TEXT NOT NULL,
+                specifications TEXT,
+                image_url VARCHAR(500),
+                is_visible TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_pages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                page_key VARCHAR(40) NOT NULL UNIQUE,
+                page_name VARCHAR(100) NOT NULL,
+                eyebrow VARCHAR(120),
+                title VARCHAR(240) NOT NULL,
+                intro TEXT,
+                additional_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+
+    default_pages = [
+        ("home", "Home", "Indian Institute of Science · Bengaluru",
+         "Advanced Centre for Cryo-Electron Microscopy",
+         "Exploring biological structure at the molecular scale. A dedicated cryo-EM facility enabling high-resolution data collection and structural analysis."),
+        ("about", "About", "About ACCEM", "About the facility",
+         "Open-access cryo-electron microscopy infrastructure for researchers across India."),
+        ("facility", "Instructions", "Using the facility", "Instructions",
+         "Plan your experiment and connect with the EM manager before submitting a sample."),
+        ("equipments", "Equipments", "Infrastructure", "Equipment & capabilities",
+         "Specialised instrumentation for sample preparation, imaging and structural analysis."),
+        ("workflow", "Workflow", "How we work", "Cryo-EM workflow",
+         "From sample preparation to structure determination, our team supports every stage of your project."),
+        ("publications", "Publications", "Research output", "Publications",
+         "Selected research enabled by cryo-electron microscopy and the ACCEM community."),
+        ("events", "Events", "Community & learning", "Events",
+         "Workshops, conferences and community activities connected with ACCEM."),
+        ("team", "Team", "People", "Our team",
+         "Meet the scientists, managers and support staff who make the facility work."),
+    ]
+    for page_key, page_name, eyebrow, title, intro in default_pages:
+        cur.execute("SELECT id FROM managed_pages WHERE page_key=?", [page_key])
+        if not cur.fetchone():
+            cur.execute(
+                """INSERT INTO managed_pages
+                   (page_key, page_name, eyebrow, title, intro)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [page_key, page_name, eyebrow, title, intro],
+            )
+
     _add_completion_columns(cur, "bookings")
     _add_completion_columns(cur, "screening_bookings")
     _add_completion_columns(cur, "completed_freezing")
@@ -335,6 +439,7 @@ def _add_completion_columns(cur, table: str):
             "bill_generated_at": "TIMESTAMP",
             "generated_by": "INTEGER",
             "processing_requested": "INTEGER NOT NULL DEFAULT 0",
+            "clipped_grids": "INTEGER NOT NULL DEFAULT 0",
         }
     else:
         cur.execute(
@@ -364,6 +469,7 @@ def _add_completion_columns(cur, table: str):
             "bill_generated_at": "TIMESTAMP NULL",
             "generated_by": "INT NULL",
             "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "clipped_grids": "INT NOT NULL DEFAULT 0",
         }
 
     for column, column_type in column_types.items():

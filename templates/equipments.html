@@ -1,9 +1,23 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Equipment{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Equipment' }}{% endblock %}
 {% block content %}
 <main>
   <section class="page-content">
-    <header class="page-header page-header--equipment"><div><div class="eyebrow">Infrastructure</div><h1>Equipment &amp; capabilities</h1><p>Specialised instrumentation for sample preparation, imaging and structural analysis.</p></div></header>
+    <header class="page-header page-header--equipment"><div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'Infrastructure' }}</div><h1>{{ page_content.title if page_content else 'Equipment & capabilities' }}</h1><p>{{ page_content.intro if page_content else 'Specialised instrumentation for sample preparation, imaging and structural analysis.' }}</p></div></header>
+    {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
+    {% if managed_instruments %}
+    <section class="managed-content-section">
+      <div class="section-heading"><h2>Additional instrumentation</h2><p>Current equipment maintained by the ACCEM team.</p></div>
+      <div class="equipment-card-grid">
+        {% for instrument in managed_instruments %}
+        <article class="equipment-tile">
+          {% if instrument.image_url %}<img src="{{ instrument.image_url }}" alt="{{ instrument.name }}">{% endif %}
+          <div><h3>{{ instrument.name }}</h3>{% if instrument.category %}<small>{{ instrument.category }}</small>{% endif %}<p>{{ instrument.description }}</p>{% if instrument.specifications %}<p>{{ instrument.specifications }}</p>{% endif %}</div>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
     <section class="equipment-featured">
       <div class="section-heading"><h2>Current instrumentation</h2><p>High-resolution imaging and direct electron detection for demanding cryo-EM projects.</p></div>
       <article class="equipment-hero-card equipment-hero-card--primary">

@@ -1,15 +1,16 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Cryo-EM Workflow{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Cryo-EM Workflow' }}{% endblock %}
 {% block content %}
 <main>
   <section class="workflow-page">
     <header class="page-header page-header--workflow">
       <div>
-        <div class="eyebrow">How we work</div>
-        <h1>Cryo-EM workflow</h1>
-        <p>From sample preparation to structure determination, our team supports every stage of your project.</p>
+        <div class="eyebrow">{{ page_content.eyebrow if page_content else 'How we work' }}</div>
+        <h1>{{ page_content.title if page_content else 'Cryo-EM workflow' }}</h1>
+        <p>{{ page_content.intro if page_content else 'From sample preparation to structure determination, our team supports every stage of your project.' }}</p>
       </div>
     </header>
+    {% if page_content and page_content.additional_content %}<div class="managed-page-content prose">{{ page_content.additional_content }}</div>{% endif %}
     <div class="workflow-intro">
       <div>
         <div class="eyebrow">ACCEM process</div>

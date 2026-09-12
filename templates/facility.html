@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Instructions{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Instructions' }}{% endblock %}
 {% block content %}
 <main>
   <section class="page-content">
     <header class="page-header page-header--facility">
-      <div><div class="eyebrow">Using the facility</div><h1>Instructions</h1>
-      <p>Plan your experiment and connect with the EM manager before submitting a sample.</p></div>
+      <div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'Using the facility' }}</div><h1>{{ page_content.title if page_content else 'Instructions' }}</h1>
+      <p>{{ page_content.intro if page_content else 'Plan your experiment and connect with the EM manager before submitting a sample.' }}</p></div>
     </header>
+    {% if page_content and page_content.additional_content %}<div class="managed-page-content prose">{{ page_content.additional_content }}</div>{% endif %}
     <div class="prose">
       <p>Any academic or industrial researchers and scientists who want to use the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY FACILITY at IISc for high-resolution data collection should directly contact the EM manager <strong>(cryoem.iisc@gmail.com)</strong> or <a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a>. A nominal charge will be applicable for cryo-EM grid preparation &amp; microscope usage. Users must provide sample details and preliminary purification or biochemical data to access the microscope. If not provided, no assurance will be given about grid/data quality.</p>
       <p>Most cryo-EM apparatuses and accessories are expensive. Therefore, external/internal users cannot request cryo-freezing, cartridge preparation, or cassette transfer. Only expert users (mainly PIs) should prepare samples or hand over to the EM manager. Only trained users are allowed to operate the microscope (Latitude S Software).</p>

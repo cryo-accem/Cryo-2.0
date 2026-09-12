@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Events & Training{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Events & Training' }}{% endblock %}
 {% block content %}
 <main>
   <section class="page-content">
     <header class="page-header page-header--events">
-      <div><div class="eyebrow">Learning and outreach</div><h1>Events &amp; Training</h1><p>Workshops, conferences and cryo-EM learning opportunities from the ACCEM community.</p></div>
+      <div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'Learning and outreach' }}</div><h1>{{ page_content.title if page_content else 'Events & Training' }}</h1><p>{{ page_content.intro if page_content else 'Workshops, conferences and cryo-EM learning opportunities from the ACCEM community.' }}</p></div>
     </header>
+    {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
 
     <section class="events-section">
       <div class="section-heading"><h2>Workshops &amp; conferences</h2><p>Highlights from meetings, demonstrations and hands-on sessions.</p></div>

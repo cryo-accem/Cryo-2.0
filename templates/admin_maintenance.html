@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Maintenance{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content">
+  <header class="page-header page-header--admin">
+    <div><div class="eyebrow">Website content</div><h1>Maintenance</h1><p>Update publications and instrumentation without editing templates or code.</p></div>
+  </header>
+
+  <div class="maintenance-grid">
+    <section class="data-panel maintenance-editor">
+      <h2>{% if edit_publication %}Edit publication{% else %}Add publication{% endif %}</h2>
+      <form method="post" action="{{ url_for('admin.save_publication') }}" class="maintenance-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        {% if edit_publication %}<input type="hidden" name="id" value="{{ edit_publication.id }}">{% endif %}
+        <label class="form-field full"><span>Citation</span><textarea name="citation" rows="4" required placeholder="Authors. (Year). Title. Journal, volume, pages.">{{ edit_publication.citation if edit_publication else '' }}</textarea></label>
+        <label class="form-field"><span>Publication year</span><input name="published_year" type="number" min="1900" max="2200" value="{{ edit_publication.published_year if edit_publication else '' }}"></label>
+        <label class="form-field"><span>DOI or article link</span><input name="doi_url" type="url" value="{{ edit_publication.doi_url if edit_publication else '' }}" placeholder="https://doi.org/..."></label>
+        <div class="form-actions"><button class="button" type="submit">{% if edit_publication %}Save changes{% else %}Add publication{% endif %}</button>{% if edit_publication %}<a class="button button--secondary" href="{{ url_for('admin.maintenance') }}">Cancel</a>{% endif %}</div>
+      </form>
+    </section>
+
+    <section class="data-panel maintenance-editor">
+      <h2>{% if edit_instrument %}Edit instrument{% else %}Add instrument{% endif %}</h2>
+      <form method="post" action="{{ url_for('admin.save_instrument') }}" class="maintenance-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        {% if edit_instrument %}<input type="hidden" name="id" value="{{ edit_instrument.id }}">{% endif %}
+        <label class="form-field"><span>Name</span><input name="name" required value="{{ edit_instrument.name if edit_instrument else '' }}" placeholder="e.g. Titan Krios"></label>
+        <label class="form-field"><span>Category</span><input name="category" value="{{ edit_instrument.category if edit_instrument else '' }}" placeholder="Imaging"></label>
+        <label class="form-field full"><span>Description</span><textarea name="description" rows="3" required placeholder="What this instrument is used for.">{{ edit_instrument.description if edit_instrument else '' }}</textarea></label>
+        <label class="form-field full"><span>Specifications</span><textarea name="specifications" rows="2" placeholder="Key specifications or capabilities.">{{ edit_instrument.specifications if edit_instrument else '' }}</textarea></label>
+        <label class="form-field full"><span>Image URL or local path</span><input name="image_url" type="url" value="{{ edit_instrument.image_url if edit_instrument else '' }}" placeholder="https://... or /static/images/equipment.png"></label>
+        <div class="form-actions"><button class="button" type="submit">{% if edit_instrument %}Save changes{% else %}Add instrument{% endif %}</button>{% if edit_instrument %}<a class="button button--secondary" href="{{ url_for('admin.maintenance') }}">Cancel</a>{% endif %}</div>
+      </form>
+    </section>
+  </div>
+
+  <section class="data-panel maintenance-list"><h2>Managed publications</h2>
+    {% if publications %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Citation</th><th>Year</th><th>Link</th><th>Actions</th></tr></thead><tbody>
+      {% for publication in publications %}<tr><td>{{ publication.citation }}</td><td>{{ publication.published_year or '—' }}</td><td>{% if publication.doi_url %}<a href="{{ publication.doi_url }}" target="_blank" rel="noopener noreferrer">Open link</a>{% else %}—{% endif %}</td><td class="action-buttons"><a class="btn btn-load" href="{{ url_for('admin.maintenance', edit_publication=publication.id) }}">Edit</a><form method="post" action="{{ url_for('admin.delete_publication', publication_id=publication.id) }}" style="display:inline" onsubmit="return confirm('Remove this publication from the website?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="btn btn-delete" type="submit">Delete</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="empty-message">No managed publications yet.</p>{% endif %}
+  </section>
+
+  <section class="data-panel maintenance-list">
+    <h2>Editable public pages</h2>
+    <p class="maintenance-help">Update page headings and add a plain-text content block. Existing operational sections stay in place, so the site remains safe and consistent while future operators can refresh messaging without code.</p>
+    {% for page in pages %}
+    <form method="post" action="{{ url_for('admin.save_page') }}" class="page-editor">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="id" value="{{ page.id }}">
+      <div class="page-editor__title"><strong>{{ page.page_name }}</strong><span>/{{ 'publication' if page.page_key == 'publications' else page.page_key }}</span></div>
+      <div class="maintenance-form">
+        <label class="form-field"><span>Eyebrow</span><input name="eyebrow" value="{{ page.eyebrow or '' }}"></label>
+        <label class="form-field"><span>Page title</span><input name="title" required value="{{ page.title }}"></label>
+        <label class="form-field full"><span>Introduction</span><textarea name="intro" rows="2">{{ page.intro or '' }}</textarea></label>
+        <label class="form-field full"><span>Additional content</span><textarea name="additional_content" rows="3" placeholder="Add announcements, contact notes or page information.">{{ page.additional_content or '' }}</textarea></label>
+      </div>
+      <button class="button" type="submit">Save {{ page.page_name }} page</button>
+    </form>
+    {% endfor %}
+  </section>
+
+  <section class="data-panel maintenance-list"><h2>Managed instruments</h2>
+    {% if instruments %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Category</th><th>Description</th><th>Actions</th></tr></thead><tbody>
+      {% for instrument in instruments %}<tr><td>{{ instrument.name }}</td><td>{{ instrument.category or '—' }}</td><td>{{ instrument.description }}</td><td class="action-buttons"><a class="btn btn-load" href="{{ url_for('admin.maintenance', edit_instrument=instrument.id) }}">Edit</a><form method="post" action="{{ url_for('admin.delete_instrument', instrument_id=instrument.id) }}" style="display:inline" onsubmit="return confirm('Remove this instrument from the website?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="btn btn-delete" type="submit">Delete</button></form></td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="empty-message">No managed instruments yet.</p>{% endif %}
+  </section>
+</section></main>
+{% endblock %}

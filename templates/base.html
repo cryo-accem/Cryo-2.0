@@ -8,7 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-  <title>{% block title %}ACCEM | Cryo-Electron Microscopy{% endblock %}</title>
+  <title>{% block title %}{% if page_content %}ACCEM | {{ page_content.title }}{% else %}ACCEM | Cryo-Electron Microscopy{% endif %}{% endblock %}</title>
 </head>
 <body class="{% if request.path.startswith('/admin') and request.path != '/admin/' %}admin-area{% endif %}">
 <div class="site-shell">
@@ -46,6 +46,8 @@
       <a class="{% if request.path.startswith('/admin/screening') %}active{% endif %}" href="{{ url_for('admin.screening_admin') }}"><i class="fa-solid fa-microscope" aria-hidden="true"></i><span>Screening</span></a>
       <a class="{% if request.path.startswith('/admin/freezing') %}active{% endif %}" href="{{ url_for('admin.freezing_admin') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i><span>Freezing</span></a>
       <a class="{% if request.path.startswith('/admin/history') %}active{% endif %}" href="{{ url_for('admin.history') }}"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i><span>History</span></a>
+      <div class="admin-sidebar__label">Website</div>
+      <a class="{% if request.path.startswith('/admin/maintenance') %}active{% endif %}" href="{{ url_for('admin.maintenance') }}"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>Maintenance</span></a>
     </nav>
     <a class="admin-sidebar__logout" href="{{ url_for('admin.logout') }}"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Logout</span></a>
   </aside>

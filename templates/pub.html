@@ -1,9 +1,20 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Publications{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Publications' }}{% endblock %}
 {% block content %}
 <main>
   <section class="page-content">
-    <header class="page-header page-header--publications"><div><div class="eyebrow">Research output</div><h1>Publications</h1><p>Selected research enabled by cryo-electron microscopy and the ACCEM community.</p></div></header>
+    <header class="page-header page-header--publications"><div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'Research output' }}</div><h1>{{ page_content.title if page_content else 'Publications' }}</h1><p>{{ page_content.intro if page_content else 'Selected research enabled by cryo-electron microscopy and the ACCEM community.' }}</p></div></header>
+    {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
+    {% if managed_publications %}
+    <section class="managed-content-section">
+      <div class="section-heading"><h2>Recently added</h2><p>Research entries maintained by the ACCEM team.</p></div>
+      <div class="publication-list">
+        {% for publication in managed_publications %}
+        <p>{{ publication.citation }}{% if publication.doi_url %} <a href="{{ publication.doi_url }}" target="_blank" rel="noopener noreferrer">{{ publication.doi_url }}</a>{% endif %}</p>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
     <div class="publication-list">
         <p>1. Chatterjee, A., Roy, A., Satheesh, T. et al. Structural insights into pre-pore intermediates of alpha-hemolysin in the lipidic environment. <em>Nat Commun</em> 16, 6348 (2025). <a href="https://doi.org/10.1038/s41467-025-61741-x">https://doi.org/10.1038/s41467-025-61741-x</a></p>
       

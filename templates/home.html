@@ -1,19 +1,20 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | Advanced Centre for Cryo-Electron Microscopy{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'Advanced Centre for Cryo-Electron Microscopy' }}{% endblock %}
 {% block content %}
 <main>
   <section class="hero">
     <img class="hero-image" src="{{ url_for('static', filename='images/talos_arctica.png') }}" alt="Talos Arctica cryo-electron microscope">
     <div class="hero-copy">
-      <div class="eyebrow">Indian Institute of Science · Bengaluru</div>
-      <h1>Advanced Centre for Cryo-Electron Microscopy</h1>
-      <p>Exploring biological structure at the molecular scale. A dedicated cryo-EM facility enabling high-resolution data collection and structural analysis.</p>
+      <div class="eyebrow">{{ page_content.eyebrow if page_content else 'Indian Institute of Science · Bengaluru' }}</div>
+      <h1>{{ page_content.title if page_content else 'Advanced Centre for Cryo-Electron Microscopy' }}</h1>
+      <p>{{ page_content.intro if page_content else 'Exploring biological structure at the molecular scale. A dedicated cryo-EM facility enabling high-resolution data collection and structural analysis.' }}</p>
       <div class="hero-actions">
         <a class="button outline" href="{{ url_for('public.equipments') }}">Explore the facility</a>
         <a class="button" href="{{ url_for('register.register') }}">Submit a sample</a>
       </div>
     </div>
   </section>
+  {% if page_content and page_content.additional_content %}<section class="section managed-page-content"><div class="prose">{{ page_content.additional_content }}</div></section>{% endif %}
   <section class="section workflow-section">
     <div class="section-heading"><h2>View the complete cryo-EM workflow</h2><a class="section-link" href="{{ url_for('public.workflow') }}">Explore workflow details →</a></div>
     <div class="workflow">

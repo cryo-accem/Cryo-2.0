@@ -119,11 +119,18 @@ def calculate_charge_sheet(
     grid_type=None,
     actual_slots=1,
     processing_requested=False,
+    clipped_grids=0,
 ):
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
     grids = parse_number_of_grids(number_of_grids)
+    clipped_text = str(clipped_grids or "").strip()
+    if clipped_text and not clipped_text.isdigit():
+        raise ValueError("Clipped grids must be zero or a positive integer.")
+    clipped = 0 if not clipped_text else int(clipped_text)
+    if clipped > grids:
+        raise ValueError("Clipped grids cannot exceed actual grids.")
     source = normalize_grid_source(grid_source)
     selected_grid_type = normalize_grid_type(grid_type)
     if source == "facility" and not selected_grid_type:
@@ -142,7 +149,8 @@ def calculate_charge_sheet(
     )
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
-    clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
+    full_clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
+    clip_base_charge = full_clip_base_charge * Decimal(grids - clipped) / Decimal(grids)
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
     processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
     subtotal = grid_charge + handling_charge + clip_base_charge + slot_charge + processing_charge
@@ -155,6 +163,7 @@ def calculate_charge_sheet(
         "grid_source": source,
         "grid_type": selected_grid_type if source == "facility" else None,
         "actual_slots": slots,
+        "clipped_grids": clipped,
         "grid_charge": _money(grid_charge),
         "handling_charge": _money(handling_charge),
         "clip_base_charge": _money(clip_base_charge),
@@ -181,11 +190,12 @@ def is_non_billable_booking(booking):
 
 def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_requested=False,
                               grid_source="facility", grid_type="normal_holey_carbon",
-                              service_stage="Data Collection", user_category=None):
+                              service_stage="Data Collection", user_category=None,
+                              clipped_grids=0):
     """Compatibility adapter for existing completion routes."""
     charges = calculate_charge_sheet(
         user_category or booking["origin"], service_stage, actual_grids, grid_source, grid_type,
-        actual_slots, processing_requested,
+        actual_slots, processing_requested, clipped_grids,
     )
     if is_non_billable_booking(booking):
         for key in ("grid_charge", "handling_charge", "clip_base_charge", "slot_charge",

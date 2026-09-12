@@ -1,12 +1,13 @@
 {% extends "base.html" %}
-{% block title %}ACCEM | About{% endblock %}
+{% block title %}ACCEM | {{ page_content.title if page_content else 'About' }}{% endblock %}
 {% block content %}
 <main>
   <section class="page-content">
     <header class="page-header page-header--science">
-      <div><div class="eyebrow">About ACCEM</div><h1>About the facility</h1>
-      <p>Open-access cryo-electron microscopy infrastructure for researchers across India.</p></div>
+      <div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'About ACCEM' }}</div><h1>{{ page_content.title if page_content else 'About the facility' }}</h1>
+      <p>{{ page_content.intro if page_content else 'Open-access cryo-electron microscopy infrastructure for researchers across India.' }}</p></div>
     </header>
+    {% if page_content and page_content.additional_content %}<div class="managed-page-content prose">{{ page_content.additional_content }}</div>{% endif %}
     <div class="prose">
       <p>The Cryo-electron microscopy facility at IISc features a state-of-the-art 200 kV Talos-Arctica electron microscope (FEI/Thermo Scientific) equipped with a Gatan K2 Summit Direct Electron Detector, automatic data acquisition via the Latitude S software package, and a Talos L120C Transmission Electron Microscope. Typically, the Talos L120C is used for negative stain sample visualization before proceeding to cryo-EM data collection using the 200 kV Talos-Arctica microscope.</p>
       <p>The facility is also equipped with essential sample preparation tools such as the FEI Vitrobot™ Mark IV, Pelco easiGLOW &amp; GloQube glow discharge system, and Q150T ES carbon coater.</p>
