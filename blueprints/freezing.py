@@ -1,6 +1,7 @@
 import datetime
+import json
 from decimal import Decimal
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
 from revenue import calculate_charge_sheet, is_non_billable_booking
@@ -11,7 +12,8 @@ GRID_LIMIT_PER_DAY = 8
 
 
 def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facility",
-                              grid_type="normal_holey_carbon", user_category=None):
+                              grid_type="normal_holey_carbon", user_category=None,
+                              normal_grids=None, gold_grids=None):
     """Complete one freezing booking using the grids actually frozen."""
     cur.execute(
         "SELECT * FROM freezing_bookings WHERE id=? AND status='active'",
@@ -23,6 +25,7 @@ def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facili
     charges = calculate_charge_sheet(
         user_category or booking["origin"], "Freezing / Grid Registration", actual_grids,
         grid_source, grid_type,
+        normal_grids=normal_grids, gold_grids=gold_grids,
     )
     if is_non_billable_booking(booking):
         for key in ("grid_charge", "handling_charge", "subtotal", "gst", "gst_amount",
@@ -31,16 +34,18 @@ def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facili
     cur.execute(
         """INSERT INTO completed_freezing
           (user_name, pi_name, email, origin, sample_name, grids, freezing_date,
-            actual_grids, number_of_grids, service_stage, grid_source, grid_type,
+            actual_grids, number_of_grids, service_stage, grid_source, grid_type, grid_breakdown,
             grid_charge, handling_charge, clip_base_charge, slot_charge,
             freezing_charge, clipping_charge, processing_charge, subtotal,
             gst_amount, grand_total, total_billed, processing_requested,
             bill_generated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
         (booking["user_name"], booking["pi_name"], booking["email"],
          booking["origin"], booking["sample_name"], booking["grids"],
          booking["freezing_date"], str(actual_grids), charges["number_of_grids"],
          charges["service_stage"], charges["grid_source"], charges["grid_type"],
+         json.dumps({"normal_holey_carbon": charges["normal_grids"],
+                     "gold_carbon_graphene": charges["gold_grids"]}),
          str(charges["grid_charge"]), str(charges["handling_charge"]), str(charges["clip_base_charge"]),
          str(charges["slot_charge"]), str(charges["freezing_charge"]), str(charges["clipping_charge"]),
          str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
@@ -78,11 +83,48 @@ def freezing_schedule():
     )
 
 
+@freezing_bp.route("/freezing_availability")
+def freezing_availability():
+    """Return current active bookings grouped by freezing date."""
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT freezing_date, COALESCE(SUM(grids), 0) AS booked
+           FROM freezing_bookings
+           WHERE status='active'
+           GROUP BY freezing_date"""
+    )
+    availability = {}
+    for row in cur.fetchall():
+        date_value = row["freezing_date"]
+        date_key = date_value.isoformat() if hasattr(date_value, "isoformat") else str(date_value)
+        booked = int(row["booked"] or 0)
+        availability[date_key] = {
+            "booked": booked,
+            "remaining": max(0, GRID_LIMIT_PER_DAY - booked),
+            "limit": GRID_LIMIT_PER_DAY,
+        }
+    cur.close()
+    conn.close()
+    return jsonify({"limit": GRID_LIMIT_PER_DAY, "dates": availability})
+
+
 def register_freezing(user_name, pi_name, email, origin, sample_name, grids, freezing_date):
     """
     Insert a new freezing booking after checking the daily grid cap.
     Returns (success: bool, message: str).
     """
+    if not freezing_date:
+        return False, "Please choose a freezing date."
+    if grids < 1 or grids > GRID_LIMIT_PER_DAY:
+        return False, f"Choose between 1 and {GRID_LIMIT_PER_DAY} grids."
+    try:
+        selected_date = datetime.date.fromisoformat(str(freezing_date))
+    except ValueError:
+        return False, "Please choose a valid freezing date."
+    if selected_date < datetime.date.today():
+        return False, "Freezing dates in the past cannot be booked."
+
     conn = get_db()
     cur = conn.cursor()
 

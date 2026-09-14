@@ -4,7 +4,9 @@ import io
 import base64
 import json
 import os
+import sqlite3
 import re
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -28,6 +30,7 @@ from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
+BACKUP_EMAIL = "cryoem.iisc@gmail.com"
 
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
@@ -115,6 +118,8 @@ def billing_preview():
             request.values.get("actual_slots", "1") or "1",
             request.values.get("processing_requested") == "1",
             request.values.get("clipped_grids", "0") or "0",
+            request.values.get("normal_grids") or None,
+            request.values.get("gold_grids") or None,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -547,12 +552,14 @@ def complete_dc(booking_id):
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
+    normal_grids = request.form.get("normal_grids", "").strip() or None
+    gold_grids = request.form.get("gold_grids", "").strip() or None
     processing_requested = request.form.get("processing_requested") == "1"
     clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.datacollecting"))
-    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+    if not grid_type and not (normal_grids or gold_grids) and grid_source.casefold() in {"facility", "facility provided"}:
         flash("Please select the grid type for facility-provided grids.")
         return redirect(url_for("admin.datacollecting"))
     if not actual_slots or not actual_grids:
@@ -708,7 +715,10 @@ def complete_freezing(booking_id):
     conn = get_db()
     cur = conn.cursor()
     try:
-        booking = complete_freezing_booking(cur, booking_id, actual_grids_value, grid_source, grid_type, user_category)
+        booking = complete_freezing_booking(
+            cur, booking_id, actual_grids_value, grid_source, grid_type, user_category,
+            normal_grids, gold_grids,
+        )
     except ValueError as exc:
         cur.close()
         conn.close()
@@ -1025,18 +1035,49 @@ def _commit_archive_to_github(filename, contents):
         raise RuntimeError(f"GitHub archive commit failed with HTTP {error.code}") from error
 
 
-@admin_bp.route("/database-backup.zip")
-def download_database_backup():
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
+def _database_backup_bytes():
     archive = io.BytesIO()
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as backup:
         if _is_sqlite_url():
             conn = get_db()
-            backup.writestr("cryo-database.sqlite3", conn.serialize())
-            conn.close()
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".sqlite3") as snapshot:
+                    snapshot_conn = sqlite3.connect(snapshot.name)
+                    try:
+                        conn.backup(snapshot_conn)
+                        snapshot_conn.commit()
+                    finally:
+                        snapshot_conn.close()
+                    snapshot.seek(0)
+                    backup.writestr("cryo-database.sqlite3", snapshot.read())
+            finally:
+                conn.close()
         else:
             backup.writestr("registrations.csv", _rows_csv(_registration_rows()))
+    return archive.getvalue()
+
+
+def _email_database_backup(subject, body, backup_bytes):
+    send_email(
+        BACKUP_EMAIL,
+        subject,
+        body,
+        attachments=[("cryo-database-backup.zip", "application/zip", backup_bytes)],
+    )
+
+
+@admin_bp.route("/database-backup.zip")
+def download_database_backup():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    backup_bytes = _database_backup_bytes()
+    _email_database_backup(
+        "ACCEM database backup downloaded",
+        "A full ACCEM database backup was requested from the admin dashboard. "
+        "The backup ZIP is attached.",
+        backup_bytes,
+    )
+    archive = io.BytesIO(backup_bytes)
     archive.seek(0)
     return send_file(archive, as_attachment=True, download_name="cryo-database-backup.zip", mimetype="application/zip")
 
@@ -1063,6 +1104,13 @@ def archive_completed_registrations():
     archive_contents = _rows_csv(completed)
     with open(archive_path, "w", newline="", encoding="utf-8") as archive:
         archive.write(archive_contents)
+    backup_bytes = _database_backup_bytes()
+    _email_database_backup(
+        "ACCEM database backup before archive and delete",
+        f"A full ACCEM database backup was created before archiving and deleting "
+        f"{len(completed)} completed registrations. The backup ZIP is attached.",
+        backup_bytes,
+    )
 
     github_error = None
     if os.environ.get("GITHUB_TOKEN"):

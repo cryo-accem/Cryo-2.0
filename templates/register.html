@@ -29,7 +29,7 @@
             </button>
           </div>
         </div>
-        <div class="form-grid">
+        <div class="form-grid" id="registration-fields">
           <div class="form-field"><label for="user_name">Name of the User</label><input type="text" id="user_name" name="user_name" required></div>
           <div class="form-field"><label for="pi_name">Name of PI (Principal Investigator)</label><input type="text" id="pi_name" name="pi_name" required></div>
           <div class="form-field"><label for="email">Email Address</label><input type="email" id="email" name="email" required></div>
@@ -43,7 +43,35 @@
             <div class="form-field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4"></div>
           </div>
           <div id="freezing_fields" class="form-grid full">
-            <div class="form-field"><label for="freezing_date">Date for Registration</label><input type="date" id="freezing_date" name="freezing_date"></div>
+            <div class="form-field full">
+              <label for="freezing_date">Date for Registration</label>
+              <input type="hidden" id="freezing_date" name="freezing_date">
+              <button type="button" class="date-picker-trigger" id="date-picker-trigger" aria-expanded="false" aria-controls="freezing-calendar">
+                <span class="date-picker-trigger__icon" aria-hidden="true"><i class="fa-regular fa-calendar"></i></span>
+                <span class="date-picker-trigger__copy">
+                  <strong id="date-picker-label">Choose a freezing date</strong>
+                  <small id="date-picker-hint">View live slot availability</small>
+                </span>
+                <i class="fa-solid fa-chevron-down date-picker-trigger__chevron" aria-hidden="true"></i>
+              </button>
+              <div class="freezing-calendar hidden" id="freezing-calendar" aria-label="Freezing slot availability">
+                <div class="freezing-calendar__toolbar">
+                  <button type="button" class="calendar-nav" id="calendar-previous" aria-label="Previous month">&lsaquo;</button>
+                  <strong id="calendar-month"></strong>
+                  <button type="button" class="calendar-nav" id="calendar-next" aria-label="Next month">&rsaquo;</button>
+                </div>
+                <div class="calendar-weekdays" aria-hidden="true">
+                  <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+                </div>
+                <div class="calendar-grid" id="calendar-grid" role="grid"></div>
+                <p class="calendar-selection" id="calendar-selection" role="status">Select a date to see remaining grids.</p>
+                <div class="calendar-legend" aria-label="Calendar legend">
+                  <span><i class="calendar-key calendar-key--available"></i>Available</span>
+                  <span><i class="calendar-key calendar-key--partial"></i>Partially booked</span>
+                  <span><i class="calendar-key calendar-key--full"></i>Fully booked</span>
+                </div>
+              </div>
+            </div>
             <div class="form-field"><label for="grids_freezing">How Many Grids (Maximum 8)</label><input type="number" id="grids_freezing" name="grids_freezing" min="1" max="8"></div>
           </div>
         </div>
@@ -78,9 +106,11 @@ function setRegType(type) {
 function toggleRegType() {
   const type = document.getElementById('reg_type').value;
   const imaging = type === 'datacollecting' || type === 'screening';
+  const registrationFields = document.getElementById('registration-fields');
   document.getElementById('imaging_fields').classList.toggle('hidden', !imaging);
   const dataCollectingFields = document.getElementById('datacollecting_fields');
   dataCollectingFields.classList.toggle('hidden', type !== 'datacollecting');
+  registrationFields.classList.toggle('is-datacollecting', type === 'datacollecting');
   document.getElementById('freezing_fields').classList.toggle('hidden', type !== 'freezing');
   document.getElementById('grids').required = imaging;
   const days = document.getElementById('days');
@@ -93,5 +123,116 @@ document.querySelectorAll('.reg-type-card').forEach(card => {
   card.addEventListener('click', () => setRegType(card.dataset.value));
 });
 toggleRegType(); toggleEsmField();
+
+(function setupFreezingCalendar() {
+  const calendar = document.getElementById('freezing-calendar');
+  if (!calendar) return;
+  const dateInput = document.getElementById('freezing_date');
+  const monthLabel = document.getElementById('calendar-month');
+  const grid = document.getElementById('calendar-grid');
+  const selection = document.getElementById('calendar-selection');
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  let viewDate = new Date(today.getFullYear(), today.getMonth(), 1);
+  let availability = {};
+  let limit = 8;
+
+  function keyForDate(date) {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  function renderCalendar() {
+    const year = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    monthLabel.textContent = viewDate.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    grid.innerHTML = '';
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let i = 0; i < firstDay; i += 1) {
+      const spacer = document.createElement('span');
+      spacer.className = 'calendar-day calendar-day--empty';
+      spacer.setAttribute('aria-hidden', 'true');
+      grid.appendChild(spacer);
+    }
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      const date = new Date(year, month, day);
+      const key = keyForDate(date);
+      const details = availability[key] || { booked: 0, remaining: limit, limit };
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'calendar-day';
+      if (key < todayKey) button.classList.add('calendar-day--past');
+      if (details.booked > 0 && details.remaining > 0) button.classList.add('calendar-day--partial');
+      if (details.remaining === 0) button.classList.add('calendar-day--full');
+      if (key === dateInput.value) button.classList.add('calendar-day--selected');
+      button.disabled = key < todayKey || details.remaining === 0;
+      button.setAttribute('aria-label', `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: ${details.booked} of ${details.limit} grids booked`);
+      const fillPercent = Math.min(100, Math.round((details.booked / details.limit) * 100));
+      button.innerHTML = `<span>${day}</span><div class="calendar-meter" aria-hidden="true"><i style="width: ${fillPercent}%"></i></div><small>${details.booked}/${details.limit} booked</small>`;
+      button.addEventListener('click', () => {
+        dateInput.value = key;
+        datePickerLabel.textContent = `${date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} · ${details.booked}/${details.limit} booked`;
+        datePickerHint.textContent = 'Click to change the freezing date';
+        calendar.classList.add('hidden');
+        datePickerTrigger.setAttribute('aria-expanded', 'false');
+        selection.textContent = `${date.toLocaleDateString(undefined, { dateStyle: 'long' })}: ${details.booked} booked, ${details.remaining} grids remaining.`;
+        renderCalendar();
+      });
+      grid.appendChild(button);
+    }
+  }
+
+  document.getElementById('calendar-previous').addEventListener('click', () => {
+    const previous = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1);
+    if (previous >= new Date(today.getFullYear(), today.getMonth(), 1)) {
+      viewDate = previous;
+      renderCalendar();
+    }
+  });
+  document.getElementById('calendar-next').addEventListener('click', () => {
+    viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+    renderCalendar();
+  });
+
+  const datePickerTrigger = document.getElementById('date-picker-trigger');
+  const datePickerLabel = document.getElementById('date-picker-label');
+  const datePickerHint = document.getElementById('date-picker-hint');
+  datePickerTrigger.closest('form').addEventListener('reset', () => {
+    window.setTimeout(() => {
+      datePickerLabel.textContent = 'Choose a freezing date';
+      datePickerHint.textContent = 'View live slot availability';
+      calendar.classList.add('hidden');
+      datePickerTrigger.setAttribute('aria-expanded', 'false');
+      renderCalendar();
+    }, 0);
+  });
+  datePickerTrigger.addEventListener('click', () => {
+    const isHidden = calendar.classList.toggle('hidden');
+    datePickerTrigger.setAttribute('aria-expanded', String(!isHidden));
+    if (!isHidden) calendar.querySelector('.calendar-nav').focus();
+  });
+
+  function loadAvailability() {
+    return fetch('{{ url_for("freezing.freezing_availability") }}', { headers: { Accept: 'application/json' } })
+      .then(response => {
+        if (!response.ok) throw new Error('Availability request failed');
+        return response.json();
+      })
+      .then(data => {
+        availability = data.dates || {};
+        limit = Number(data.limit) || 8;
+        renderCalendar();
+      })
+      .catch(() => {
+        selection.textContent = 'Availability could not be loaded. Please refresh and try again.';
+        renderCalendar();
+      });
+  }
+
+  loadAvailability();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) loadAvailability();
+  });
+})();
 </script>
 {% endblock %}
