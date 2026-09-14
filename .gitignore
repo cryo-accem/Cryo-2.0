@@ -17,14 +17,3 @@ instance/payment_proofs/
 # IDE
 .vscode/
 preview.db
-
-# Runtime databases, exports, archives, uploads, and generated private documents
-*.db
-*.db-*
-*.sqlite
-*.sqlite3
-cryo-registrations-backup.csv
-cryo-registrations-backup-preview.html
-instance/registration_archives/
-instance/payment_proofs/
-charge-sheet-preview.pdf

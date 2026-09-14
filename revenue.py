@@ -119,15 +119,43 @@ def calculate_charge_sheet(
     grid_type=None,
     actual_slots=1,
     processing_requested=False,
+    clipped_grids=0,
+    normal_grids=None,
+    gold_grids=None,
 ):
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
     grids = parse_number_of_grids(number_of_grids)
+    clipped_text = str(clipped_grids or "").strip()
+    if clipped_text and not clipped_text.isdigit():
+        raise ValueError("Clipped grids must be zero or a positive integer.")
+    clipped = 0 if not clipped_text else int(clipped_text)
+    if clipped > grids:
+        raise ValueError("Clipped grids cannot exceed actual grids.")
     source = normalize_grid_source(grid_source)
     selected_grid_type = normalize_grid_type(grid_type)
-    if source == "facility" and not selected_grid_type:
+    if source == "facility" and not selected_grid_type and normal_grids is None and gold_grids is None:
         raise ValueError("Please select the grid type for facility-provided grids.")
+    if source == "facility" and (normal_grids is not None or gold_grids is not None):
+        try:
+            normal_count = int(normal_grids or 0)
+            gold_count = int(gold_grids or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Grid type quantities must be whole numbers.") from None
+        if normal_count < 0 or gold_count < 0 or normal_count + gold_count != grids:
+            raise ValueError("Grid type quantities must add up to the actual grids.")
+        if normal_count and gold_count:
+            selected_grid_type = "mixed"
+        elif normal_count:
+            selected_grid_type = "normal_holey_carbon"
+        elif gold_count:
+            selected_grid_type = "gold_carbon_graphene"
+        else:
+            raise ValueError("Enter at least one grid type quantity.")
+    else:
+        normal_count = grids if selected_grid_type == "normal_holey_carbon" else 0
+        gold_count = grids if selected_grid_type == "gold_carbon_graphene" else 0
 
     try:
         slots = Decimal(str(actual_slots))
@@ -138,11 +166,14 @@ def calculate_charge_sheet(
     config = CHARGE_CONFIG[category]
 
     grid_charge = (
-        config["grid"][selected_grid_type] * grids if source == "facility" else Decimal("0")
+        config["grid"]["normal_holey_carbon"] * normal_count
+        + config["grid"]["gold_carbon_graphene"] * gold_count
+        if source == "facility" else Decimal("0")
     )
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
-    clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
+    full_clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
+    clip_base_charge = full_clip_base_charge * Decimal(grids - clipped) / Decimal(grids)
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
     processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
     subtotal = grid_charge + handling_charge + clip_base_charge + slot_charge + processing_charge
@@ -154,7 +185,10 @@ def calculate_charge_sheet(
         "actual_grids": grids,
         "grid_source": source,
         "grid_type": selected_grid_type if source == "facility" else None,
+        "normal_grids": normal_count if source == "facility" else 0,
+        "gold_grids": gold_count if source == "facility" else 0,
         "actual_slots": slots,
+        "clipped_grids": clipped,
         "grid_charge": _money(grid_charge),
         "handling_charge": _money(handling_charge),
         "clip_base_charge": _money(clip_base_charge),
@@ -181,11 +215,12 @@ def is_non_billable_booking(booking):
 
 def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_requested=False,
                               grid_source="facility", grid_type="normal_holey_carbon",
-                              service_stage="Data Collection", user_category=None):
+                              service_stage="Data Collection", user_category=None,
+                              clipped_grids=0):
     """Compatibility adapter for existing completion routes."""
     charges = calculate_charge_sheet(
         user_category or booking["origin"], service_stage, actual_grids, grid_source, grid_type,
-        actual_slots, processing_requested,
+        actual_slots, processing_requested, clipped_grids,
     )
     if is_non_billable_booking(booking):
         for key in ("grid_charge", "handling_charge", "clip_base_charge", "slot_charge",

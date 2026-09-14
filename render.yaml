@@ -10,6 +10,8 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: SECURE_COOKIES
+        value: "true"
       - key: MAIL_USERNAME
         sync: false
       - key: MAIL_PASSWORD
@@ -22,13 +24,9 @@ services:
         sync: false
       - key: GOOGLE_APPS_SCRIPT_TOKEN
         sync: false
-      - key: ADMIN_USERNAME
+      - key: GITHUB_TOKEN
         sync: false
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_INITIAL_PASSWORD
-        sync: false
-      - key: ARCHIVE_DIR
-        sync: false
-      - key: PAYMENT_PROOF_DIR
-        sync: false
+      - key: GITHUB_REPOSITORY
+        value: cryo-accem/Cryo-2.0
+      - key: GITHUB_BRANCH
+        value: main

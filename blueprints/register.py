@@ -9,28 +9,21 @@ register_bp = Blueprint("register", __name__)
 @register_bp.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
-        reg_type     = request.form.get("reg_type", "").strip().lower()
-        user_name   = request.form.get("user_name", "")
-        pi_name     = request.form.get("pi_name", "")
-        email       = request.form.get("email", "")
+        reg_type    = request.form["reg_type"]
+        user_name   = request.form["user_name"]
+        pi_name     = request.form["pi_name"]
+        email       = request.form["email"]
         origin      = request.form.get("origin", "")
-        sample_name = request.form.get("sample_name", "")
-        phone      = request.form.get("phone", "")
-        if reg_type not in {"datacollecting", "screening", "freezing"}:
-            flash("Please select a valid service.", "registration")
-            return redirect(url_for("register.register"))
+        sample_name = request.form["sample_name"]
 
         # ── Data Collecting (was Imaging) ────────────────────────────────────
         if reg_type == "datacollecting":
             esm   = request.form.get("esm", "")
-            try:
-                grids = int(request.form.get("grids") or 0)
-                days = int(request.form.get("days") or 0)
-            except (TypeError, ValueError):
-                grids = days = 0
+            grids = int(request.form.get("grids") or 0)
+            days  = int(request.form.get("days") or 0)
 
             success, message = register_imaging(
-                user_name, pi_name, email, origin, esm, sample_name, grids, days, phone
+                user_name, pi_name, email, origin, esm, sample_name, grids, days
             )
             if not success:
                 flash(message, "registration")
@@ -40,14 +33,11 @@ def register():
         # ── Screening ────────────────────────────────────────────────────────
         elif reg_type == "screening":
             esm   = request.form.get("esm", "")
-            try:
-                grids = int(request.form.get("grids") or 0)
-            except (TypeError, ValueError):
-                grids = 0
+            grids = int(request.form.get("grids") or 0)
             days  = 1
 
             success, message = register_screening(
-                user_name, pi_name, email, origin, esm, sample_name, grids, days, phone
+                user_name, pi_name, email, origin, esm, sample_name, grids, days
             )
             if not success:
                 flash(message, "registration")
@@ -56,10 +46,7 @@ def register():
 
         # ── Freezing ─────────────────────────────────────────────────────────
         elif reg_type == "freezing":
-            try:
-                grids = int(request.form.get("grids_freezing") or 0)
-            except (TypeError, ValueError):
-                grids = 0
+            grids         = int(request.form.get("grids_freezing") or 0)
             freezing_date = request.form.get("freezing_date")
 
             success, message = register_freezing(

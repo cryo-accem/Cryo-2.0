@@ -1,8 +1,6 @@
 import os
 import sqlite3
 import urllib.parse
-import re
-import datetime
 
 from dotenv import load_dotenv
 from werkzeug.security import generate_password_hash
@@ -286,11 +284,113 @@ def init_db():
             )
         """)
 
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_publications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                citation TEXT NOT NULL,
+                doi_url TEXT,
+                published_year INTEGER,
+                is_visible INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_instruments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(180) NOT NULL,
+                category VARCHAR(120),
+                description TEXT NOT NULL,
+                specifications TEXT,
+                image_url VARCHAR(500),
+                is_visible INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_pages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                page_key VARCHAR(40) NOT NULL UNIQUE,
+                page_name VARCHAR(100) NOT NULL,
+                eyebrow VARCHAR(120),
+                title VARCHAR(240) NOT NULL,
+                intro TEXT,
+                additional_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_publications (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                citation TEXT NOT NULL,
+                doi_url VARCHAR(500),
+                published_year INT,
+                is_visible TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_instruments (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                name VARCHAR(180) NOT NULL,
+                category VARCHAR(120),
+                description TEXT NOT NULL,
+                specifications TEXT,
+                image_url VARCHAR(500),
+                is_visible TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS managed_pages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                page_key VARCHAR(40) NOT NULL UNIQUE,
+                page_name VARCHAR(100) NOT NULL,
+                eyebrow VARCHAR(120),
+                title VARCHAR(240) NOT NULL,
+                intro TEXT,
+                additional_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+
+    default_pages = [
+        ("home", "Home", "Indian Institute of Science · Bengaluru",
+         "Advanced Centre for Cryo-Electron Microscopy",
+         "Exploring biological structure at the molecular scale. A dedicated cryo-EM facility enabling high-resolution data collection and structural analysis."),
+        ("about", "About", "About ACCEM", "About the facility",
+         "Open-access cryo-electron microscopy infrastructure for researchers across India."),
+        ("facility", "Instructions", "Using the facility", "Instructions",
+         "Plan your experiment and connect with the EM manager before submitting a sample."),
+        ("equipments", "Equipments", "Infrastructure", "Equipment & capabilities",
+         "Specialised instrumentation for sample preparation, imaging and structural analysis."),
+        ("workflow", "Workflow", "How we work", "Cryo-EM workflow",
+         "From sample preparation to structure determination, our team supports every stage of your project."),
+        ("publications", "Publications", "Research output", "Publications",
+         "Selected research enabled by cryo-electron microscopy and the ACCEM community."),
+        ("events", "Events", "Community & learning", "Events",
+         "Workshops, conferences and community activities connected with ACCEM."),
+        ("team", "Team", "People", "Our team",
+         "Meet the scientists, managers and support staff who make the facility work."),
+    ]
+    for page_key, page_name, eyebrow, title, intro in default_pages:
+        cur.execute("SELECT id FROM managed_pages WHERE page_key=?", [page_key])
+        if not cur.fetchone():
+            cur.execute(
+                """INSERT INTO managed_pages
+                   (page_key, page_name, eyebrow, title, intro)
+                   VALUES (?, ?, ?, ?, ?)""",
+                [page_key, page_name, eyebrow, title, intro],
+            )
+
     _add_completion_columns(cur, "bookings")
     _add_completion_columns(cur, "screening_bookings")
-    _add_completion_columns(cur, "freezing_bookings")
     _add_completion_columns(cur, "completed_freezing")
-    _backfill_booking_metadata(cur)
 
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
@@ -298,88 +398,14 @@ def init_db():
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
-    # Operational metadata is deliberately kept separate from registrations so
-    # adding controls/logging never changes historical booking rows.
-    if _is_sqlite_url():
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS service_controls (
-                service TEXT PRIMARY KEY,
-                enabled INTEGER NOT NULL DEFAULT 1,
-                message TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS email_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recipient TEXT NOT NULL,
-                subject TEXT NOT NULL,
-                status TEXT NOT NULL,
-                error TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS maintenance_slots (
-                service TEXT NOT NULL,
-                slot_date DATE NOT NULL,
-                reason TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (service, slot_date)
-            )
-        """)
-    else:
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS service_controls (
-                service VARCHAR(40) PRIMARY KEY,
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                message TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS email_logs (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                recipient VARCHAR(255) NOT NULL,
-                subject VARCHAR(255) NOT NULL,
-                status VARCHAR(30) NOT NULL,
-                error TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS maintenance_slots (
-                service VARCHAR(40) NOT NULL,
-                slot_date DATE NOT NULL,
-                reason TEXT,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (service, slot_date)
-            )
-        """)
-    for service in ("freezing", "screening", "datacollecting"):
-        cur.execute(
-            "INSERT OR IGNORE INTO service_controls (service, enabled) VALUES (?, 1)"
-            if _is_sqlite_url() else
-            "INSERT IGNORE INTO service_controls (service, enabled) VALUES (?, 1)",
-            [service],
-        )
-
     # ── Seed default admin user if none exists ──────────────────────────────
     cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role = ?", ["admin"])
     admin_count = cur.fetchone()["cnt"]
-    admin_password = (
-        os.environ.get("ADMIN_INITIAL_PASSWORD")
-        or os.environ.get("ADMIN_PASSWORD")
-        or os.environ.get("INITIAL_ADMIN_PASSWORD")
-        or ""
-    ).strip()
-    admin_username = (os.environ.get("ADMIN_USERNAME") or os.environ.get("INITIAL_ADMIN_USERNAME") or "").strip().lower()
-    admin_email = (os.environ.get("ADMIN_EMAIL") or os.environ.get("INITIAL_ADMIN_EMAIL") or "").strip()
-    if admin_count == 0 and admin_password and admin_username and admin_email:
-        default_password_hash = generate_password_hash(admin_password, method="pbkdf2:sha256")
+    if admin_count == 0:
+        default_password_hash = generate_password_hash("admin123", method="pbkdf2:sha256")
         cur.execute(
             "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-            [admin_username, admin_email, default_password_hash, "admin"]
+            ["admin", "admin@accem.iisc.ac.in", default_password_hash, "admin"]
         )
 
     conn.commit()
@@ -388,118 +414,102 @@ def init_db():
 
 
 def _add_completion_columns(cur, table: str):
-    """Add billing and payment fields without changing existing values."""
+    """Add billing fields without changing existing requested booking values."""
     if _is_sqlite_url():
         cur.execute(f"PRAGMA table_info({table})")
         existing = {row["name"] for row in cur.fetchall()}
         column_types = {
-            "actual_slots": "NUMERIC", "actual_grids": "INTEGER", "number_of_grids": "INTEGER",
-            "service_stage": "TEXT", "grid_source": "TEXT", "grid_type": "TEXT",
-            "grid_charge": "NUMERIC", "handling_charge": "NUMERIC", "clip_base_charge": "NUMERIC",
-            "slot_charge": "NUMERIC", "freezing_charge": "NUMERIC", "clipping_charge": "NUMERIC",
-            "processing_charge": "NUMERIC", "subtotal": "NUMERIC", "gst_amount": "NUMERIC",
-            "grand_total": "NUMERIC", "total_billed": "NUMERIC", "bill_generated_at": "TIMESTAMP",
-            "generated_by": "INTEGER", "processing_requested": "INTEGER NOT NULL DEFAULT 0",
-            "billing_category": "TEXT", "booking_ref": "TEXT",
-            "charge_sheet_sent_at": "TIMESTAMP", "payment_status": "TEXT DEFAULT 'Payment Pending'",
-            "transaction_reference": "TEXT", "transaction_date": "DATE", "amount_received": "NUMERIC",
-            "payment_mode": "TEXT", "proof_received_date": "DATE", "payment_proof_path": "TEXT",
-            "payment_proof_original_name": "TEXT", "admin_remarks": "TEXT", "debit_head_details": "TEXT",
-            "debit_head_status": "TEXT DEFAULT 'Debit Head Pending'", "pi_email": "VARCHAR(150)",
+            "actual_slots": "NUMERIC",
+            "actual_grids": "INTEGER",
+            "number_of_grids": "INTEGER",
+            "service_stage": "TEXT",
+            "grid_source": "TEXT",
+            "grid_type": "TEXT",
+            "grid_breakdown": "TEXT",
+            "grid_charge": "NUMERIC",
+            "handling_charge": "NUMERIC",
+            "clip_base_charge": "NUMERIC",
+            "slot_charge": "NUMERIC",
+            "freezing_charge": "NUMERIC",
+            "clipping_charge": "NUMERIC",
+            "processing_charge": "NUMERIC",
+            "subtotal": "NUMERIC",
+            "gst_amount": "NUMERIC",
+            "grand_total": "NUMERIC",
+            "total_billed": "NUMERIC",
+            "bill_generated_at": "TIMESTAMP",
+            "generated_by": "INTEGER",
+            "processing_requested": "INTEGER NOT NULL DEFAULT 0",
+            "clipped_grids": "INTEGER NOT NULL DEFAULT 0",
         }
     else:
-        cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s", [table])
+        cur.execute(
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s",
+            [table],
+        )
         existing = {row["COLUMN_NAME"] for row in cur.fetchall()}
         column_types = {
-            "actual_slots": "DECIMAL(12,3)", "actual_grids": "INT", "number_of_grids": "INT",
-            "service_stage": "VARCHAR(60)", "grid_source": "VARCHAR(30)", "grid_type": "VARCHAR(60)",
-            "grid_charge": "DECIMAL(12,2)", "handling_charge": "DECIMAL(12,2)", "clip_base_charge": "DECIMAL(12,2)",
-            "slot_charge": "DECIMAL(12,2)", "freezing_charge": "DECIMAL(12,2)", "clipping_charge": "DECIMAL(12,2)",
-            "processing_charge": "DECIMAL(12,2)", "subtotal": "DECIMAL(12,2)", "gst_amount": "DECIMAL(12,2)",
-            "grand_total": "DECIMAL(12,2)", "total_billed": "DECIMAL(12,2)", "bill_generated_at": "TIMESTAMP NULL",
-            "generated_by": "INT NULL", "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
-            "billing_category": "VARCHAR(20)", "booking_ref": "VARCHAR(40)", "charge_sheet_sent_at": "TIMESTAMP NULL",
-            "payment_status": "VARCHAR(40) DEFAULT 'Payment Pending'", "transaction_reference": "VARCHAR(150)",
-            "transaction_date": "DATE NULL", "amount_received": "DECIMAL(12,2) NULL", "payment_mode": "VARCHAR(80)",
-            "proof_received_date": "DATE NULL", "payment_proof_path": "VARCHAR(255)",
-            "payment_proof_original_name": "VARCHAR(255)", "admin_remarks": "TEXT", "debit_head_details": "TEXT",
-            "debit_head_status": "VARCHAR(40) DEFAULT 'Debit Head Pending'", "pi_email": "VARCHAR(150)",
+            "actual_slots": "DECIMAL(12,3)",
+            "actual_grids": "INT",
+            "number_of_grids": "INT",
+            "service_stage": "VARCHAR(60)",
+            "grid_source": "VARCHAR(30)",
+            "grid_type": "VARCHAR(60)",
+            "grid_breakdown": "TEXT",
+            "grid_charge": "DECIMAL(12,2)",
+            "handling_charge": "DECIMAL(12,2)",
+            "clip_base_charge": "DECIMAL(12,2)",
+            "slot_charge": "DECIMAL(12,2)",
+            "freezing_charge": "DECIMAL(12,2)",
+            "clipping_charge": "DECIMAL(12,2)",
+            "processing_charge": "DECIMAL(12,2)",
+            "subtotal": "DECIMAL(12,2)",
+            "gst_amount": "DECIMAL(12,2)",
+            "grand_total": "DECIMAL(12,2)",
+            "total_billed": "DECIMAL(12,2)",
+            "bill_generated_at": "TIMESTAMP NULL",
+            "generated_by": "INT NULL",
+            "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "clipped_grids": "INT NOT NULL DEFAULT 0",
         }
+
     for column, column_type in column_types.items():
         if column not in existing:
             cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
-
-def _backfill_booking_metadata(cur):
-    """Populate new metadata for legacy rows without changing user-entered data."""
-    for table, prefix in (("bookings", "DC"), ("screening_bookings", "SC"), ("freezing_bookings", "FZ"), ("completed_freezing", "FZ")):
-        cur.execute(f"SELECT id, origin, booking_ref, billing_category FROM {table}")
-        for row in cur.fetchall():
-            if not row["billing_category"]:
-                normalized = str(row["origin"] or "").strip().casefold()
-                category = "internal" if normalized == "internal" else "industry" if normalized in {"industry", "industrial", "external industry"} else "academic"
-                cur.execute(f"UPDATE {table} SET billing_category=? WHERE id=?", [category, row["id"]])
-            if not row["booking_ref"]:
-                cur.execute(f"UPDATE {table} SET booking_ref=? WHERE id=?", [make_booking_ref(prefix, row["id"]), row["id"]])
-
-
-def service_enabled(service):
-    """Return the current operational switch without exposing settings publicly."""
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT enabled FROM service_controls WHERE service=?", [service])
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return bool(row["enabled"]) if row else True
-    except Exception:
-        return True
-
-
-def service_message(service):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT message FROM service_controls WHERE service=?", [service])
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        return (row["message"] if row else None) or "This service is temporarily unavailable."
-    except Exception:
-        return "This service is temporarily unavailable."
-
-
-def is_maintenance(service, slot_date):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "SELECT reason FROM maintenance_slots WHERE service=? AND slot_date=?",
-        [service, slot_date],
-    )
-    row = cur.fetchone()
-    cur.close()
-    conn.close()
-    return row
-
-
-def validate_registration_fields(user_name, pi_name, email, sample_name, phone=None):
-    values = {
-        "user_name": str(user_name or "").strip(),
-        "pi_name": str(pi_name or "").strip(),
-        "email": str(email or "").strip().lower(),
-        "sample_name": str(sample_name or "").strip(),
+    payment_columns = {
+        "charge_sheet_sent_at": "TIMESTAMP",
+        "payment_status": "TEXT DEFAULT 'Payment Pending'",
+        "transaction_reference": "TEXT",
+        "transaction_date": "DATE",
+        "amount_received": "NUMERIC",
+        "payment_mode": "TEXT",
+        "proof_received_date": "DATE",
+        "payment_proof_path": "TEXT",
+        "payment_proof_original_name": "TEXT",
+        "admin_remarks": "TEXT",
+        "debit_head_details": "TEXT",
+        "debit_head_status": "TEXT DEFAULT 'Debit Head Pending'",
+        "pi_email": "VARCHAR(150)",
     }
-    if any(not values[key] for key in values):
-        raise ValueError("Name, PI, email, and sample name are required.")
-    if len(values["user_name"]) > 100 or len(values["pi_name"]) > 100 or len(values["sample_name"]) > 150:
-        raise ValueError("One or more registration fields are too long.")
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", values["email"]) or len(values["email"]) > 150:
-        raise ValueError("Enter a valid email address.")
-    if phone and not re.fullmatch(r"[0-9+() .-]{7,25}", str(phone).strip()):
-        raise ValueError("Enter a valid phone number.")
-    return values
+    if not _is_sqlite_url():
+        payment_columns = {
+            "charge_sheet_sent_at": "TIMESTAMP NULL",
+            "payment_status": "VARCHAR(40) DEFAULT 'Payment Pending'",
+            "transaction_reference": "VARCHAR(150)",
+            "transaction_date": "DATE NULL",
+            "amount_received": "DECIMAL(12,2) NULL",
+            "payment_mode": "VARCHAR(80)",
+            "proof_received_date": "DATE NULL",
+            "payment_proof_path": "VARCHAR(255)",
+            "payment_proof_original_name": "VARCHAR(255)",
+            "admin_remarks": "TEXT",
+            "debit_head_details": "TEXT",
+            "debit_head_status": "VARCHAR(40) DEFAULT 'Debit Head Pending'",
+            "pi_email": "VARCHAR(150)",
+        }
 
-
-def make_booking_ref(prefix, booking_id):
-    return f"ACCEM-{prefix}-{datetime.date.today().year}-{int(booking_id):04d}"
+    for column, column_type in payment_columns.items():
+        if column not in existing:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")

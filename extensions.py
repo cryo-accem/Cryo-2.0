@@ -26,28 +26,7 @@ def send_email(recipient: str, subject: str, body: str, cc=None, attachments=Non
     """Send email asynchronously through a Google Apps Script HTTPS relay."""
     from flask import current_app
 
-    try:
-        app = current_app._get_current_object()
-    except RuntimeError:
-        # Registration helpers are also usable from jobs/tests without a
-        # request context; lack of a relay must never undo a booking.
-        return
-
-    def _log(status, error=None):
-        """Email telemetry is best-effort and must never affect a booking."""
-        try:
-            from database import get_db
-            conn = get_db()
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO email_logs (recipient, subject, status, error) VALUES (?, ?, ?, ?)",
-                [recipient, subject, status, str(error)[:1000] if error else None],
-            )
-            conn.commit()
-            cur.close()
-            conn.close()
-        except Exception as exc:
-            app.logger.warning("Could not write email log: %s", exc)
+    app = current_app._get_current_object()
 
     def _send():
         with app.app_context():
@@ -58,7 +37,6 @@ def send_email(recipient: str, subject: str, body: str, cc=None, attachments=Non
                     "Email to %s was not sent because Google Apps Script email relay is not configured",
                     recipient,
                 )
-                _log("not_configured")
                 return
 
             payload = {
@@ -92,7 +70,6 @@ def send_email(recipient: str, subject: str, body: str, cc=None, attachments=Non
                     recipient,
                     response_body,
                 )
-                _log("sent")
             except urllib.error.HTTPError as exc:
                 details = exc.read().decode("utf-8", errors="replace")
                 app.logger.error(
@@ -101,20 +78,11 @@ def send_email(recipient: str, subject: str, body: str, cc=None, attachments=Non
                     exc.code,
                     details,
                 )
-                _log("failed", details)
             except urllib.error.URLError as exc:
                 app.logger.error(
                     "Email to %s failed through Google Apps Script: %s",
                     recipient,
                     exc.reason,
                 )
-                _log("failed", exc.reason)
-            except Exception as exc:
-                app.logger.exception("Unexpected email delivery failure to %s", recipient)
-                _log("failed", exc)
 
-    try:
-        threading.Thread(target=_send, daemon=True).start()
-    except Exception as exc:
-        # A relay/thread failure must not roll back or fail the booking request.
-        app.logger.exception("Could not queue email to %s: %s", recipient, exc)
+    threading.Thread(target=_send, daemon=True).start()
