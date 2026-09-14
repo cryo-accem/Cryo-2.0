@@ -120,6 +120,8 @@ def calculate_charge_sheet(
     actual_slots=1,
     processing_requested=False,
     clipped_grids=0,
+    normal_grids=None,
+    gold_grids=None,
 ):
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
@@ -133,8 +135,27 @@ def calculate_charge_sheet(
         raise ValueError("Clipped grids cannot exceed actual grids.")
     source = normalize_grid_source(grid_source)
     selected_grid_type = normalize_grid_type(grid_type)
-    if source == "facility" and not selected_grid_type:
+    if source == "facility" and not selected_grid_type and normal_grids is None and gold_grids is None:
         raise ValueError("Please select the grid type for facility-provided grids.")
+    if source == "facility" and (normal_grids is not None or gold_grids is not None):
+        try:
+            normal_count = int(normal_grids or 0)
+            gold_count = int(gold_grids or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Grid type quantities must be whole numbers.") from None
+        if normal_count < 0 or gold_count < 0 or normal_count + gold_count != grids:
+            raise ValueError("Grid type quantities must add up to the actual grids.")
+        if normal_count and gold_count:
+            selected_grid_type = "mixed"
+        elif normal_count:
+            selected_grid_type = "normal_holey_carbon"
+        elif gold_count:
+            selected_grid_type = "gold_carbon_graphene"
+        else:
+            raise ValueError("Enter at least one grid type quantity.")
+    else:
+        normal_count = grids if selected_grid_type == "normal_holey_carbon" else 0
+        gold_count = grids if selected_grid_type == "gold_carbon_graphene" else 0
 
     try:
         slots = Decimal(str(actual_slots))
@@ -145,7 +166,9 @@ def calculate_charge_sheet(
     config = CHARGE_CONFIG[category]
 
     grid_charge = (
-        config["grid"][selected_grid_type] * grids if source == "facility" else Decimal("0")
+        config["grid"]["normal_holey_carbon"] * normal_count
+        + config["grid"]["gold_carbon_graphene"] * gold_count
+        if source == "facility" else Decimal("0")
     )
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
@@ -162,6 +185,8 @@ def calculate_charge_sheet(
         "actual_grids": grids,
         "grid_source": source,
         "grid_type": selected_grid_type if source == "facility" else None,
+        "normal_grids": normal_count if source == "facility" else 0,
+        "gold_grids": gold_count if source == "facility" else 0,
         "actual_slots": slots,
         "clipped_grids": clipped,
         "grid_charge": _money(grid_charge),
