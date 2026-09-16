@@ -28,13 +28,14 @@ PI_USERS = [
     ("Prof. Dipshikha Chakravortty", 1), ("Prof. Dipankar Chatterji", 1), ("Prof. K. Suguna", 1),
     ("Prof. B. Gopal", 1), ("Dr. Aravind Pentamasa", 5), ("Dr. Somnath Dutta", 8),
     ("Dr. Ashok Sekhar", 1), ("Dr. Jayanta Chatterjee", 1), ("Dr. Mahavir Singh", 2),
-    ("Dr. Tanweer Hussain", 4), ("Dr. Raghavan Varadarajan", 5), ("Dr. Vidhya Mangala Prasad", 8),
+    ("Dr. Tanweer Hussain", 7), ("Dr. Raghavan Varadarajan", 5), ("Dr. Vidhya Mangala Prasad", 8),
     ("Dr. Amit Baidya", 3), ("Dr. Mahipal Ganji", 2), ("Dr. Saibal Chatterjee", 1),
     ("Dr. Saravanan Palani", 1), ("Dr. Srimonta Gayen", 3), ("Prof. Siddhartha P. Sarma", 2),
     ("Dr. Amit Singh", 2), ("Dr. Deepak K. Saini", 1), ("Dr. Kartik Sunagar", 1),
     ("Prof. P. K. Das", 1), ("Prof. Aninda J. Bhattacharyya", 1), ("Dr. Subinoy Rana", 1),
-    ("Dr. Debasis Das", 3), ("Prof. Uday Maitra", 9), ("Prof. Joydeep Basu", 1),
+    ("Dr. Debasis Das", 2), ("Prof. Uday Maitra", 5), ("Prof. Joydeep Basu", 1),
     ("Dr. Sivaprakasam Ramamoorthy", 2),
+    ("Dr. Mrinmoy De", 4),
 ]
 
 ACADEMIC_USERS = [
@@ -92,7 +93,7 @@ def get_slideshow_images():
 
 def get_user_statistics():
     """Combine the published baseline with newly logged registrations."""
-    baseline = {"Internal": 72, "External": 54, "Industry": 44}
+    baseline = {"Internal": 74, "External": 64, "Industry": 25}
     try:
         conn = get_db()
         cur = conn.cursor()

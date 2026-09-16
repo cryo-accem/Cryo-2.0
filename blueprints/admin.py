@@ -29,6 +29,7 @@ from revenue import (
 from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
+from blueprints.public import PI_USERS
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -141,15 +142,30 @@ def panel():
         return redirect(url_for("admin.login"))
     conn = get_db()
     cur = conn.cursor()
-    pi_users = {}
+    pi_users = {
+        normalize_pi_name(label): {
+            "label": clean_display_name(label),
+            "users": {f"historical:{normalize_pi_name(label)}:{index}" for index in range(count)},
+        }
+        for label, count in PI_USERS
+    }
+    pi_users.update({
+        "historical-external": {"label": "Historical external academic users", "users": {f"historical:external:{i}" for i in range(64)}},
+        "historical-industry": {"label": "Historical industry users", "users": {f"historical:industry:{i}" for i in range(25)}},
+    })
+    recent_users = set()
     for table in ("bookings", "screening_bookings", "freezing_bookings"):
         cur.execute(f"SELECT pi_name, user_name, email FROM {table} WHERE pi_name IS NOT NULL AND pi_name <> ''")
         for row in cur.fetchall():
             pi_name = clean_display_name(row["pi_name"])
             pi_key = normalize_pi_name(pi_name)
+            identity = (row["email"] or row["user_name"] or "").strip().casefold()
+            if not identity or identity in recent_users:
+                continue
+            recent_users.add(identity)
             entry = pi_users.setdefault(pi_key, {"label": pi_name, "users": set()})
             entry["label"] = preferred_pi_label(entry["label"], pi_name)
-            entry["users"].add((row["email"] or row["user_name"]).strip().casefold())
+            entry["users"].add(f"recent:{identity}")
     pi_counts = sorted(
         ({"label": entry["label"], "value": len(entry["users"])} for entry in pi_users.values()),
         key=lambda item: (-item["value"], item["label"]),
