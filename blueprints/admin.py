@@ -1169,6 +1169,36 @@ _PAYMENT_PROOF_MIME_TYPES = {
 }
 
 
+def _history_rows(rows):
+    """Normalize legacy rows so older production records render safely."""
+    defaults = {
+        "actual_slots": 0,
+        "actual_grids": 0,
+        "charge_sheet_sent_at": None,
+        "grid_source": "",
+        "grid_type": "",
+        "payment_status": "Payment Pending",
+        "debit_head_status": "Debit Head Pending",
+        "payment_proof_path": None,
+        "payment_proof_original_name": None,
+        "transaction_reference": None,
+        "transaction_date": None,
+        "amount_received": None,
+        "payment_mode": None,
+        "proof_received_date": None,
+        "admin_remarks": None,
+        "debit_head_details": None,
+        "pi_email": None,
+    }
+    normalized = []
+    for row in rows:
+        item = dict(row)
+        for key, default in defaults.items():
+            item.setdefault(key, default)
+        normalized.append(item)
+    return normalized
+
+
 def _charge_sheet_record(service_key, booking_id):
     table_info = _CHARGE_SHEET_TABLES.get(service_key)
     if not table_info:
@@ -1540,13 +1570,13 @@ def history():
     cur.execute(
         "SELECT * FROM bookings WHERE status='completed' ORDER BY completion_date DESC"
     )
-    completed_imaging = cur.fetchall()
+    completed_imaging = _history_rows(cur.fetchall())
     cur.execute("SELECT * FROM completed_freezing ORDER BY completed_at DESC")
-    completed_freezing = cur.fetchall()
+    completed_freezing = _history_rows(cur.fetchall())
     cur.execute(
         "SELECT * FROM screening_bookings WHERE status='completed' ORDER BY completion_date DESC"
     )
-    completed_screening = cur.fetchall()
+    completed_screening = _history_rows(cur.fetchall())
     cur.close()
     conn.close()
 
