@@ -54,6 +54,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.delete_sc",
     "admin.history",
     "admin.send_charge_sheet",
+    "admin.preview_charge_sheet",
     "admin.send_combined_charge_sheet",
     "admin.update_payment",
     "admin.download_payment_proof",
@@ -1403,6 +1404,47 @@ def send_charge_sheet(service_key, booking_id):
     conn.close()
     flash("Charge Sheet queued for email delivery.")
     return redirect(url_for("admin.history"))
+
+
+@admin_bp.route("/charge-sheet/<service_key>/<int:booking_id>/preview", methods=["POST"])
+def preview_charge_sheet(service_key, booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    row, service = _charge_sheet_record(service_key, booking_id)
+    if not row or (service_key != "freezing" and row["status"] != "completed"):
+        flash("That completed booking could not be found.")
+        return redirect(url_for("admin.history"))
+    row = dict(row)
+    if is_non_billable_booking(row):
+        flash("Charge sheets are not applicable for this PI.")
+        return redirect(url_for("admin.history"))
+    grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
+    grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
+    if not grid_source:
+        flash("Please select the grid source before previewing the bill.")
+        return redirect(url_for("admin.history"))
+    try:
+        charges = calculate_charge_sheet(
+            row.get("origin", ""), service,
+            row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
+            grid_source, grid_type,
+            row.get("actual_slots") or 1,
+            bool(row.get("processing_requested")),
+        )
+    except ValueError as exc:
+        flash(str(exc))
+        return redirect(url_for("admin.history"))
+    row.update(charges)
+    row["grid_source"] = grid_source
+    row["grid_type"] = grid_type
+    row["charge_sheet_id"] = row.get("charge_sheet_id") or f"PREVIEW-{service_key.upper()}-{booking_id}"
+    pdf = generate_charge_sheet(row, service)
+    return send_file(
+        io.BytesIO(pdf),
+        mimetype="application/pdf",
+        as_attachment=False,
+        download_name=f"charge-sheet-preview-{service_key}-{booking_id}.pdf",
+    )
 
 
 @admin_bp.route("/charge-sheet/combined", methods=["POST"])
