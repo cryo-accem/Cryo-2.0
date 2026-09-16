@@ -408,6 +408,9 @@ def _parse_date(value):
 def _revenue_dashboard(cur):
     today = datetime.date.today()
     preset = request.args.get("range", "all")
+    period = request.args.get("period", "monthly")
+    if period not in {"weekly", "monthly", "annual"}:
+        period = "monthly"
     start = end = None
     if preset == "this_month":
         start = today.replace(day=1)
@@ -463,6 +466,7 @@ def _revenue_dashboard(cur):
 
     totals = {
         "net": Decimal("0"), "gst": Decimal("0"), "gross": Decimal("0"),
+        "billed": Decimal("0"), "received": Decimal("0"), "outstanding": Decimal("0"),
         "slots": Decimal("0"), "grids": Decimal("0"),
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
@@ -487,6 +491,11 @@ def _revenue_dashboard(cur):
         totals["net"] += net
         totals["gst"] += gst
         totals["gross"] += gross
+        billed = _money(row["total_billed"] or gross)
+        received = _money(row["amount_received"])
+        totals["billed"] += billed
+        totals["received"] += received
+        totals["outstanding"] += max(billed - received, Decimal("0"))
         totals["slots"] += Decimal(str(row["actual_slots"] or 0))
         totals["grids"] += Decimal(str(row["number_of_grids"] or row["actual_grids"] or 0))
         origin = (row["origin"] or "").strip().casefold()
@@ -497,10 +506,15 @@ def _revenue_dashboard(cur):
         by_service["Clipping"] += clipping
         by_service["Handling Charge"] += handling
         by_service["Data Processing"] += processing
-        month = completion_date.strftime("%Y-%m")
-        monthly.setdefault(month, {"net": Decimal("0"), "slots": Decimal("0")})
-        monthly[month]["net"] += net
-        monthly[month]["slots"] += Decimal(str(row["actual_slots"] or 0))
+        if period == "weekly":
+            period_key = completion_date.strftime("%G-W%V")
+        elif period == "annual":
+            period_key = completion_date.strftime("%Y")
+        else:
+            period_key = completion_date.strftime("%Y-%m")
+        monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
+        monthly[period_key]["net"] += net
+        monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
 
     monthly_items = [
         {"label": key, "value": values["net"].quantize(Decimal("0.01")),
@@ -514,6 +528,7 @@ def _revenue_dashboard(cur):
             item["y"] = 160 - float(item["value"] / monthly_max * 140)
     return {
         "preset": preset,
+        "period": period,
         "start": start.isoformat() if start else "",
         "end": end.isoformat() if end else "",
         "totals": {key: value.quantize(Decimal("0.01")) for key, value in totals.items()},
