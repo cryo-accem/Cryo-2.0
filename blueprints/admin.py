@@ -30,7 +30,9 @@ from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import PI_USERS
-from historical_revenue import HISTORICAL_REVENUE, HISTORICAL_CATEGORY_TOTALS
+from historical_revenue import (
+    HISTORICAL_REVENUE, HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
+)
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -558,9 +560,15 @@ def _revenue_dashboard(cur):
             period_key = month
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
-    for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
-        if not start and not end:
+    if not start and not end:
+        for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
             by_category[category] += amount
+    else:
+        for month, category_amounts in HISTORICAL_CATEGORY_BY_MONTH.items():
+            if historical_start and month < historical_start or historical_end and month > historical_end:
+                continue
+            for category, amount in category_amounts.items():
+                by_category[category] += amount
 
     monthly_items = [
         {"label": key, "value": values["net"].quantize(Decimal("0.01")),
