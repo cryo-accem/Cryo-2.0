@@ -42,6 +42,7 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
+    "admin.download_pi_users_csv",
     "admin.logout",
     "admin.datacollecting",
     "admin.load_dc",
@@ -145,34 +146,7 @@ def panel():
         return redirect(url_for("admin.login"))
     conn = get_db()
     cur = conn.cursor()
-    pi_users = {
-        normalize_pi_name(label): {
-            "label": clean_display_name(label),
-            "users": {f"historical:{normalize_pi_name(label)}:{index}" for index in range(count)},
-        }
-        for label, count in PI_USERS
-    }
-    pi_users.update({
-        "historical-external": {"label": "Historical external academic users", "users": {f"historical:external:{i}" for i in range(64)}},
-        "historical-industry": {"label": "Historical industry users", "users": {f"historical:industry:{i}" for i in range(25)}},
-    })
-    recent_users = set()
-    for table in ("bookings", "screening_bookings", "freezing_bookings"):
-        cur.execute(f"SELECT pi_name, user_name, email FROM {table} WHERE pi_name IS NOT NULL AND pi_name <> ''")
-        for row in cur.fetchall():
-            pi_name = clean_display_name(row["pi_name"])
-            pi_key = normalize_pi_name(pi_name)
-            identity = (row["email"] or row["user_name"] or "").strip().casefold()
-            if not identity or identity in recent_users:
-                continue
-            recent_users.add(identity)
-            entry = pi_users.setdefault(pi_key, {"label": pi_name, "users": set()})
-            entry["label"] = preferred_pi_label(entry["label"], pi_name)
-            entry["users"].add(f"recent:{identity}")
-    pi_counts = sorted(
-        ({"label": entry["label"], "value": len(entry["users"])} for entry in pi_users.values()),
-        key=lambda item: (-item["value"], item["label"]),
-    )
+    pi_counts = _pi_overview_counts(cur)
     if len(pi_counts) > 6:
         other_count = sum(item["value"] for item in pi_counts[6:])
         pi_counts = pi_counts[:6] + [{"label": "Other PIs", "value": other_count}]
@@ -212,6 +186,57 @@ def panel():
         waiting_total=waiting_total,
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
+    )
+
+
+def _pi_overview_counts(cur):
+    pi_users = {
+        normalize_pi_name(label): {
+            "label": clean_display_name(label),
+            "users": {f"historical:{normalize_pi_name(label)}:{index}" for index in range(count)},
+        }
+        for label, count in PI_USERS
+    }
+    pi_users.update({
+        "historical-external": {"label": "Historical external academic users", "users": {f"historical:external:{i}" for i in range(64)}},
+        "historical-industry": {"label": "Historical industry users", "users": {f"historical:industry:{i}" for i in range(25)}},
+    })
+    recent_users = set()
+    for table in ("bookings", "screening_bookings", "freezing_bookings"):
+        cur.execute(f"SELECT pi_name, user_name, email FROM {table} WHERE pi_name IS NOT NULL AND pi_name <> ''")
+        for row in cur.fetchall():
+            pi_name = clean_display_name(row["pi_name"])
+            pi_key = normalize_pi_name(pi_name)
+            identity = (row["email"] or row["user_name"] or "").strip().casefold()
+            if not identity or identity in recent_users:
+                continue
+            recent_users.add(identity)
+            entry = pi_users.setdefault(pi_key, {"label": pi_name, "users": set()})
+            entry["label"] = preferred_pi_label(entry["label"], pi_name)
+            entry["users"].add(f"recent:{identity}")
+    return sorted(
+        ({"label": entry["label"], "value": len(entry["users"])} for entry in pi_users.values()),
+        key=lambda item: (-item["value"], item["label"]),
+    )
+
+
+@admin_bp.route("/panel/pi-users.csv")
+def download_pi_users_csv():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    rows = _pi_overview_counts(cur)
+    cur.close()
+    conn.close()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["PI / Group", "Users"])
+    writer.writerows((row["label"], row["value"]) for row in rows)
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=users-by-pi.csv"},
     )
 
 

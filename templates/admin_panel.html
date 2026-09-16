@@ -5,7 +5,7 @@
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Admin dashboard</h1><p>Manage registrations and monitor facility activity.</p></div></header>
   <div class="dashboard-charts">
     <section class="chart-card">
-      <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><i class="fa-solid fa-users" aria-hidden="true"></i></div>
+      <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><a class="button small secondary" href="{{ url_for('admin.download_pi_users_csv') }}">Download CSV</a></div>
       <div class="donut-layout">
         <div class="donut-chart" data-donut>
           <svg viewBox="0 0 120 120" aria-label="Users grouped by PI">
@@ -30,7 +30,7 @@
     </section>
   </div>
   <section class="revenue-dashboard">
-    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values only; GST is shown separately from net revenue.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label>{% if revenue.preset == 'custom' %}<label>From <input type="date" name="start" value="{{ revenue.start }}" required></label><label>To <input type="date" name="end" value="{{ revenue.end }}" required></label>{% endif %}<button class="button" type="submit">Apply filters</button></form></div>
+    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values only.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields" {% if revenue.preset != 'custom' %}hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
     <div class="revenue-cards">{% for label, key in [('Net Revenue','net'),('GST','gst'),('Gross Billed','gross'),('Amount Billed','billed'),('Amount Received','received'),('Outstanding','outstanding'),('Completed Bookings','bookings'),('Actual 24-hour Slots','slots'),('Actual Grids','grids')] %}<div class="revenue-card"><span>{{ label }}</span><strong>{% if key in ['net','gst','gross','billed','received','outstanding'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>{% endfor %}</div>
     <div class="revenue-charts">
       <section class="revenue-chart-card"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
@@ -50,4 +50,19 @@
     <strong class="archive-warning">WARNING: Completed records are archived locally before being permanently deleted. Archives are never uploaded to source control.</strong>
   </div>
 </section></main>
+<script>
+(() => {
+  const form = document.querySelector(".revenue-filter");
+  const range = form?.querySelector("[name=range]");
+  const custom = form?.querySelector(".custom-range-fields");
+  if (range && custom) {
+    const update = () => {
+      custom.hidden = range.value !== "custom";
+      custom.querySelectorAll("input").forEach((input) => { input.required = range.value === "custom"; });
+    };
+    range.addEventListener("change", update);
+    update();
+  }
+})();
+</script>
 {% endblock %}
