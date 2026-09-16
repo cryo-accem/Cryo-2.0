@@ -28,6 +28,7 @@ from revenue import (
 )
 from blueprints.freezing import complete_freezing_booking
 from charge_sheet import generate_charge_sheet
+from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -144,8 +145,10 @@ def panel():
     for table in ("bookings", "screening_bookings", "freezing_bookings"):
         cur.execute(f"SELECT pi_name, user_name, email FROM {table} WHERE pi_name IS NOT NULL AND pi_name <> ''")
         for row in cur.fetchall():
-            pi_key = " ".join(row["pi_name"].split()).casefold()
-            entry = pi_users.setdefault(pi_key, {"label": " ".join(row["pi_name"].split()), "users": set()})
+            pi_name = clean_display_name(row["pi_name"])
+            pi_key = normalize_pi_name(pi_name)
+            entry = pi_users.setdefault(pi_key, {"label": pi_name, "users": set()})
+            entry["label"] = preferred_pi_label(entry["label"], pi_name)
             entry["users"].add((row["email"] or row["user_name"]).strip().casefold())
     pi_counts = sorted(
         ({"label": entry["label"], "value": len(entry["users"])} for entry in pi_users.values()),
