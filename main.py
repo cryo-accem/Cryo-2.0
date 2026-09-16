@@ -46,7 +46,10 @@ def create_app() -> Flask:
         if not token:
             token = secrets.token_urlsafe(32)
             session["_csrf_token"] = token
-        return {"csrf_token": token, "current_year": datetime.date.today().year}
+        return {
+            "csrf_token": lambda: token,
+            "current_year": datetime.date.today().year,
+        }
 
     @app.before_request
     def protect_state_changing_requests():
