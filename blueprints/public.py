@@ -38,6 +38,19 @@ PI_USERS = [
     ("Dr. Mrinmoy De", 4),
 ]
 
+
+def get_combined_ongoing_slots(cur):
+    """Return ongoing data-collection and screening slots in one schedule."""
+    cur.execute(
+        """SELECT id AS booking_ref, registration_date, 'Data collection' AS service, id
+           FROM bookings WHERE status='ongoing'
+           UNION ALL
+           SELECT id AS booking_ref, registration_date, 'Screening' AS service, id
+           FROM screening_bookings WHERE status='ongoing'
+           ORDER BY registration_date, id"""
+    )
+    return cur.fetchall()
+
 ACADEMIC_USERS = [
     ("NCCS, Pune", 2), ("IIT-Bombay", 3), ("InStem", 1), ("Bose Institute", 4),
     ("Siddaganga Institute of Technology", 2), ("IISER-Mohali", 4), ("IISER-Pune", 1),
