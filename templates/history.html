@@ -31,7 +31,7 @@
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
     <div class="table-tools combined-charge-toolbar">
       <label class="table-search combined-user-filter"><i class="fa-solid fa-user" aria-hidden="true"></i><select data-user-filter aria-label="Filter by user"><option value="">All users</option></select></label>
-      <span class="combined-selection-status" data-selected-count>Select unsent slots belonging to one user to create one combined charge sheet.</span>
+      <span class="combined-selection-status" data-selected-count>Select billable slots belonging to one user to create or resend one combined charge sheet.</span>
       <button class="button small" type="submit" disabled data-combined-submit>Create combined charge sheet</button>
     </div>
     <input type="hidden" name="selected_slots" data-selected-slots>
@@ -45,7 +45,7 @@
       <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Payment tracking</th></tr></thead>
       <tbody>{% for slot in rows %}
         <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}">
-          <td>{% if not is_non_billable_booking(slot) and not slot.charge_sheet_sent_at %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
+          <td>{% if not is_non_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
           <td>{{ slot.sample_name }}{% if has_days %}<br><small>{{ slot.days }} requested days / {{ slot.grids }} requested grids</small>{% else %}<br><small>{{ slot.grids }} requested grids</small>{% endif %}</td>
@@ -158,7 +158,7 @@
     submit.disabled = selected.length === 0;
     count.textContent = selected.length
       ? `${selected.length} slot(s) selected`
-      : "Select unsent slots belonging to one user to create one combined charge sheet.";
+      : "Select billable slots belonging to one user to create or resend one combined charge sheet.";
   };
   userFilter.addEventListener("change", refresh);
   boxes.forEach((box) => box.addEventListener("change", refresh));

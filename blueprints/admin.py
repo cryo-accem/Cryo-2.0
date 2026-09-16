@@ -1395,7 +1395,7 @@ def send_combined_charge_sheet():
     except (TypeError, ValueError):
         selections = []
     if not isinstance(selections, list) or not selections:
-        flash("Select at least one unsent slot to create a combined charge sheet.")
+        flash("Select at least one billable slot to create or resend a combined charge sheet.")
         return redirect(url_for("admin.history"))
     conn = get_db()
     cur = conn.cursor()
@@ -1412,8 +1412,8 @@ def send_combined_charge_sheet():
             if not row or (service_key != "freezing" and row["status"] != "completed"):
                 raise ValueError("One of the selected slots is no longer completed.")
             row = dict(row)
-            if is_non_billable_booking(row) or row.get("charge_sheet_sent_at"):
-                raise ValueError("Only unsent, billable slots can be combined.")
+            if is_non_billable_booking(row):
+                raise ValueError("Only billable slots can be combined.")
             grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
             grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
             if not grid_source:
