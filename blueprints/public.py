@@ -8,6 +8,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify
 from database import get_db
+from normalization import clean_display_name
 
 public_bp = Blueprint("public", __name__)
 _publication_cache = {"timestamp": 0.0, "count": 36, "source": "curated fallback"}
@@ -97,12 +98,22 @@ def get_user_statistics():
         cur = conn.cursor()
         registrations = []
         for table in ("bookings", "screening_bookings", "freezing_bookings"):
-            cur.execute(f"SELECT origin FROM {table} WHERE origin IS NOT NULL AND origin != ''")
+            cur.execute(
+                f"SELECT origin, user_name, email FROM {table} "
+                "WHERE origin IS NOT NULL AND origin != ''"
+            )
             registrations.extend(cur.fetchall())
         conn.close()
 
+        seen_users = set()
         for row in registrations:
             origin = row["origin"] if isinstance(row, dict) else row[0]
+            user_name = row["user_name"] if isinstance(row, dict) else row[1]
+            email = row["email"] if isinstance(row, dict) else row[2]
+            identity = clean_display_name(email or user_name).casefold()
+            if not identity or identity in seen_users:
+                continue
+            seen_users.add(identity)
             normalized = origin.strip().lower()
             category = (
                 "Industry" if "industry" in normalized
