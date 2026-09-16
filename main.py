@@ -15,6 +15,11 @@ from blueprints.register  import register_bp
 from blueprints.admin     import admin_bp
 
 
+class _CSRFToken(str):
+    def __call__(self):
+        return str(self)
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
 
@@ -47,7 +52,7 @@ def create_app() -> Flask:
             token = secrets.token_urlsafe(32)
             session["_csrf_token"] = token
         return {
-            "csrf_token": lambda: token,
+            "csrf_token": _CSRFToken(token),
             "current_year": datetime.date.today().year,
         }
 
