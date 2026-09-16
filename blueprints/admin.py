@@ -439,7 +439,7 @@ def _revenue_dashboard(cur):
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
                        handling_charge, subtotal, processing_charge, gst_amount,
-                       grand_total, total_billed
+                       grand_total, total_billed, amount_received
                 FROM {table}
                 WHERE status='completed'"""
         )
@@ -454,7 +454,7 @@ def _revenue_dashboard(cur):
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
                   handling_charge, subtotal, processing_charge, gst_amount,
-                  grand_total, total_billed
+                  grand_total, total_billed, amount_received
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
