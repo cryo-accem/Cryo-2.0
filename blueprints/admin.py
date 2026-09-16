@@ -1186,28 +1186,24 @@ def archive_completed_registrations():
         flash("There are no completed registrations to archive.")
         return redirect(url_for("admin.panel"))
 
-    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup_dir = os.path.join(current_app.instance_path, "registration_archives")
-    os.makedirs(backup_dir, exist_ok=True)
-    archive_filename = f"completed-registrations-{timestamp}.csv"
-    archive_path = os.path.join(backup_dir, archive_filename)
-    archive_contents = _rows_csv(completed)
-    with open(archive_path, "w", newline="", encoding="utf-8") as archive:
-        archive.write(archive_contents)
+    if not current_app.config.get("GOOGLE_APPS_SCRIPT_URL") or not current_app.config.get(
+        "GOOGLE_APPS_SCRIPT_TOKEN"
+    ):
+        flash(
+            "Completed registrations were not removed because the email backup service "
+            "is not configured.",
+            "error",
+        )
+        return redirect(url_for("admin.panel"))
+
     backup_bytes = _database_backup_bytes()
     _email_database_backup(
-        "ACCEM database backup before archive and delete",
+        "ACCEM database backup before completed-record removal",
         f"A full ACCEM database backup was created before archiving and deleting "
-        f"{len(completed)} completed registrations. The backup ZIP is attached.",
+        f"{len(completed)} completed registrations. The backup ZIP containing all "
+        "available registration data is attached.",
         backup_bytes,
     )
-
-    github_error = None
-    if os.environ.get("GITHUB_TOKEN"):
-        try:
-            _commit_archive_to_github(archive_filename, archive_contents)
-        except RuntimeError as error:
-            github_error = str(error)
 
     conn = get_db()
     cur = conn.cursor()
@@ -1218,20 +1214,10 @@ def archive_completed_registrations():
     conn.commit()
     cur.close()
     conn.close()
-    if github_error:
-        flash(
-            f"Archived {len(completed)} completed registrations locally and removed them from "
-            f"the database, but GitHub synchronization failed: {github_error}",
-            "warning",
-        )
-    elif not os.environ.get("GITHUB_TOKEN"):
-        flash(
-            f"Archived {len(completed)} completed registrations locally and removed them from "
-            "the database. GitHub synchronization is unavailable because GITHUB_TOKEN is not configured.",
-            "warning",
-        )
-    else:
-        flash(f"Archived {len(completed)} completed registrations, then removed them from the database.")
+    flash(
+        f"Emailed a full backup to {BACKUP_EMAIL}, then removed "
+        f"{len(completed)} completed registrations from the database."
+    )
     return redirect(url_for("admin.panel"))
 
 

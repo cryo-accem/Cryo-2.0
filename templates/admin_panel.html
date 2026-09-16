@@ -41,10 +41,10 @@
   </section>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
-    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" onsubmit="return confirm('This will save completed registrations to an archive and permanently remove them from the database. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-      <button class="button archive-button" type="submit">Archive and remove completed</button>
+    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="button archive-button" type="submit">Email backup and remove completed</button>
     </form>
-    <strong class="archive-warning">WARNING: Completed records are archived locally in <code>instance/registration_archives/</code> before being permanently deleted. GitHub synchronization is attempted when configured.</strong>
+    <strong class="archive-warning">A full backup is emailed to cryoem.iisc@gmail.com before completed records are permanently removed. No archive is saved on this server.</strong>
   </div>
 </section></main>
 <script>
