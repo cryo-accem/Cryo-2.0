@@ -473,7 +473,9 @@ a { color: inherit; }
 .revenue-heading > div:first-child { min-width: 0; flex: 1; }
 .revenue-heading h2 { margin: 5px 0 6px; color: var(--navy); font-size: 25px; letter-spacing: -.035em; white-space: nowrap; }
 .revenue-heading p { max-width: 520px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
-.revenue-filter { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; min-width: 170px; }
+.revenue-filter { display: flex; flex-wrap: wrap; align-items: end; justify-content: flex-end; gap: 8px; min-width: 170px; padding: 8px; border: 1px solid #dce8ed; border-radius: 12px; background: #f8fbfc; }
+.revenue-filter label { display: grid; gap: 4px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.custom-range-fields { display: contents; }
 .revenue-filter select, .revenue-filter input { min-height: 38px; padding: 8px 12px; border: 1px solid #c9dbe3; border-radius: 9px; background: #fff; color: #43546a; font: inherit; font-size: 11px; box-shadow: 0 3px 8px rgba(8, 30, 55, .04); }
 .revenue-filter select:focus, .revenue-filter input:focus { outline: 0; border-color: #55aec5; box-shadow: 0 0 0 3px rgba(72, 200, 232, .14); }
 .revenue-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
