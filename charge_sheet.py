@@ -187,11 +187,12 @@ def _external_pdf(row, service):
     category = "Academic" if str(row["origin"]).casefold() == "external" else row["origin"]
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
+    institution_name = _value(row, "esm", "") or "Not provided"
     info = [
         [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]), f"CS-{row['id']}",
          _paragraph("<b>Date:</b>", styles["Small"]), _display_date(row["completion_date"] if service != "Freezing" else row["completed_at"])],
         [_paragraph("<b>TO:</b>", styles["Small"]), _paragraph(
-            f"{row['user_name']}<br/>{row['email']}<br/>Institution: {row.get('pi_name', '') if hasattr(row, 'get') else row['pi_name']}",
+            f"{row['user_name']}<br/>{row['email']}<br/>Institution: {institution_name}",
             styles["Small"]), "", ""],
         [_paragraph("<b>Booking ID:</b>", styles["Small"]), str(row["id"]),
          _paragraph("<b>Service:</b>", styles["Small"]), service],
