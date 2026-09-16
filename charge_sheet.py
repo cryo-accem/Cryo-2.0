@@ -287,12 +287,13 @@ def _external_pdf(row, service, category, is_industry):
         str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
     ) or str(row["id"])
     date_value = _value(row, "completion_date", _value(row, "completed_at"))
+    institution_name = _value(row, "esm", "") or "Not provided"
     info = [
         [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]),
          str(_value(row, "charge_sheet_id", f"CS-{row['id']}")),
          _paragraph("<b>Date:</b>", styles["Small"]), _display_date(date_value)],
         [_paragraph("<b>TO:</b>", styles["Small"]), _paragraph(
-            f"{row['user_name']}<br/>{row['email']}<br/>Institution: {row.get('pi_name', '') if hasattr(row, 'get') else row['pi_name']}",
+            f"{row['user_name']}<br/>{row['email']}<br/>Institution: {institution_name}",
             styles["Small"]), "", ""],
         [_paragraph("<b>Booking ID(s):</b>", styles["Small"]), booking_label,
          _paragraph("<b>Service:</b>", styles["Small"]), service],
