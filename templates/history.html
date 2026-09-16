@@ -60,6 +60,7 @@
               <select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility" {{ 'selected' if slot.grid_source == 'facility' else '' }}>Facility Provided</option><option value="self_owned" {{ 'selected' if slot.grid_source == 'self_owned' else '' }}>Self Owned / User Provided</option></select>
               <select name="grid_type" aria-label="Grid type"><option value="">Grid type</option><option value="normal_holey_carbon" {{ 'selected' if slot.grid_type == 'normal_holey_carbon' else '' }}>Normal Holey Carbon Grid</option><option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / Carbon Coated / Graphene Oxide Grid</option></select>
               {% if slot.origin|lower == 'internal' %}<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" placeholder="PI email (optional)" aria-label="PI email">{% endif %}
+              <button class="button small secondary" type="submit" formmethod="post" formaction="{{ url_for('admin.preview_charge_sheet', service_key=service_key, booking_id=slot.id) }}" formtarget="_blank">Preview Charge Sheet</button>
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
