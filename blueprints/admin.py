@@ -701,6 +701,8 @@ def complete_freezing(booking_id):
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
+    normal_grids = request.form.get("normal_grids", "").strip() or None
+    gold_grids = request.form.get("gold_grids", "").strip() or None
     user_category = request.form.get("user_category", "").strip() or None
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
