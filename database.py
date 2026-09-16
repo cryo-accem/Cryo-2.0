@@ -392,6 +392,25 @@ def init_db():
     _add_completion_columns(cur, "screening_bookings")
     _add_completion_columns(cur, "completed_freezing")
 
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS charge_sheet_sequences (
+                academic_year INTEGER NOT NULL,
+                category      TEXT NOT NULL,
+                next_number   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (academic_year, category)
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS charge_sheet_sequences (
+                academic_year INT NOT NULL,
+                category      VARCHAR(10) NOT NULL,
+                next_number   INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (academic_year, category)
+            )
+        """)
+
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
     # Completely safe — if no unique index exists, nothing happens.
@@ -441,6 +460,7 @@ def _add_completion_columns(cur, table: str):
             "generated_by": "INTEGER",
             "processing_requested": "INTEGER NOT NULL DEFAULT 0",
             "clipped_grids": "INTEGER NOT NULL DEFAULT 0",
+            "charge_sheet_id": "TEXT",
         }
     else:
         cur.execute(
@@ -472,6 +492,7 @@ def _add_completion_columns(cur, table: str):
             "generated_by": "INT NULL",
             "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
             "clipped_grids": "INT NOT NULL DEFAULT 0",
+            "charge_sheet_id": "VARCHAR(30)",
         }
 
     for column, column_type in column_types.items():

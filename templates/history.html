@@ -4,15 +4,48 @@
 <main class="portal-page"><section class="page-content">
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>History, charge sheets and payment tracking.</p></div></header>
 
+  <div class="history-summary" aria-label="Booking history summary">
+    <div class="history-summary__item">
+      <span>Data collection</span>
+      <strong>{{ completed_imaging|length }}</strong>
+      <small>completed</small>
+    </div>
+    <div class="history-summary__item">
+      <span>Freezing</span>
+      <strong>{{ completed_freezing|length }}</strong>
+      <small>completed</small>
+    </div>
+    <div class="history-summary__item">
+      <span>Screening</span>
+      <strong>{{ completed_screening|length }}</strong>
+      <small>completed</small>
+    </div>
+    <div class="history-summary__item">
+      <span>Charge sheets</span>
+      <strong>{{ (completed_imaging + completed_freezing + completed_screening)|length }}</strong>
+      <small>total records</small>
+    </div>
+  </div>
+
+  <form method="post" action="{{ url_for('admin.send_combined_charge_sheet') }}" data-combined-charge-form class="data-panel combined-charge-panel">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <div class="table-tools combined-charge-toolbar">
+      <label class="table-search combined-user-filter"><i class="fa-solid fa-user" aria-hidden="true"></i><select data-user-filter aria-label="Filter by user"><option value="">All users</option></select></label>
+      <span class="combined-selection-status" data-selected-count>Select billable slots belonging to one user to create or resend one combined charge sheet.</span>
+      <button class="button small" type="submit" disabled data-combined-submit>Create combined charge sheet</button>
+    </div>
+    <input type="hidden" name="selected_slots" data-selected-slots>
+  </form>
+
   {% macro completed_table(title, rows, service_key, service_label, has_days=False) %}
-  <section class="data-panel" data-history-panel="{{ service_key }}">
+  <section class="data-panel history-panel" data-history-panel="{{ service_key }}">
     <h2>{{ title }}</h2>
     {% if rows %}
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Booking ref</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Payment tracking</th></tr></thead>
       <tbody>{% for slot in rows %}
-        <tr data-origin="{{ slot.origin }}">
-          <td>{{ slot.booking_ref or ('#' ~ slot.id) }}</td>
+        <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}">
+          <td>{% if not is_non_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
           <td>{{ slot.sample_name }}{% if has_days %}<br><small>{{ slot.days }} requested days / {{ slot.grids }} requested grids</small>{% else %}<br><small>{{ slot.grids }} requested grids</small>{% endif %}</td>
@@ -75,7 +108,7 @@
     <button type="button" class="history-tab" data-history-tab="screening" role="tab" aria-selected="false">Screening</button>
   </div>
   <div class="data-stack">
-    <div class="table-tools" data-admin-filter>
+    <div class="table-tools history-filter-bar" data-admin-filter>
       <label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI, email, sample or status"></label>
       <select data-origin-filter aria-label="Filter by origin">
         <option value="">All origins</option>
@@ -91,8 +124,49 @@
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a>  </div>
 </section>
 <script>
-document.querySelectorAll("form[action*='charge-sheet']").forEach((form) => {
-  const source = form.querySelector("[name=grid_source]"), type = form.querySelector("[name=grid_type]");
+(() => {
+  const userFilter = document.querySelector("[data-user-filter]");
+  const rows = [...document.querySelectorAll("[data-slot-select]")].map((box) => box.closest("tr"));
+  const boxes = [...document.querySelectorAll("[data-slot-select]")];
+  const form = document.querySelector("[data-combined-charge-form]");
+  const payload = form.querySelector("[data-selected-slots]");
+  const submit = form.querySelector("[data-combined-submit]");
+  const count = form.querySelector("[data-selected-count]");
+  const users = [...new Map(rows.map((row) => [row.dataset.userEmail, row.dataset.userName])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  users.forEach(([email, name]) => {
+    const option = document.createElement("option");
+    option.value = email; option.textContent = name;
+    userFilter.appendChild(option);
+  });
+  const refresh = () => {
+    const selectedUser = userFilter.value;
+    rows.forEach((row) => {
+      const visible = !selectedUser || row.dataset.userEmail === selectedUser;
+      row.hidden = !visible;
+      if (!visible) row.querySelector("[data-slot-select]").checked = false;
+    });
+    const selected = boxes.filter((box) => box.checked).map((box) => ({
+      service_key: box.dataset.serviceKey, booking_id: box.dataset.bookingId,
+      grid_source: box.closest("tr").querySelector("select[name=grid_source]")?.value || "",
+      grid_type: box.closest("tr").querySelector("select[name=grid_type]")?.value || ""
+    }));
+    payload.value = JSON.stringify(selected);
+    submit.disabled = selected.length === 0;
+    count.textContent = selected.length
+      ? `${selected.length} slot(s) selected`
+      : "Select billable slots belonging to one user to create or resend one combined charge sheet.";
+  };
+  userFilter.addEventListener("change", refresh);
+  boxes.forEach((box) => box.addEventListener("change", refresh));
+  form.addEventListener("submit", (event) => {
+    refresh();
+    if (!payload.value || payload.value === "[]") event.preventDefault();
+  });
+})();
+document.querySelectorAll("form[action*='charge-sheet'] [name=grid_source]").forEach((source) => {
+  const form = source.closest("form");
+  const type = form.querySelector("[name=grid_type]");
   const update = () => { type.disabled = source.value === "self_owned"; type.required = source.value === "facility"; if (type.disabled) type.value = ""; };
   source.addEventListener("change", update); update();
 });

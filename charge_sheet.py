@@ -27,6 +27,53 @@ BANK_DETAILS = [
     ("GSTIN", "29AAATI1501J2ZV"),
 ]
 
+SIGNATORY_NAME = "Dr. Somnath Dutta"
+SIGNATORY_TITLE = "Convener, Electron Microscope Facility"
+SIGNATORY_DIVISION = "Division of Biological Sciences"
+SIGNATORY_INSTITUTE = "Indian Institute of Science, Bangalore"
+
+
+def _signatory_block(styles):
+    return _paragraph(
+        f"{SIGNATORY_NAME}<br/>{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
+        styles["SmallRight"],
+    )
+
+
+def _signature_block(styles, right_label="Signature", left_label="PI Signature", left_label_row=0):
+    return Table([
+        [_paragraph(left_label if left_label_row == 0 else "", styles["Small"]),
+         _paragraph(right_label, styles["SmallRight"])],
+        [_paragraph(left_label if left_label_row == 1 else "", styles["Small"]),
+         _paragraph("", styles["SmallRight"])],
+        [_paragraph(left_label if left_label_row == 2 else "", styles["Small"]), _paragraph(
+            f"{SIGNATORY_NAME}<br/>{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
+            styles["SmallRight"],
+        )],
+    ], colWidths=[95 * mm, 65 * mm])
+
+
+def _industry_signature_block(styles):
+    return Table([
+        [_paragraph("", styles["Small"]), _paragraph("Dr. Somnath Dutta", styles["SmallRight"])],
+        [_paragraph("", styles["Small"]), _paragraph("", styles["SmallRight"])],
+    ], colWidths=[95 * mm, 65 * mm])
+
+
+def _internal_signature_block(styles):
+    table = Table([
+        [_paragraph("PI Signature", styles["Small"]), _paragraph("Dr. Somnath Dutta", styles["SmallCenter"])],
+        [_paragraph("", styles["Small"]), _paragraph(
+            f"{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
+            styles["SmallCenter"],
+        )],
+    ], colWidths=[95 * mm, 65 * mm])
+    table.setStyle(TableStyle([
+        ("LEFTPADDING", (0, 0), (0, -1), 12 * mm),
+    ]))
+    table.hAlign = "RIGHT"
+    return table
+
 
 def _decimal(value):
     return Decimal(str(value or 0)).quantize(Decimal("0.01"))
@@ -104,6 +151,12 @@ def _value(row, key, default=None):
 
 
 def _billing_lines(row, service):
+    if _value(row, "combined_items"):
+        lines = []
+        for item in _value(row, "combined_items", []):
+            for description, quantity, amount in _billing_lines(item, item.get("combined_service", service)):
+                lines.append((f"{item.get('combined_service', service)} - {description}", quantity, amount))
+        return lines
     stage = str(_value(row, "service_stage", service) or service)
     if stage.casefold() in {"freezing", "grid registration"}:
         stage = "Freezing / Grid Registration"
@@ -174,7 +227,51 @@ def _watermark(canvas, doc):
     canvas.restoreState()
 
 
-def _external_pdf(row, service):
+def _internal_footer(canvas, doc):
+    styles = _styles()
+    signature = _internal_signature_block(styles)
+    width, _ = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
+    signature.drawOn(
+        canvas,
+        doc.leftMargin + (doc.width - width) / 2,
+        doc.bottomMargin,
+    )
+
+
+def _internal_page(canvas, doc):
+    _watermark(canvas, doc)
+    _internal_footer(canvas, doc)
+
+
+def _external_footer(canvas, doc):
+    styles = _styles()
+    signature = _external_signature_block(styles)
+    width, _ = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
+    signature.drawOn(
+        canvas,
+        doc.leftMargin + (doc.width - width) / 2,
+        doc.bottomMargin,
+    )
+
+
+def _external_signature_block(styles):
+    table = Table([
+        [_paragraph("", styles["Small"]), _paragraph("Dr. Somnath Dutta", styles["SmallCenter"])],
+        [_paragraph("", styles["Small"]), _paragraph(
+            f"{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
+            styles["SmallCenter"],
+        )],
+    ], colWidths=[95 * mm, 65 * mm])
+    table.hAlign = "CENTER"
+    return table
+
+
+def _external_page(canvas, doc):
+    _watermark(canvas, doc)
+    _external_footer(canvas, doc)
+
+
+def _external_pdf(row, service, category, is_industry):
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
@@ -184,17 +281,21 @@ def _external_pdf(row, service):
     story.append(_paragraph("CHARGE SHEET / PROFORMA INVOICE", styles["Institution"]))
     story.append(Spacer(1, 16))
 
-    category = "Academic" if str(row["origin"]).casefold() == "external" else row["origin"]
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     institution_name = _value(row, "esm", "") or "Not provided"
+    booking_label = ", ".join(
+        str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
+    ) or str(row["id"])
+    date_value = _value(row, "completion_date", _value(row, "completed_at"))
     info = [
-        [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]), f"CS-{row['id']}",
-         _paragraph("<b>Date:</b>", styles["Small"]), _display_date(row["completion_date"] if service != "Freezing" else row["completed_at"])],
+        [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]),
+         str(_value(row, "charge_sheet_id", f"CS-{row['id']}")),
+         _paragraph("<b>Date:</b>", styles["Small"]), _display_date(date_value)],
         [_paragraph("<b>TO:</b>", styles["Small"]), _paragraph(
             f"{row['user_name']}<br/>{row['email']}<br/>Institution: {institution_name}",
             styles["Small"]), "", ""],
-        [_paragraph("<b>Booking ID:</b>", styles["Small"]), str(row["id"]),
+        [_paragraph("<b>Booking ID(s):</b>", styles["Small"]), booking_label,
          _paragraph("<b>Service:</b>", styles["Small"]), service],
         [_paragraph("<b>User Category:</b>", styles["Small"]), category, "", ""],
         [_paragraph("<b>Number of Grids:</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0),
@@ -235,21 +336,23 @@ def _external_pdf(row, service):
     subtotal = _decimal(_value(row, "subtotal", None))
     if not subtotal:
         subtotal = sum((_decimal(_value(row, field, 0)) for field in ("slot_charge", "freezing_charge", "clipping_charge", "processing_charge")), Decimal("0"))
+    amount_in_words = _amount_words(_value(row, 'grand_total', _value(row, 'total_billed', 0)))
     summary = [
         ["Actual 24-hour slots", str(row["actual_slots"] or 0), "Subtotal", f"INR {subtotal:,.2f}"],
         ["Actual grids", str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0), "GST", f"INR {_decimal(_value(row, 'gst_amount', 0)):,.2f}"],
         ["", "", "Grand Total", f"INR {_decimal(_value(row, 'grand_total', _value(row, 'total_billed', 0))):,.2f}"],
+        ["", "", _paragraph("<b>Amount in words</b>", styles["Small"]), _paragraph(amount_in_words, styles["Small"])],
     ]
     summary_table = Table(summary, colWidths=[42 * mm, 28 * mm, 42 * mm, 68 * mm])
     summary_table.setStyle(TableStyle([
         ("GRID", (2, 0), (-1, -1), 0.4, colors.HexColor("#b8c5d0")),
         ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#edf3f7")),
         ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME", (2, 2), (3, 2), "Helvetica-Bold"),
         ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story.append(summary_table)
-    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(_value(row, 'grand_total', _value(row, 'total_billed', 0)))}", styles["Small"]))
     story.append(Spacer(1, 14))
     story.append(_paragraph("<b>PAYMENT INSTRUCTIONS</b>", styles["Section"]))
     story.append(_paragraph("Please make the payment using the bank details provided below. After completing the transaction, "
@@ -264,11 +367,16 @@ def _external_pdf(row, service):
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(bank_table)
-    story.append(Spacer(1, 14))
-    story.append(_paragraph("Dr. Somnath Dutta<br/>Convener, Electron Microscope Facility<br/>Division of Biological Sciences<br/>Indian Institute of Science, Bangalore",
-                            styles["SmallRight"]))
-    doc.build(story, onFirstPage=_watermark, onLaterPages=_watermark)
+    doc.build(story, onFirstPage=_external_page, onLaterPages=_external_page)
     return buffer.getvalue()
+
+
+def _academic_pdf(row, service):
+    return _external_pdf(row, service, "Academic", is_industry=False)
+
+
+def _industrial_pdf(row, service):
+    return _external_pdf(row, service, "Industrial", is_industry=True)
 
 
 def _internal_pdf(row, service):
@@ -283,9 +391,15 @@ def _internal_pdf(row, service):
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     grid_type = _value(row, "grid_type", "")
-    story.append(_paragraph(f"<b>Date:</b> {_display_date(row['completion_date'] if service != 'Freezing' else row['completed_at'])}<br/>"
+    charge_sheet_number = _value(row, "charge_sheet_id", f"CS-{row['id']}")
+    booking_label = ", ".join(
+        str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
+    ) or str(row["id"])
+    date_value = _value(row, "completion_date", _value(row, "completed_at"))
+    story.append(_paragraph(f"<b>Charge Sheet No:</b> {charge_sheet_number}<br/>"
+                            f"<b>Date:</b> {_display_date(date_value)}<br/>"
                             f"<b>TO:</b> {row['user_name']}<br/>Department/Unit: Indian Institute of Science<br/>Email: {row['email']}<br/>"
-                            f"<b>Booking ID:</b> {row['id']} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal<br/>"
+                            f"<b>Booking ID(s):</b> {booking_label} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal<br/>"
                             f"<b>Number of Grids:</b> {_value(row, 'number_of_grids', _value(row, 'actual_grids', 0)) or 0}<br/>"
                             f"<b>Grid Source:</b> {source_label}"
                             f"{'<br/><b>Grid Type:</b> ' + str(grid_type).replace('_', ' ').title() if source != 'self_owned' and grid_type else ''}", styles["Small"]))
@@ -310,13 +424,14 @@ def _internal_pdf(row, service):
     subtotal = _decimal(_value(row, "subtotal", 0))
     gst = _decimal(_value(row, "gst_amount", 0))
     total = _decimal(_value(row, "grand_total", _value(row, "total_billed", 0)))
+    amount_in_words = _amount_words(total)
     summary = [
         [_paragraph("<b>Actual 24-hour slots</b>", styles["Small"]), str(_value(row, "actual_slots", 0) or 0),
          _paragraph("<b>Actual grids</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0)],
         [_paragraph("<b>Subtotal</b>", styles["Small"]), f"INR {subtotal:,.2f}",
          _paragraph("<b>GST</b>", styles["Small"]), f"INR {gst:,.2f}"],
         [_paragraph("<b>Grand Total</b>", styles["Small"]), f"INR {total:,.2f}",
-         _paragraph("<b>Amount in words</b>", styles["Small"]), _amount_words(total)],
+         _paragraph("<b>Amount in words</b>", styles["Small"]), _paragraph(amount_in_words, styles["Small"])],
     ]
     summary_table = Table(summary, colWidths=[42 * mm, 24 * mm, 42 * mm, 72 * mm])
     summary_table.setStyle(TableStyle([
@@ -330,21 +445,18 @@ def _internal_pdf(row, service):
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     story.append(summary_table)
-    story.append(Spacer(1, 4))
-    story.append(_paragraph(f"<b>Amount in words:</b> {_amount_words(total)}", styles["Small"]))
     story.append(Spacer(1, 10))
     story.append(_paragraph("<b>Internal users are requested to provide the appropriate Debit Head for processing the charges "
                             "and copy their PI while submitting the Debit Head details.</b>", styles["Small"]))
-    story.append(Spacer(1, 30))
-    story.append(_paragraph("PI Signature", styles["Small"]))
-    story.append(Spacer(1, 18))
-    story.append(_paragraph("Dr. Somnath Dutta<br/>Convener, Electron Microscope Facility<br/>Division of Biological Sciences<br/>Indian Institute of Science, Bangalore",
-                            styles["Small"]))
-    doc.build(story, onFirstPage=_watermark, onLaterPages=_watermark)
+    doc.build(story, onFirstPage=_internal_page, onLaterPages=_internal_page)
     return buffer.getvalue()
 
 
 def generate_charge_sheet(row, service):
     """Return a PDF generated only from the completed row's stored billing values."""
     origin = str(row["origin"] or "").strip().casefold()
-    return _internal_pdf(row, service) if origin == "internal" else _external_pdf(row, service)
+    if origin == "internal":
+        return _internal_pdf(row, service)
+    if origin in {"industry", "industrial", "external industry"}:
+        return _industrial_pdf(row, service)
+    return _academic_pdf(row, service)

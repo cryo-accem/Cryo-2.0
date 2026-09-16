@@ -31,6 +31,11 @@ from charge_sheet import generate_charge_sheet
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
+_CHARGE_SHEET_CATEGORY_CODES = {
+    "internal": "INT",
+    "academic": "ACDM",
+    "industrial": "INDY",
+}
 
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
@@ -47,6 +52,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.delete_sc",
     "admin.history",
     "admin.send_charge_sheet",
+    "admin.send_combined_charge_sheet",
     "admin.update_payment",
     "admin.download_payment_proof",
     "admin.download_registrations_csv",
@@ -1211,6 +1217,58 @@ def _valid_email(value):
     return bool(value and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value))
 
 
+def _academic_year(value):
+    if hasattr(value, "year") and hasattr(value, "month"):
+        year, month = value.year, value.month
+    else:
+        parsed = str(value or "").strip()[:10]
+        try:
+            year, month = (int(part) for part in parsed.split("-")[:2])
+        except (TypeError, ValueError):
+            today = datetime.date.today()
+            year, month = today.year, today.month
+    return year if month >= 4 else year - 1
+
+
+def _charge_sheet_category(origin):
+    normalized = str(origin or "").strip().casefold()
+    if normalized == "internal":
+        return "internal"
+    if normalized in {"industry", "industrial", "external industry"}:
+        return "industrial"
+    return "academic"
+
+
+def _next_charge_sheet_id(cur, origin, completed_date):
+    category = _charge_sheet_category(origin)
+    academic_year = _academic_year(completed_date)
+    code = _CHARGE_SHEET_CATEGORY_CODES[category]
+    if _is_sqlite_url():
+        cur.execute(
+            "INSERT OR IGNORE INTO charge_sheet_sequences "
+            "(academic_year, category, next_number) VALUES (?, ?, 0)",
+            [academic_year, category],
+        )
+    else:
+        cur.execute(
+            "INSERT IGNORE INTO charge_sheet_sequences "
+            "(academic_year, category, next_number) VALUES (?, ?, 0)",
+            [academic_year, category],
+        )
+    cur.execute(
+        "UPDATE charge_sheet_sequences SET next_number=next_number + 1 "
+        "WHERE academic_year=? AND category=?",
+        [academic_year, category],
+    )
+    cur.execute(
+        "SELECT next_number FROM charge_sheet_sequences "
+        "WHERE academic_year=? AND category=?",
+        [academic_year, category],
+    )
+    sequence = cur.fetchone()["next_number"]
+    return f"{academic_year}_{code}_{sequence:04d}"
+
+
 @admin_bp.route("/charge-sheet/<service_key>/<int:booking_id>", methods=["POST"])
 def send_charge_sheet(service_key, booking_id):
     if not session.get("admin_logged_in"):
@@ -1219,6 +1277,7 @@ def send_charge_sheet(service_key, booking_id):
     if not row or (service_key != "freezing" and row["status"] != "completed"):
         flash("That completed booking could not be found.")
         return redirect(url_for("admin.history"))
+
 
     row = dict(row)
     if is_non_billable_booking(row):
@@ -1249,6 +1308,14 @@ def send_charge_sheet(service_key, booking_id):
         return redirect(url_for("admin.history"))
     if pi_email:
         row["pi_email"] = pi_email
+    conn = get_db()
+    cur = conn.cursor()
+    charge_sheet_id = row.get("charge_sheet_id")
+    if not charge_sheet_id:
+        charge_sheet_id = _next_charge_sheet_id(
+            cur, row.get("origin", ""), row.get("completion_date")
+        )
+        row["charge_sheet_id"] = charge_sheet_id
 
     cc = []
     facility_cc = current_app.config.get("CHARGE_SHEET_CC_EMAIL", "")
@@ -1284,20 +1351,19 @@ def send_charge_sheet(service_key, booking_id):
         attachments=[(filename, "application/pdf", pdf)],
     )
 
-    conn = get_db()
-    cur = conn.cursor()
     cur.execute(
         "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
         "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
         "freezing_charge=?, clipping_charge=?, processing_charge=?, subtotal=?, "
-        "gst_amount=?, grand_total=?, total_billed=?, bill_generated_at=CURRENT_TIMESTAMP "
+        "gst_amount=?, grand_total=?, total_billed=?, charge_sheet_id=?, "
+        "bill_generated_at=CURRENT_TIMESTAMP "
         "WHERE id=?".format(_CHARGE_SHEET_TABLES[service_key][0]),
         [charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
          charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]),
          str(charges["freezing_charge"]), str(charges["clipping_charge"]),
          str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
-         str(charges["grand_total"]), str(charges["total_billed"]), booking_id],
+         str(charges["grand_total"]), str(charges["total_billed"]), charge_sheet_id, booking_id],
     )
     if pi_email:
         cur.execute(
@@ -1317,6 +1383,92 @@ def send_charge_sheet(service_key, booking_id):
     cur.close()
     conn.close()
     flash("Charge Sheet queued for email delivery.")
+    return redirect(url_for("admin.history"))
+
+
+@admin_bp.route("/charge-sheet/combined", methods=["POST"])
+def send_combined_charge_sheet():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    try:
+        selections = json.loads(request.form.get("selected_slots", "[]"))
+    except (TypeError, ValueError):
+        selections = []
+    if not isinstance(selections, list) or not selections:
+        flash("Select at least one billable slot to create or resend a combined charge sheet.")
+        return redirect(url_for("admin.history"))
+    conn = get_db()
+    cur = conn.cursor()
+    items = []
+    try:
+        for selection in selections:
+            service_key = str(selection.get("service_key", ""))
+            table_info = _CHARGE_SHEET_TABLES.get(service_key)
+            booking_id = int(selection["booking_id"])
+            if not table_info:
+                raise ValueError("One of the selected slots is invalid.")
+            cur.execute(f"SELECT * FROM {table_info[0]} WHERE id=?", [booking_id])
+            row = cur.fetchone()
+            if not row or (service_key != "freezing" and row["status"] != "completed"):
+                raise ValueError("One of the selected slots is no longer completed.")
+            row = dict(row)
+            if is_non_billable_booking(row):
+                raise ValueError("Only billable slots can be combined.")
+            grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
+            grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
+            if not grid_source:
+                raise ValueError("Select a grid source for every selected slot.")
+            row.update(calculate_charge_sheet(
+                row.get("origin", ""), table_info[1],
+                row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
+                grid_source, grid_type, row.get("actual_slots") or 1,
+                bool(row.get("processing_requested")),
+            ))
+            row["combined_service"] = table_info[1]
+            items.append((service_key, booking_id, row))
+    except (KeyError, TypeError, ValueError) as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.history"))
+    recipients = {(str(row.get("user_name") or "").strip().casefold(),
+                   str(row.get("email") or "").strip().casefold()) for _, _, row in items}
+    if len(recipients) != 1 or not _valid_email(next(iter(recipients))[1]):
+        cur.close()
+        conn.close()
+        flash("Select slots belonging to the same user and email address.")
+        return redirect(url_for("admin.history"))
+    first = items[0][2]
+    charge_sheet_id = _next_charge_sheet_id(
+        cur, first.get("origin", ""), first.get("completion_date") or first.get("completed_at")
+    )
+    combined = dict(first)
+    combined["charge_sheet_id"] = charge_sheet_id
+    combined["combined_items"] = [row for _, _, row in items]
+    for field in ("actual_slots", "number_of_grids", "subtotal", "gst_amount", "grand_total", "total_billed"):
+        combined[field] = sum((Decimal(str(row.get(field) or 0)) for _, _, row in items), Decimal("0"))
+    combined["actual_slots"] = str(combined["actual_slots"])
+    combined["number_of_grids"] = int(combined["number_of_grids"])
+    send_email(
+        first["email"], "Charge Sheet - Cryo-EM Completed Services",
+        f"Dear {first['user_name']},\n\nPlease find attached the combined Charge Sheet for your completed Cryo-EM bookings.\n\nRegards,\nCryo-EM Facility",
+        attachments=[("charge-sheet-combined.pdf", "application/pdf", generate_charge_sheet(combined, "Combined Services"))],
+    )
+    for service_key, booking_id, row in items:
+        cur.execute(
+            f"UPDATE {_CHARGE_SHEET_TABLES[service_key][0]} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
+            "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?, "
+            "processing_charge=?, subtotal=?, gst_amount=?, grand_total=?, total_billed=?, charge_sheet_id=?, "
+            "bill_generated_at=CURRENT_TIMESTAMP, charge_sheet_sent_at=CURRENT_TIMESTAMP WHERE id=?",
+            [row["number_of_grids"], row["service_stage"], row["grid_source"], row["grid_type"],
+             str(row["grid_charge"]), str(row["handling_charge"]), str(row["clip_base_charge"]), str(row["slot_charge"]),
+             str(row["freezing_charge"]), str(row["clipping_charge"]), str(row["processing_charge"]), str(row["subtotal"]),
+             str(row["gst_amount"]), str(row["grand_total"]), str(row["total_billed"]), charge_sheet_id, booking_id],
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(f"Combined charge sheet {charge_sheet_id} queued for email delivery.")
     return redirect(url_for("admin.history"))
 
 
