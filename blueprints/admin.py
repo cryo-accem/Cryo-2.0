@@ -55,6 +55,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.history",
     "admin.send_charge_sheet",
     "admin.preview_charge_sheet",
+    "admin.delete_completed_booking",
     "admin.send_combined_charge_sheet",
     "admin.update_payment",
     "admin.download_payment_proof",
@@ -1231,6 +1232,50 @@ def _charge_sheet_record(service_key, booking_id):
     cur.close()
     conn.close()
     return row, service
+
+
+@admin_bp.route("/history/<service_key>/<int:booking_id>/delete", methods=["POST"])
+def delete_completed_booking(service_key, booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    table_info = _CHARGE_SHEET_TABLES.get(service_key)
+    if not table_info:
+        flash("Unknown booking type.")
+        return redirect(url_for("admin.history"))
+
+    table = table_info[0]
+    conn = get_db()
+    cur = conn.cursor()
+    selected_columns = "payment_proof_path" if service_key == "freezing" else "status, payment_proof_path"
+    cur.execute(f"SELECT {selected_columns} FROM {table} WHERE id=?", [booking_id])
+    row = cur.fetchone()
+    if not row or (service_key != "freezing" and row["status"] != "completed"):
+        cur.close()
+        conn.close()
+        flash("That completed booking could not be found.")
+        return redirect(url_for("admin.history"))
+
+    proof_path = row["payment_proof_path"]
+    cur.execute(f"DELETE FROM {table} WHERE id=?", [booking_id])
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("The booking could not be deleted.")
+        return redirect(url_for("admin.history"))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    if proof_path:
+        try:
+            os.remove(proof_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            current_app.logger.warning("Could not remove payment proof for deleted booking %s: %s", booking_id, exc)
+    flash("Completed booking deleted. Dashboard revenue and history totals have been updated.", "success")
+    return redirect(url_for("admin.history"))
 
 
 def _valid_email(value):

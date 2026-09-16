@@ -63,6 +63,10 @@
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
+            <form method="post" action="{{ url_for('admin.delete_completed_booking', service_key=service_key, booking_id=slot.id) }}" onsubmit="return confirm('Delete this completed booking for {{ slot.user_name|e }}? This removes it from history and revenue totals and cannot be undone.');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <button class="button small btn-delete" type="submit">Delete Booking</button>
+            </form>
           </td>
           <td>
             {% if slot.origin|lower == 'internal' %}
