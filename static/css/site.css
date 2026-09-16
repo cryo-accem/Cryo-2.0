@@ -491,6 +491,11 @@ a { color: inherit; }
 .line-chart { min-height: 235px; overflow-x: auto; padding: 12px 4px 0; }
 .line-chart svg { display: block; width: 100%; min-width: 420px; height: 190px; overflow: visible; background: linear-gradient(to bottom, transparent 24%, #edf2f5 25%, transparent 26%, transparent 49%, #edf2f5 50%, transparent 51%, transparent 74%, #edf2f5 75%, transparent 76%); }
 .line-chart-labels { display: flex; justify-content: space-between; gap: 8px; min-width: 420px; color: var(--muted); font-size: 9px; text-align: center; }
+.revenue-bars { display: flex; align-items: flex-end; gap: 10px; min-height: 280px; overflow-x: auto; padding: 34px 12px 8px; border-bottom: 1px solid #b9cbd5; background: repeating-linear-gradient(to bottom, transparent 0, transparent 24%, #edf2f5 25%, transparent 26%); }
+.revenue-bar-item { display: flex; flex: 0 0 76px; height: 238px; flex-direction: column; align-items: center; justify-content: flex-end; gap: 7px; color: var(--muted); font-size: 10px; text-align: center; }
+.revenue-bar-item strong { min-height: 14px; color: var(--navy); font-size: 10px; white-space: nowrap; }
+.revenue-bar-item span { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.revenue-bar { width: 42px; min-height: 3px; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #167da5, #32a889); box-shadow: 0 4px 10px rgba(22, 125, 165, .2); }
 .revenue-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid #edf2f5; color: #43546a; font-size: 11px; }
 .revenue-row:last-child { border-bottom: 0; }
 .revenue-row strong { color: var(--navy); font-size: 12px; white-space: nowrap; }
