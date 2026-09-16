@@ -126,7 +126,7 @@
 <script>
 (() => {
   const userFilter = document.querySelector("[data-user-filter]");
-  const rows = [...document.querySelectorAll("[data-slot-select]")].map((box) => box.closest("tr"));
+  const rows = [...document.querySelectorAll("[data-history-panel] tbody tr")];
   const boxes = [...document.querySelectorAll("[data-slot-select]")];
   const form = document.querySelector("[data-combined-charge-form]");
   const payload = form.querySelector("[data-selected-slots]");
@@ -144,7 +144,8 @@
     rows.forEach((row) => {
       const visible = !selectedUser || row.dataset.userEmail === selectedUser;
       row.hidden = !visible;
-      if (!visible) row.querySelector("[data-slot-select]").checked = false;
+      const checkbox = row.querySelector("[data-slot-select]");
+      if (!visible && checkbox) checkbox.checked = false;
     });
     const selected = boxes.filter((box) => box.checked).map((box) => ({
       service_key: box.dataset.serviceKey, booking_id: box.dataset.bookingId,
