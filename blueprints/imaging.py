@@ -2,6 +2,7 @@ import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
+from blueprints.public import get_combined_ongoing_slots
 
 imaging_bp = Blueprint("imaging", __name__)
 
@@ -11,8 +12,7 @@ def list_view():
     """Public list of ongoing, waiting, and completed imaging slots."""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM bookings WHERE status='ongoing'")
-    ongoing = cur.fetchall()
+    ongoing = get_combined_ongoing_slots(cur)
     cur.execute("SELECT * FROM bookings WHERE status='waiting'")
     waiting = cur.fetchall()
     cur.execute("SELECT * FROM bookings WHERE status='completed'")

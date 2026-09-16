@@ -2,6 +2,7 @@ import datetime
 from flask import Blueprint, render_template
 from database import get_db
 from extensions import send_email
+from blueprints.public import get_combined_ongoing_slots
 
 screening_bp = Blueprint("screening", __name__)
 
@@ -11,8 +12,7 @@ def screening_list():
     """Public list of ongoing, waiting, and completed screening slots."""
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM screening_bookings WHERE status='ongoing'")
-    ongoing = cur.fetchall()
+    ongoing = get_combined_ongoing_slots(cur)
     cur.execute("SELECT * FROM screening_bookings WHERE status='waiting'")
     waiting = cur.fetchall()
     cur.execute("SELECT * FROM screening_bookings WHERE status='completed'")
