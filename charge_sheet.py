@@ -230,11 +230,11 @@ def _watermark(canvas, doc):
 def _internal_footer(canvas, doc):
     styles = _styles()
     signature = _internal_signature_block(styles)
-    width, _ = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
+    width, height = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
     signature.drawOn(
         canvas,
         doc.leftMargin + (doc.width - width) / 2,
-        doc.bottomMargin,
+        max(0, doc.bottomMargin - height),
     )
 
 
@@ -246,17 +246,17 @@ def _internal_page(canvas, doc):
 def _external_footer(canvas, doc):
     styles = _styles()
     signature = _external_signature_block(styles)
-    width, _ = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
+    width, height = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
     signature.drawOn(
         canvas,
         doc.leftMargin + (doc.width - width) / 2,
-        doc.bottomMargin,
+        max(0, doc.bottomMargin - height),
     )
 
 
 def _external_signature_block(styles):
     table = Table([
-        [_paragraph("", styles["Small"]), _paragraph("Dr. Somnath Dutta", styles["SmallCenter"])],
+        [_paragraph("", styles["Small"]), _paragraph(SIGNATORY_NAME, styles["SmallCenter"])],
         [_paragraph("", styles["Small"]), _paragraph(
             f"{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
             styles["SmallCenter"],
@@ -275,7 +275,7 @@ def _external_pdf(row, service, category, is_industry):
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
-                            topMargin=10 * mm, bottomMargin=10 * mm)
+                            topMargin=10 * mm, bottomMargin=30 * mm)
     story = []
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET / PROFORMA INVOICE", styles["Institution"]))
@@ -383,7 +383,7 @@ def _internal_pdf(row, service):
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
-                            topMargin=12 * mm, bottomMargin=14 * mm)
+                            topMargin=12 * mm, bottomMargin=30 * mm)
     story = []
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET", styles["Institution"]))
