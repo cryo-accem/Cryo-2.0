@@ -124,6 +124,8 @@ def register_freezing(user_name, pi_name, email, origin, sample_name, grids, fre
         return False, "Please choose a valid freezing date."
     if selected_date < datetime.date.today():
         return False, "Freezing dates in the past cannot be booked."
+    if selected_date.weekday() >= 5:
+        return False, "Freezing slots cannot be booked on Saturdays or Sundays."
 
     conn = get_db()
     cur = conn.cursor()

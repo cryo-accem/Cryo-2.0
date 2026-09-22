@@ -119,6 +119,15 @@ function toggleRegType() {
   document.getElementById('freezing_date').required = type === 'freezing';
   document.getElementById('grids_freezing').required = type === 'freezing';
 }
+const freezingDate = document.getElementById('freezing_date');
+freezingDate.addEventListener('change', () => {
+  const selectedDate = freezingDate.value ? new Date(`${freezingDate.value}T00:00:00`) : null;
+  freezingDate.setCustomValidity(
+    selectedDate && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
+      ? 'Freezing slots cannot be booked on Saturdays or Sundays.'
+      : ''
+  );
+});
 document.querySelectorAll('.reg-type-card').forEach(card => {
   card.addEventListener('click', () => setRegType(card.dataset.value));
 });
@@ -158,15 +167,19 @@ toggleRegType(); toggleEsmField();
       const date = new Date(year, month, day);
       const key = keyForDate(date);
       const details = availability[key] || { booked: 0, remaining: limit, limit };
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'calendar-day';
       if (key < todayKey) button.classList.add('calendar-day--past');
+      if (isWeekend) button.classList.add('calendar-day--unavailable');
       if (details.booked > 0 && details.remaining > 0) button.classList.add('calendar-day--partial');
       if (details.remaining === 0) button.classList.add('calendar-day--full');
       if (key === dateInput.value) button.classList.add('calendar-day--selected');
-      button.disabled = key < todayKey || details.remaining === 0;
-      button.setAttribute('aria-label', `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: ${details.booked} of ${details.limit} grids booked`);
+      button.disabled = key < todayKey || isWeekend || details.remaining === 0;
+      button.setAttribute('aria-label', isWeekend
+        ? `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: Weekend unavailable`
+        : `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: ${details.booked} of ${details.limit} grids booked`);
       const fillPercent = Math.min(100, Math.round((details.booked / details.limit) * 100));
       button.innerHTML = `<span>${day}</span><div class="calendar-meter" aria-hidden="true"><i style="width: ${fillPercent}%"></i></div><small>${details.booked}/${details.limit} booked</small>`;
       button.addEventListener('click', () => {
