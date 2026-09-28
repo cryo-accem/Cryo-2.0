@@ -240,14 +240,28 @@ def _seed_bootstrap_admin(cur):
     if len(password) < 12:
         raise RuntimeError("The bootstrap admin password must be at least 12 characters.")
 
-    cur.execute("SELECT id, role FROM users WHERE username=?", [username])
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bootstrap_admins (
+            username VARCHAR(100) NOT NULL PRIMARY KEY
+        )
+    """)
+    cur.execute("SELECT username FROM bootstrap_admins WHERE username=?", [username])
+    if cur.fetchone():
+        return
+
+    cur.execute(
+        "SELECT id, role FROM users WHERE username=?",
+        [username],
+    )
     existing = cur.fetchone()
     if existing:
         if existing["role"] != "admin":
             raise RuntimeError(
                 "The configured bootstrap admin username already belongs to a non-admin user."
             )
-        return
+        user_id = existing["id"]
+    else:
+        user_id = None
 
     cur.execute(
         "SELECT id FROM users WHERE email=? AND role<>?",
@@ -257,18 +271,22 @@ def _seed_bootstrap_admin(cur):
         raise RuntimeError(
             "The bootstrap admin email is already assigned to a non-admin user."
         )
-    cur.execute(
-        "INSERT INTO users "
-        "(username, email, password_hash, role, must_change_password) "
-        "VALUES (?, ?, ?, ?, ?)",
-        [
-            username,
-            email,
-            generate_password_hash(password, method="pbkdf2:sha256"),
-            "admin",
-            1,
-        ],
-    )
+
+    password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+    if user_id is None:
+        cur.execute(
+            "INSERT INTO users "
+            "(username, email, password_hash, role, must_change_password) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [username, email, password_hash, "admin", 1],
+        )
+    else:
+        cur.execute(
+            "UPDATE users SET email=?, password_hash=?, must_change_password=? "
+            "WHERE id=? AND role=?",
+            [email, password_hash, 1, user_id, "admin"],
+        )
+    cur.execute("INSERT INTO bootstrap_admins (username) VALUES (?)", [username])
 
 
 def _ensure_global_charge_sheet_sequence(cur):

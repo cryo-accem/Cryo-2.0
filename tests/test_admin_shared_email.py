@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 import database
 
@@ -38,21 +38,72 @@ class AdminSharedEmailTests(unittest.TestCase):
                     "UPDATE users SET must_change_password=? WHERE username=?",
                     [0, "convenor"],
                 )
+                cur.execute(
+                    "UPDATE users SET password_hash=? WHERE username=?",
+                    [
+                        generate_password_hash(
+                            "User-Changed-Password-2026!",
+                            method="pbkdf2:sha256",
+                        ),
+                        "convenor",
+                    ],
+                )
                 conn.commit()
                 cur.close()
                 conn.close()
 
+                with patch.dict(os.environ, {
+                    "BOOTSTRAP_ADMIN_PASSWORD": "A-Different-Secret-2026!",
+                }):
+                    database.init_db()
                 database.init_db()
                 conn = database.get_db()
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT COUNT(*) AS count, MAX(must_change_password) AS must_change "
+                    "SELECT COUNT(*) AS count, MAX(must_change_password) AS must_change, "
+                    "MAX(password_hash) AS password_hash "
                     "FROM users WHERE username=?",
                     ["convenor"],
                 )
                 result = cur.fetchone()
                 self.assertEqual(result["count"], 1)
                 self.assertEqual(result["must_change"], 0)
+                self.assertTrue(
+                    check_password_hash(
+                        result["password_hash"], "User-Changed-Password-2026!"
+                    )
+                )
+                cur.close()
+                conn.close()
+
+    def test_bootstrap_updates_existing_admin_account_and_forces_password_change(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "existing-admin.sqlite3")
+            with patch.object(database, "DATABASE_URL", f"sqlite:///{db_path}"):
+                database.init_db()
+                with patch.dict(os.environ, {
+                    "BOOTSTRAP_ADMIN_USERNAME": "admin",
+                    "BOOTSTRAP_ADMIN_EMAIL": "shared@example.com",
+                    "BOOTSTRAP_ADMIN_PASSWORD": "Temporary-Admin-Secret-2026!",
+                }):
+                    database.init_db()
+
+                conn = database.get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT email, password_hash, role, must_change_password "
+                    "FROM users WHERE username=?",
+                    ["admin"],
+                )
+                user = cur.fetchone()
+                self.assertEqual(user["email"], "shared@example.com")
+                self.assertEqual(user["role"], "admin")
+                self.assertEqual(user["must_change_password"], 1)
+                self.assertTrue(
+                    check_password_hash(
+                        user["password_hash"], "Temporary-Admin-Secret-2026!"
+                    )
+                )
                 cur.close()
                 conn.close()
 
