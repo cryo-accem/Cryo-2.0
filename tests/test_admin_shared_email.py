@@ -4,10 +4,58 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from werkzeug.security import check_password_hash
+
 import database
 
 
 class AdminSharedEmailTests(unittest.TestCase):
+    def test_bootstrap_admin_is_created_once_and_requires_password_change(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = os.path.join(temp_dir, "bootstrap.sqlite3")
+            with patch.object(database, "DATABASE_URL", f"sqlite:///{db_path}"), \
+                    patch.dict(os.environ, {
+                        "BOOTSTRAP_ADMIN_USERNAME": "convenor",
+                        "BOOTSTRAP_ADMIN_EMAIL": "shared@example.com",
+                        "BOOTSTRAP_ADMIN_PASSWORD": "Temporary-Secret-123!",
+                    }):
+                database.init_db()
+                conn = database.get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT username, email, role, password_hash, must_change_password "
+                    "FROM users WHERE username=?",
+                    ["convenor"],
+                )
+                user = cur.fetchone()
+                self.assertEqual(user["email"], "shared@example.com")
+                self.assertEqual(user["role"], "admin")
+                self.assertEqual(user["must_change_password"], 1)
+                self.assertTrue(
+                    check_password_hash(user["password_hash"], "Temporary-Secret-123!")
+                )
+                cur.execute(
+                    "UPDATE users SET must_change_password=? WHERE username=?",
+                    [0, "convenor"],
+                )
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                database.init_db()
+                conn = database.get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COUNT(*) AS count, MAX(must_change_password) AS must_change "
+                    "FROM users WHERE username=?",
+                    ["convenor"],
+                )
+                result = cur.fetchone()
+                self.assertEqual(result["count"], 1)
+                self.assertEqual(result["must_change"], 0)
+                cur.close()
+                conn.close()
+
     def test_init_db_migrates_unique_user_email_and_preserves_accounts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             db_path = os.path.join(temp_dir, "legacy.sqlite3")

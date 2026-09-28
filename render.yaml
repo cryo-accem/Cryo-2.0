@@ -8,6 +8,12 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
+      - key: BOOTSTRAP_ADMIN_USERNAME
+        value: convenor
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        value: cryoem.iisc@gmail.com
+      - key: BOOTSTRAP_ADMIN_PASSWORD
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: SECURE_COOKIES

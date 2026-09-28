@@ -201,6 +201,11 @@ def _ensure_password_change_column(cur):
                 "ALTER TABLE users ADD COLUMN must_change_password "
                 "INTEGER NOT NULL DEFAULT 0"
             )
+            cur.execute(
+                "UPDATE users SET must_change_password=? "
+                "WHERE username=? AND role=?",
+                [1, "convenor", "admin"],
+            )
         return
 
     cur.execute(
@@ -214,6 +219,56 @@ def _ensure_password_change_column(cur):
             "ALTER TABLE users ADD COLUMN must_change_password "
             "BOOLEAN NOT NULL DEFAULT FALSE"
         )
+        cur.execute(
+            "UPDATE users SET must_change_password=%s "
+            "WHERE username=%s AND role=%s",
+            [True, "convenor", "admin"],
+        )
+
+
+def _seed_bootstrap_admin(cur):
+    username = os.environ.get("BOOTSTRAP_ADMIN_USERNAME", "").strip().lower()
+    email = os.environ.get("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
+    password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not any((username, email, password)):
+        return
+    if not all((username, email, password)):
+        raise RuntimeError(
+            "BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL, and "
+            "BOOTSTRAP_ADMIN_PASSWORD must all be configured together."
+        )
+    if len(password) < 12:
+        raise RuntimeError("The bootstrap admin password must be at least 12 characters.")
+
+    cur.execute("SELECT id, role FROM users WHERE username=?", [username])
+    existing = cur.fetchone()
+    if existing:
+        if existing["role"] != "admin":
+            raise RuntimeError(
+                "The configured bootstrap admin username already belongs to a non-admin user."
+            )
+        return
+
+    cur.execute(
+        "SELECT id FROM users WHERE email=? AND role<>?",
+        [email, "admin"],
+    )
+    if cur.fetchone():
+        raise RuntimeError(
+            "The bootstrap admin email is already assigned to a non-admin user."
+        )
+    cur.execute(
+        "INSERT INTO users "
+        "(username, email, password_hash, role, must_change_password) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            username,
+            email,
+            generate_password_hash(password, method="pbkdf2:sha256"),
+            "admin",
+            1,
+        ],
+    )
 
 
 def _ensure_global_charge_sheet_sequence(cur):
@@ -556,6 +611,7 @@ def init_db():
     # Completely safe — if no unique index exists, nothing happens.
     _drop_users_email_unique(cur)
     _ensure_password_change_column(cur)
+    _seed_bootstrap_admin(cur)
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
