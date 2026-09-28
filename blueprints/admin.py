@@ -17,7 +17,7 @@ from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
     redirect, url_for, session, flash,
 )
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 from monthly_activity_report import build_monthly_activity_report
 from database import get_db
@@ -47,6 +47,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
     "admin.download_pi_users_csv",
     "admin.download_activity_report",
+    "admin.change_password",
     "admin.logout",
     "admin.datacollecting",
     "admin.load_dc",
@@ -84,6 +85,27 @@ _ALLOWED_ADMIN_ENDPOINTS = {
 @admin_bp.before_app_request
 def check_admin_session():
     if "admin_logged_in" in session and request.endpoint:
+        if session.get("admin_user_id") is not None:
+            conn = get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT must_change_password FROM users WHERE id=? AND role=?",
+                [session["admin_user_id"], "admin"],
+            )
+            user = cur.fetchone()
+            cur.close()
+            conn.close()
+            if not user:
+                session.clear()
+                return redirect(url_for("admin.login"))
+            if user["must_change_password"]:
+                session["must_change_password"] = True
+        if session.get("must_change_password") and request.endpoint not in {
+            "admin.change_password",
+            "admin.logout",
+            "static",
+        }:
+            return redirect(url_for("admin.change_password"))
         if request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS:
             session.pop("admin_logged_in", None)
 
@@ -107,15 +129,68 @@ def login():
             session.clear()
             session.permanent = True
             session["admin_logged_in"] = True
+            session["admin_user_id"] = user["id"]
+            if user["must_change_password"]:
+                session["must_change_password"] = True
+                return redirect(url_for("admin.change_password"))
             return redirect(url_for("admin.panel"))
 
         flash("Invalid username or password.", "login")
     return render_template("admin.html")
 
 
+@admin_bp.route("/change-password", methods=["GET", "POST"])
+def change_password():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    if not session.get("must_change_password"):
+        return redirect(url_for("admin.panel"))
+
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "")
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT password_hash FROM users WHERE id=? AND role=?",
+            [session.get("admin_user_id"), "admin"],
+        )
+        user = cur.fetchone()
+        if not user or not check_password_hash(user["password_hash"], current_password):
+            cur.close()
+            conn.close()
+            flash("Enter your current temporary password correctly.", "password")
+            return render_template("admin_change_password.html")
+        if len(new_password) < 12:
+            cur.close()
+            conn.close()
+            flash("Choose a password with at least 12 characters.", "password")
+            return render_template("admin_change_password.html")
+        if new_password != confirm_password:
+            cur.close()
+            conn.close()
+            flash("The new password and confirmation do not match.", "password")
+            return render_template("admin_change_password.html")
+
+        cur.execute(
+            "UPDATE users SET password_hash=?, must_change_password=? WHERE id=?",
+            [generate_password_hash(new_password, method="pbkdf2:sha256"), 0, session["admin_user_id"]],
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        session.pop("must_change_password", None)
+        flash("Your password has been changed.", "success")
+        return redirect(url_for("admin.panel"))
+
+    return render_template("admin_change_password.html")
+
+
 @admin_bp.route("/logout")
 def logout():
-    session.pop("admin_logged_in", None)
+    session.clear()
     return redirect(url_for("public.index"))
 
 
@@ -1424,23 +1499,23 @@ def _next_charge_sheet_id(cur, origin, completed_date):
         cur.execute(
             "INSERT OR IGNORE INTO charge_sheet_sequences "
             "(academic_year, category, next_number) VALUES (?, ?, 0)",
-            [academic_year, category],
+            [0, "all"],
         )
     else:
         cur.execute(
             "INSERT IGNORE INTO charge_sheet_sequences "
             "(academic_year, category, next_number) VALUES (?, ?, 0)",
-            [academic_year, category],
+            [0, "all"],
         )
     cur.execute(
         "UPDATE charge_sheet_sequences SET next_number=next_number + 1 "
         "WHERE academic_year=? AND category=?",
-        [academic_year, category],
+        [0, "all"],
     )
     cur.execute(
         "SELECT next_number FROM charge_sheet_sequences "
         "WHERE academic_year=? AND category=?",
-        [academic_year, category],
+        [0, "all"],
     )
     sequence = cur.fetchone()["next_number"]
     return f"{academic_year}_{code}_{sequence:04d}"

@@ -157,6 +157,13 @@ def _drop_users_email_unique(cur):
         cur.execute(f'PRAGMA index_info("{index_name}")')
         columns = [row["name"] for row in cur.fetchall()]
         if columns == ["email"]:
+            cur.execute("PRAGMA table_info(users)")
+            existing_columns = {row["name"] for row in cur.fetchall()}
+            password_change_value = (
+                "must_change_password"
+                if "must_change_password" in existing_columns
+                else "0"
+            )
             cur.execute("""
                 CREATE TABLE users_without_email_unique (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,13 +171,14 @@ def _drop_users_email_unique(cur):
                     email         VARCHAR(150),
                     password_hash VARCHAR(255),
                     role          TEXT CHECK(role IN ('user', 'admin')) DEFAULT 'user',
-                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    must_change_password INTEGER NOT NULL DEFAULT 0
                 )
             """)
-            cur.execute("""
+            cur.execute(f"""
                 INSERT INTO users_without_email_unique
-                    (id, username, email, password_hash, role, created_at)
-                SELECT id, username, email, password_hash, role, created_at
+                    (id, username, email, password_hash, role, created_at, must_change_password)
+                SELECT id, username, email, password_hash, role, created_at, {password_change_value}
                 FROM users
             """)
             cur.execute("DROP TABLE users")
@@ -182,6 +190,71 @@ def _drop_users_email_unique(cur):
         ON users (email)
         WHERE role != 'admin' AND email IS NOT NULL
     """)
+
+
+def _ensure_password_change_column(cur):
+    if _is_sqlite_url():
+        cur.execute("PRAGMA table_info(users)")
+        columns = {row["name"] for row in cur.fetchall()}
+        if "must_change_password" not in columns:
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN must_change_password "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        return
+
+    cur.execute(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s "
+        "AND COLUMN_NAME=%s",
+        ["users", "must_change_password"],
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+
+
+def _ensure_global_charge_sheet_sequence(cur):
+    """Seed one shared bill counter without reusing numbers already issued."""
+    latest_number = 75
+    cur.execute(
+        "SELECT next_number FROM charge_sheet_sequences"
+    )
+    latest_number = max(
+        latest_number,
+        max((int(row["next_number"] or 0) for row in cur.fetchall()), default=0),
+    )
+    for table in ("bookings", "screening_bookings", "completed_freezing"):
+        cur.execute(
+            f"SELECT charge_sheet_id FROM {table} "
+            "WHERE charge_sheet_id IS NOT NULL"
+        )
+        for row in cur.fetchall():
+            value = str(row["charge_sheet_id"] or "")
+            suffix = value.rsplit("_", 1)[-1]
+            if suffix.isdigit():
+                latest_number = max(latest_number, int(suffix))
+
+    cur.execute(
+        "SELECT next_number FROM charge_sheet_sequences "
+        "WHERE academic_year=? AND category=?",
+        [0, "all"],
+    )
+    sequence = cur.fetchone()
+    if not sequence:
+        cur.execute(
+            "INSERT INTO charge_sheet_sequences "
+            "(academic_year, category, next_number) VALUES (?, ?, ?)",
+            [0, "all", latest_number],
+        )
+    elif int(sequence["next_number"] or 0) < latest_number:
+        cur.execute(
+            "UPDATE charge_sheet_sequences SET next_number=? "
+            "WHERE academic_year=? AND category=?",
+            [latest_number, 0, "all"],
+        )
 
 
 def init_db():
@@ -476,11 +549,13 @@ def init_db():
                 PRIMARY KEY (academic_year, category)
             )
         """)
+    _ensure_global_charge_sheet_sequence(cur)
 
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
     # Completely safe — if no unique index exists, nothing happens.
     _drop_users_email_unique(cur)
+    _ensure_password_change_column(cur)
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
