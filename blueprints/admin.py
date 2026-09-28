@@ -19,6 +19,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash
 from werkzeug.utils import secure_filename
+from monthly_activity_report import build_monthly_activity_report
 from database import get_db
 from database import _is_sqlite_url
 from extensions import send_email
@@ -45,6 +46,7 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
     "admin.download_pi_users_csv",
+    "admin.download_activity_report",
     "admin.logout",
     "admin.datacollecting",
     "admin.load_dc",
@@ -591,6 +593,61 @@ def _revenue_dashboard(cur):
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
     }
+
+
+def _monthly_report_range() -> tuple[datetime.date, datetime.date]:
+    today = datetime.date.today()
+    preset = request.args.get("range", "this_month")
+    if preset == "this_month":
+        return today.replace(day=1), (today.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
+    if preset == "last_month":
+        end = today.replace(day=1) - datetime.timedelta(days=1)
+        return end.replace(day=1), end
+    if preset == "this_year":
+        return datetime.date(today.year, 1, 1), datetime.date(today.year, 12, 31)
+    if preset != "custom":
+        raise ValueError("Choose a valid report period.")
+
+    try:
+        start = datetime.date.fromisoformat(request.args.get("start_date", ""))
+        end = datetime.date.fromisoformat(request.args.get("end_date", ""))
+    except ValueError:
+        raise ValueError("Choose both a valid start date and end date.") from None
+    if start > end:
+        raise ValueError("The start date must be before or equal to the end date.")
+    return start, end
+
+
+@admin_bp.route("/activity-report.docx")
+def download_activity_report():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    try:
+        start, end = _monthly_report_range()
+    except ValueError as exc:
+        return Response(str(exc), status=400, mimetype="text/plain")
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM bookings WHERE status='completed'")
+    data_collection = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM screening_bookings WHERE status='completed'")
+    screening = [dict(row) for row in cur.fetchall()]
+    cur.execute("SELECT * FROM completed_freezing")
+    freezing = [dict(row) for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+
+    report = build_monthly_activity_report(
+        start, end, data_collection, screening, freezing, HISTORICAL_REVENUE
+    )
+    filename = f"ACCEM-activity-report-{start:%Y-%m-%d}-to-{end:%Y-%m-%d}.docx"
+    return send_file(
+        report,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
 
 # ── Data Collecting Section ──────────────────────────────────────────────────
