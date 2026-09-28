@@ -50,6 +50,24 @@
     </form>
     <strong class="archive-warning">A full backup is emailed to cryoem.iisc@gmail.com before completed records are permanently removed. No archive is saved on this server.</strong>
   </div>
+  <section class="activity-report-panel" aria-labelledby="activity-report-title">
+    <div><span class="chart-kicker">Monthly operations review</span><h2 id="activity-report-title">Download activity report</h2><p>Editable Word report covering completed freezing, clipping, screening and data collection, revenue and grid usage.</p></div>
+    <form class="activity-report-filter" method="get" action="{{ url_for('admin.download_activity_report') }}">
+      <label>Period
+        <select name="range">
+          <option value="this_month">This month</option>
+          <option value="last_month">Last month</option>
+          <option value="this_year">This year</option>
+          <option value="custom">Custom period selection</option>
+        </select>
+      </label>
+      <span class="activity-report-dates" hidden>
+        <label>From date <input type="date" name="start_date"></label>
+        <label>To date <input type="date" name="end_date"></label>
+      </span>
+      <button class="button" type="submit"><i class="fa-solid fa-file-word" aria-hidden="true"></i> Download .docx report</button>
+    </form>
+  </section>
 </section></main>
 <script>
 (() => {
@@ -60,6 +78,21 @@
     const update = () => {
       custom.hidden = range.value !== "custom";
       custom.querySelectorAll("input").forEach((input) => { input.required = range.value === "custom"; });
+    };
+    range.addEventListener("change", update);
+    update();
+  }
+})();
+(() => {
+  const form = document.querySelector(".activity-report-filter");
+  const range = form?.querySelector("[name=range]");
+  const dates = form?.querySelector(".activity-report-dates");
+  if (range && dates) {
+    const update = () => {
+      dates.hidden = range.value !== "custom";
+      dates.querySelectorAll("input").forEach((input) => {
+        input.required = range.value === "custom";
+      });
     };
     range.addEventListener("change", update);
     update();
