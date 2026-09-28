@@ -121,6 +121,69 @@ def _drop_unique_email(cur, table: str):
             print(f"  Could not drop index {idx} on {table}: {e}")
 
 
+def _drop_users_email_unique(cur):
+    """Allow shared admin mailboxes while preserving existing user accounts."""
+    if not _is_sqlite_url():
+        _drop_unique_email(cur, "users")
+        cur.execute(
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s "
+            "AND COLUMN_NAME=%s",
+            ["users", "email_unique_guard"],
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN email_unique_guard VARCHAR(150) "
+                "GENERATED ALWAYS AS "
+                "(CASE WHEN role = 'admin' THEN NULL ELSE email END) STORED"
+            )
+        cur.execute(
+            "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s AND INDEX_NAME=%s",
+            ["users", "users_unique_non_admin_email"],
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "CREATE UNIQUE INDEX users_unique_non_admin_email "
+                "ON users (email_unique_guard)"
+            )
+        return
+
+    cur.execute("PRAGMA index_list(users)")
+    for index in cur.fetchall():
+        if not index["unique"]:
+            continue
+        index_name = str(index["name"]).replace('"', '""')
+        cur.execute(f'PRAGMA index_info("{index_name}")')
+        columns = [row["name"] for row in cur.fetchall()]
+        if columns == ["email"]:
+            cur.execute("""
+                CREATE TABLE users_without_email_unique (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username      VARCHAR(100),
+                    email         VARCHAR(150),
+                    password_hash VARCHAR(255),
+                    role          TEXT CHECK(role IN ('user', 'admin')) DEFAULT 'user',
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cur.execute("""
+                INSERT INTO users_without_email_unique
+                    (id, username, email, password_hash, role, created_at)
+                SELECT id, username, email, password_hash, role, created_at
+                FROM users
+            """)
+            cur.execute("DROP TABLE users")
+            cur.execute("ALTER TABLE users_without_email_unique RENAME TO users")
+            break
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS users_unique_non_admin_email
+        ON users (email)
+        WHERE role != 'admin' AND email IS NOT NULL
+    """)
+
+
 def init_db():
     """
     Create tables if not exist. Never modifies existing data.
@@ -136,7 +199,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 username      VARCHAR(100),
-                email         VARCHAR(150) UNIQUE,
+                email         VARCHAR(150),
                 password_hash VARCHAR(255),
                 role          TEXT CHECK(role IN ('user', 'admin')) DEFAULT 'user',
                 created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -212,10 +275,13 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id            INT AUTO_INCREMENT PRIMARY KEY,
                 username      VARCHAR(100),
-                email         VARCHAR(150) UNIQUE,
+                email         VARCHAR(150),
                 password_hash VARCHAR(255),
                 role          ENUM('user','admin') DEFAULT 'user',
-                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                email_unique_guard VARCHAR(150)
+                    GENERATED ALWAYS AS
+                    (CASE WHEN role = 'admin' THEN NULL ELSE email END) STORED
             )
         """)
 
@@ -414,6 +480,7 @@ def init_db():
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
     # Completely safe — if no unique index exists, nothing happens.
+    _drop_users_email_unique(cur)
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
