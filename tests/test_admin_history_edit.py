@@ -120,6 +120,78 @@ class AdminHistoryEditTests(unittest.TestCase):
             cur.close()
             conn.close()
 
+    def test_edit_accepts_database_formatted_whole_number_slots(self):
+        response = self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Formatted Slot User",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Corrected from production format",
+                "grids": "2",
+                "days": "2",
+                "completion_date": "2026-09-10",
+                "actual_slots": "3.000",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clipped_grids": "0",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Booking details updated and charges recalculated.", response.data)
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT user_name, sample_name, actual_slots, total_billed FROM bookings WHERE id=?",
+                [1],
+            )
+            booking = cur.fetchone()
+            self.assertEqual(booking["user_name"], "Formatted Slot User")
+            self.assertEqual(booking["sample_name"], "Corrected from production format")
+            self.assertEqual(Decimal(str(booking["actual_slots"])), Decimal("3.000"))
+            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("53100.00"))
+            cur.close()
+            conn.close()
+
+    def test_edit_rejects_fractional_actual_slots(self):
+        response = self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Original User",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Original sample",
+                "grids": "2",
+                "days": "2",
+                "completion_date": "2026-09-10",
+                "actual_slots": "1.500",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clipped_grids": "0",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertIn(b"Actual slots must be a positive whole number.", response.data)
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT sample_name FROM bookings WHERE id=?", [1])
+            self.assertEqual(cur.fetchone()["sample_name"], "Original sample")
+            cur.close()
+            conn.close()
+
     def test_preview_uses_edited_values_and_clipped_grid_calculation(self):
         self.client.post(
             "/admin/history/imaging/1/edit",

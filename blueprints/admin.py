@@ -1645,7 +1645,16 @@ def edit_completed_booking(service_key, booking_id):
             days = parse_number_of_grids(request.form.get("days"))
             if days > 4 or requested_grids > 4:
                 raise ValueError("Requested days and grids must not exceed 4.")
-            actual_slots = parse_number_of_grids(request.form.get("actual_slots"))
+            try:
+                actual_slots = Decimal(request.form.get("actual_slots", "").strip())
+                if (
+                    not actual_slots.is_finite()
+                    or actual_slots <= 0
+                    or actual_slots != actual_slots.to_integral_value()
+                ):
+                    raise ValueError("Actual slots must be a positive whole number.")
+            except InvalidOperation:
+                raise ValueError("Actual slots must be a positive whole number.") from None
         else:
             if requested_grids > 8:
                 raise ValueError("Requested freezing grids must not exceed 8.")
