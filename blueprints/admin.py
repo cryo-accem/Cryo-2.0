@@ -237,6 +237,7 @@ def panel():
     freezing_active = cur.fetchone()["count"]
     pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
+    yearly_comparison = _year_over_year_revenue_chart(cur)
     cur.close()
     conn.close()
     pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd"]
@@ -266,6 +267,7 @@ def panel():
         waiting_total=waiting_total,
         pending_payments=pending_payments,
         revenue=revenue,
+        yearly_comparison=yearly_comparison,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
 
@@ -322,6 +324,153 @@ def _dashboard_pending_payments(cur):
         "debit_head_count": sum(
             item["tracking_label"] == "Debit head pending" for item in pending_rows
         ),
+    }
+
+
+def _year_over_year_revenue_chart(cur):
+    today = datetime.date.today()
+    current_year = today.year
+    previous_year = current_year - 1
+    monthly = {
+        current_year: [Decimal("0.00") for _ in range(12)],
+        previous_year: [Decimal("0.00") for _ in range(12)],
+    }
+    years_with_data = set()
+    date_range_start = datetime.date(previous_year, 1, 1)
+    date_range_end = datetime.date(current_year + 1, 1, 1)
+
+    sources = (
+        ("bookings", "completion_date", " WHERE status='completed'"),
+        ("screening_bookings", "completion_date", " WHERE status='completed'"),
+        ("completed_freezing", "completed_at", ""),
+    )
+    for table, date_column, where in sources:
+        cur.execute(
+            f"""SELECT pi_name, {date_column} AS revenue_date, grand_total,
+                       total_billed, gst_amount, subtotal, slot_charge,
+                       freezing_charge, clipping_charge, handling_charge,
+                       processing_charge
+                FROM {table}{where}"""
+        )
+        for row in cur.fetchall():
+            if is_non_billable_booking(row):
+                continue
+            revenue_date = _parse_date(str(row["revenue_date"] or "")[:10])
+            if (
+                not revenue_date
+                or revenue_date < date_range_start
+                or revenue_date >= date_range_end
+            ):
+                continue
+            years_with_data.add(revenue_date.year)
+            gross = _money(row["grand_total"] or row["total_billed"])
+            gst = _money(row["gst_amount"])
+            if not gross:
+                subtotal = _money(row["subtotal"])
+                if not subtotal:
+                    subtotal = sum(
+                        (
+                            _money(row[column])
+                            for column in (
+                                "slot_charge",
+                                "freezing_charge",
+                                "clipping_charge",
+                                "handling_charge",
+                                "processing_charge",
+                            )
+                        ),
+                        Decimal("0.00"),
+                    )
+                gross = subtotal + gst
+            monthly[revenue_date.year][revenue_date.month - 1] += gross - gst
+
+    for month, amount in HISTORICAL_REVENUE:
+        year_text, month_text = month.split("-", 1)
+        year, month_number = int(year_text), int(month_text)
+        if year in monthly:
+            years_with_data.add(year)
+            monthly[year][month_number - 1] += amount
+
+    current_month = today.month
+    previous_cumulative = []
+    current_cumulative = []
+    previous_total = Decimal("0.00")
+    current_total = Decimal("0.00")
+    for index in range(12):
+        previous_total += monthly[previous_year][index]
+        current_total += monthly[current_year][index]
+        previous_cumulative.append(previous_total)
+        if index < current_month:
+            current_cumulative.append(current_total)
+
+    chart_width = 960
+    chart_height = 300
+    left, right, top, bottom = 52, 944, 20, 252
+    max_value = max(
+        max(previous_cumulative, default=Decimal("0")),
+        max(current_cumulative, default=Decimal("0")),
+        Decimal("1"),
+    )
+
+    def points(values):
+        return [
+            {
+                "x": left + index * (right - left) / 11,
+                "y": bottom
+                - float(value / max_value) * (bottom - top),
+                "value": value.quantize(Decimal("0.01")),
+                "label": datetime.date(current_year, index + 1, 1).strftime("%b"),
+            }
+            for index, value in enumerate(values)
+        ]
+
+    previous_points = points(previous_cumulative)
+    current_points = points(current_cumulative)
+    previous_points = previous_points[:current_month]
+    previous_total = previous_cumulative[current_month - 1]
+    current_total = current_cumulative[-1]
+    change = current_total - previous_total
+    comparison_available = previous_year in years_with_data
+    return {
+        "current_year": current_year,
+        "previous_year": previous_year,
+        "current_month": current_month,
+        "current_points": current_points,
+        "previous_points": previous_points if comparison_available else [],
+        "current_line": " ".join(
+            f"{point['x']:.1f},{point['y']:.1f}" for point in current_points
+        ),
+        "previous_line": (
+            " ".join(
+                f"{point['x']:.1f},{point['y']:.1f}" for point in previous_points
+            )
+            if comparison_available else ""
+        ),
+        "current_area": (
+            f"{current_points[0]['x']:.1f},{bottom} "
+            + " ".join(
+                f"{point['x']:.1f},{point['y']:.1f}" for point in current_points
+            )
+            + f" {current_points[-1]['x']:.1f},{bottom}"
+        ),
+        "current_total": current_total.quantize(Decimal("0.01")),
+        "previous_total": previous_total.quantize(Decimal("0.01")),
+        "same_period_previous_total": previous_total.quantize(Decimal("0.01")),
+        "change": change.quantize(Decimal("0.01")),
+        "change_is_positive": change >= 0,
+        "comparison_available": comparison_available,
+        "current_available": current_year in years_with_data,
+        "max_value": max_value,
+        "chart_width": chart_width,
+        "chart_height": chart_height,
+        "left": left,
+        "right": right,
+        "top": top,
+        "bottom": bottom,
+        "month_labels": [
+            datetime.date(current_year, month, 1).strftime("%b")
+            for month in range(1, 13)
+        ],
     }
 
 

@@ -1,3 +1,4 @@
+import datetime
 import os
 import tempfile
 import unittest
@@ -108,6 +109,47 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb974,950.00", response.data)
         self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
+
+    def test_dashboard_renders_current_and_previous_year_cumulative_comparison(self):
+        current_year = datetime.date.today().year
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            for year, amount, user in (
+                (current_year - 1, "10000.00", "Previous year chart"),
+                (current_year, "12000.00", "Current year chart"),
+            ):
+                cur.execute(
+                    """INSERT INTO bookings
+                       (user_name, pi_name, email, origin, sample_name, status,
+                        completion_date, total_billed)
+                       VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                    (
+                        user,
+                        "Comparison PI",
+                        f"{year}@example.com",
+                        "academic",
+                        "Comparison sample",
+                        f"{year}-01-15",
+                        amount,
+                    ),
+                )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        response = self.client.get("/admin/panel")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Cumulative net revenue", response.data)
+        self.assertIn(str(current_year).encode(), response.data)
+        self.assertIn(str(current_year - 1).encode(), response.data)
+        self.assertIn(b"class=\"yearly-comparison__line is-current\"", response.data)
+        self.assertIn(b"class=\"yearly-comparison__line is-previous\"", response.data)
+        self.assertIn(
+            f"{current_year - 1} cumulative through Jan".encode(), response.data
+        )
+        self.assertIn(b"10,000.00", response.data)
 
 
 if __name__ == "__main__":

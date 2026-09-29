@@ -33,6 +33,52 @@
     <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values only.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields" {% if revenue.preset != 'custom' %}hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
     <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
     <div class="revenue-cards">{% for label, key in [('Net Revenue','net'),('GST','gst'),('Gross Billed','gross'),('Amount Billed','billed'),('Amount Received','received'),('Outstanding','outstanding'),('Completed Bookings','bookings'),('Actual 24-hour Slots','slots'),('Actual Grids','grids')] %}<div class="revenue-card"><span>{{ label }}</span><strong>{% if key in ['net','gst','gross','billed','received','outstanding'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>{% endfor %}</div>
+    <section class="yearly-comparison" aria-labelledby="yearly-comparison-title">
+      <div class="yearly-comparison__heading">
+        <div>
+          <span class="chart-kicker">Year-over-year trend</span>
+          <h3 id="yearly-comparison-title">Cumulative net revenue</h3>
+          <p>Current year through {{ yearly_comparison.month_labels[yearly_comparison.current_month - 1] }} compared with the same months last year. Net revenue excludes GST.{% if not yearly_comparison.comparison_available %} No revenue records are available for {{ yearly_comparison.previous_year }}, so a year-over-year comparison cannot be calculated.{% endif %}</p>
+        </div>
+        {% if yearly_comparison.comparison_available %}
+        <div class="yearly-comparison__change {{ 'is-positive' if yearly_comparison.change_is_positive else 'is-negative' }}">
+          <strong>{{ '+' if yearly_comparison.change_is_positive else '−' }}₹{{ "{:,.2f}".format(yearly_comparison.change|abs) }}</strong>
+          <span>vs same period last year</span>
+        </div>
+        {% endif %}
+      </div>
+      <div class="yearly-comparison__legend" aria-label="Chart legend">
+        <span><i class="yearly-comparison__dot is-current" aria-hidden="true"></i>{{ yearly_comparison.current_year }} current · ₹{{ "{:,.2f}".format(yearly_comparison.current_total) }}{% if not yearly_comparison.current_available %} · No records{% endif %}</span>
+        <span><i class="yearly-comparison__dot is-previous" aria-hidden="true"></i>{{ yearly_comparison.previous_year }} previous · {% if yearly_comparison.comparison_available %}₹{{ "{:,.2f}".format(yearly_comparison.previous_total) }}{% else %}No records{% endif %}</span>
+      </div>
+      <div class="yearly-comparison__plot">
+        <svg viewBox="0 0 {{ yearly_comparison.chart_width }} {{ yearly_comparison.chart_height }}" role="img" aria-label="Cumulative net revenue comparison: {{ yearly_comparison.current_year }} through {{ yearly_comparison.month_labels[yearly_comparison.current_month - 1] }} versus the same period in {{ yearly_comparison.previous_year }}">
+          {% for tick in range(5) %}
+          {% set tick_y = yearly_comparison.bottom - tick * (yearly_comparison.bottom - yearly_comparison.top) / 4 %}
+          {% set tick_value = yearly_comparison.max_value * tick / 4 %}
+          <line class="yearly-comparison__grid" x1="{{ yearly_comparison.left }}" y1="{{ tick_y }}" x2="{{ yearly_comparison.right }}" y2="{{ tick_y }}"></line>
+          <text class="yearly-comparison__axis-label" x="{{ yearly_comparison.left - 8 }}" y="{{ tick_y + 4 }}" text-anchor="end">₹{{ "{:,.0f}".format(tick_value) }}</text>
+          {% endfor %}
+          <polygon class="yearly-comparison__area" points="{{ yearly_comparison.current_area }}"></polygon>
+          {% if yearly_comparison.comparison_available %}
+          <polyline class="yearly-comparison__line is-previous" points="{{ yearly_comparison.previous_line }}"></polyline>
+          {% endif %}
+          <polyline class="yearly-comparison__line is-current" points="{{ yearly_comparison.current_line }}"></polyline>
+          {% if yearly_comparison.comparison_available %}
+          {% for point in yearly_comparison.previous_points %}
+          <circle class="yearly-comparison__point is-previous" cx="{{ point.x }}" cy="{{ point.y }}" r="3"><title>{{ yearly_comparison.previous_year }} cumulative through {{ point.label }}: ₹{{ "{:,.2f}".format(point.value) }}</title></circle>
+          {% endfor %}
+          {% endif %}
+          {% for point in yearly_comparison.current_points %}
+          <circle class="yearly-comparison__point is-current" cx="{{ point.x }}" cy="{{ point.y }}" r="4"><title>{{ yearly_comparison.current_year }} cumulative through {{ point.label }}: ₹{{ "{:,.2f}".format(point.value) }}</title></circle>
+          {% endfor %}
+          {% for label in yearly_comparison.month_labels %}
+          {% set month_x = yearly_comparison.left + loop.index0 * (yearly_comparison.right - yearly_comparison.left) / 11 %}
+          <text class="yearly-comparison__month" x="{{ month_x }}" y="{{ yearly_comparison.bottom + 22 }}" text-anchor="middle">{{ label }}</text>
+          {% endfor %}
+        </svg>
+      </div>
+    </section>
     <div class="revenue-charts">
       <section class="revenue-chart-card"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
       <section class="revenue-chart-card"><h3>Revenue by user category</h3>{% for item in revenue.by_category %}<div class="revenue-row"><span>{{ item.label }}</span><strong>₹{{ "{:,.2f}".format(item.value) }}</strong></div>{% endfor %}</section>

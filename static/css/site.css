@@ -487,6 +487,30 @@ a { color: inherit; }
 .revenue-card:nth-child(3) { border-top: 3px solid #32a889; }
 .revenue-card:nth-child(4) { border-top: 3px solid #7d6bb5; }
 .revenue-card:nth-child(5), .revenue-card:nth-child(6) { border-top: 3px solid #55aec5; }
+.yearly-comparison { margin-top: 20px; padding: 22px 24px 16px; overflow: hidden; border: 1px solid #25282d; border-radius: 16px; background: #17191d; color: #f8fafc; box-shadow: 0 12px 28px rgba(8, 15, 25, .16); }
+.yearly-comparison__heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; }
+.yearly-comparison__heading h3 { margin: 5px 0 6px; color: #fff; font-size: 20px; letter-spacing: -.025em; }
+.yearly-comparison__heading p { max-width: 600px; margin: 0; color: #aab2ba; font-size: 11px; line-height: 1.5; }
+.yearly-comparison .chart-kicker { color: #ff922e; }
+.yearly-comparison__change { display: grid; flex: 0 0 auto; gap: 4px; text-align: right; }
+.yearly-comparison__change strong { color: #ff922e; font-size: 22px; line-height: 1.1; }
+.yearly-comparison__change.is-negative strong { color: #c5cbd1; }
+.yearly-comparison__change span { color: #aab2ba; font-size: 9px; font-weight: 700; }
+.yearly-comparison__legend { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 18px; color: #e7eaee; font-size: 10px; font-weight: 700; }
+.yearly-comparison__legend > span { display: inline-flex; align-items: center; gap: 7px; }
+.yearly-comparison__dot { width: 9px; height: 9px; border-radius: 50%; background: #ff922e; box-shadow: 0 0 10px rgba(255, 146, 46, .55); }
+.yearly-comparison__dot.is-previous { background: #a9adb2; box-shadow: none; }
+.yearly-comparison__plot { width: 100%; overflow-x: auto; }
+.yearly-comparison__plot svg { display: block; width: 100%; min-width: 650px; height: auto; margin-top: 8px; overflow: visible; }
+.yearly-comparison__grid { stroke: #34383e; stroke-width: 1; stroke-dasharray: 3 6; }
+.yearly-comparison__axis-label, .yearly-comparison__month { fill: #939ba3; font-family: inherit; font-size: 10px; }
+.yearly-comparison__month { font-size: 9px; }
+.yearly-comparison__area { fill: rgba(255, 146, 46, .12); }
+.yearly-comparison__line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; }
+.yearly-comparison__line.is-current { stroke: #ff922e; filter: drop-shadow(0 0 5px rgba(255, 146, 46, .42)); }
+.yearly-comparison__line.is-previous { stroke: #a9adb2; }
+.yearly-comparison__point.is-current { fill: #ff922e; stroke: #17191d; stroke-width: 2; }
+.yearly-comparison__point.is-previous { fill: #a9adb2; stroke: #17191d; stroke-width: 2; }
 .revenue-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
 .revenue-chart-card { min-width: 0; min-height: 220px; padding: 20px; border: 1px solid #dfebef; border-radius: 14px; background: rgba(255,255,255,.82); }
 .revenue-chart-card h3 { margin: 0 0 16px; color: var(--navy); font-size: 15px; letter-spacing: -.015em; }
