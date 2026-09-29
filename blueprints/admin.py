@@ -1840,6 +1840,7 @@ def send_charge_sheet(service_key, booking_id):
             grid_source, grid_type,
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
+            clipped_grids=row.get("clipped_grids") or 0,
             normal_grids=normal_grids,
             gold_grids=gold_grids,
         )
@@ -1956,6 +1957,7 @@ def preview_charge_sheet(service_key, booking_id):
             grid_source, grid_type,
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
+            clipped_grids=row.get("clipped_grids") or 0,
             normal_grids=normal_grids,
             gold_grids=gold_grids,
         )
@@ -2013,6 +2015,7 @@ def send_combined_charge_sheet():
                 row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
                 grid_source, grid_type, row.get("actual_slots") or 1,
                 bool(row.get("processing_requested")),
+                clipped_grids=row.get("clipped_grids") or 0,
                 normal_grids=normal_grids,
                 gold_grids=gold_grids,
             ))

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import tempfile
@@ -118,6 +119,140 @@ class AdminHistoryEditTests(unittest.TestCase):
             self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("38940.00"))
             cur.close()
             conn.close()
+
+    def test_preview_uses_edited_values_and_clipped_grid_calculation(self):
+        self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Edited For Preview",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Updated sample",
+                "grids": "2",
+                "days": "2",
+                "completion_date": "2026-09-10",
+                "actual_slots": "2",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clipped_grids": "1",
+            },
+            follow_redirects=True,
+        )
+
+        with patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf:
+            response = self.client.post(
+                "/admin/charge-sheet/imaging/1/preview",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "grid_source": "facility",
+                    "grid_type": "normal_holey_carbon",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        edited_row = make_pdf.call_args.args[0]
+        self.assertEqual(edited_row["user_name"], "Edited For Preview")
+        self.assertEqual(edited_row["sample_name"], "Updated sample")
+        self.assertEqual(str(edited_row["actual_slots"]), "2")
+        self.assertEqual(edited_row["clipped_grids"], 1)
+        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
+        self.assertEqual(Decimal(str(edited_row["slot_charge"])), Decimal("24000.00"))
+        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
+
+    def test_sent_charge_sheet_uses_edited_values_and_clipped_grid_calculation(self):
+        self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Edited For Sending",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Updated sample",
+                "grids": "2",
+                "days": "2",
+                "completion_date": "2026-09-10",
+                "actual_slots": "2",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clipped_grids": "1",
+            },
+            follow_redirects=True,
+        )
+
+        with (
+            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
+            patch("blueprints.admin.send_email"),
+        ):
+            response = self.client.post(
+                "/admin/charge-sheet/imaging/1",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "grid_source": "facility",
+                    "grid_type": "normal_holey_carbon",
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        sent_row = make_pdf.call_args.args[0]
+        self.assertEqual(sent_row["user_name"], "Edited For Sending")
+        self.assertEqual(sent_row["sample_name"], "Updated sample")
+        self.assertEqual(str(sent_row["actual_slots"]), "2")
+        self.assertEqual(sent_row["clipped_grids"], 1)
+        self.assertEqual(Decimal(str(sent_row["clip_base_charge"])), Decimal("1250.00"))
+        self.assertEqual(Decimal(str(sent_row["slot_charge"])), Decimal("24000.00"))
+        self.assertEqual(Decimal(str(sent_row["total_billed"])), Decimal("37465.00"))
+
+    def test_combined_charge_sheet_uses_edited_clipped_grid_calculation(self):
+        self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Edited For Combined",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Updated sample",
+                "grids": "2",
+                "days": "2",
+                "completion_date": "2026-09-10",
+                "actual_slots": "2",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clipped_grids": "1",
+            },
+            follow_redirects=True,
+        )
+
+        with (
+            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
+            patch("blueprints.admin.send_email"),
+        ):
+            response = self.client.post(
+                "/admin/charge-sheet/combined",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "selected_slots": json.dumps([{"service_key": "imaging", "booking_id": 1}]),
+                },
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        combined_row = make_pdf.call_args.args[0]
+        edited_row = combined_row["combined_items"][0]
+        self.assertEqual(edited_row["user_name"], "Edited For Combined")
+        self.assertEqual(edited_row["clipped_grids"], 1)
+        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
+        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
 
     def test_sent_booking_cannot_be_edited(self):
         response = self.client.post(
