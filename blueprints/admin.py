@@ -600,7 +600,7 @@ def _revenue_dashboard(cur):
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
                        handling_charge, subtotal, processing_charge, gst_amount,
-                       grand_total, total_billed, amount_received
+                       grand_total, total_billed, amount_received, payment_status
                 FROM {table}
                 WHERE status='completed'"""
         )
@@ -615,7 +615,7 @@ def _revenue_dashboard(cur):
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
                   handling_charge, subtotal, processing_charge, gst_amount,
-                  grand_total, total_billed, amount_received
+                  grand_total, total_billed, amount_received, payment_status
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
@@ -654,7 +654,13 @@ def _revenue_dashboard(cur):
         totals["gst"] += gst
         totals["gross"] += gross
         billed = _money(row["total_billed"] or gross)
-        received = _money(row["amount_received"])
+        recorded_received = row["amount_received"]
+        payment_status = (row["payment_status"] or "").strip().casefold()
+        received = _money(
+            recorded_received
+            if recorded_received is not None
+            else billed if payment_status == "payment verified" else 0
+        )
         totals["billed"] += billed
         totals["received"] += received
         totals["outstanding"] += max(billed - received, Decimal("0"))

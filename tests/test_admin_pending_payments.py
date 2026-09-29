@@ -84,6 +84,15 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertNotIn(b"Paid User", response.data)
         self.assertNotIn(b"Proof User", response.data)
 
+    def test_accounting_counts_verified_bills_as_received_when_amount_is_blank(self):
+        response = self.client.get(
+            "/admin/panel?range=custom&start=2026-09-01&end=2026-09-30"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb9700.00", response.data)
+        self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()
