@@ -135,11 +135,24 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
     def test_dashboard_omits_percentage_when_the_previous_year_has_no_revenue(self):
         response = self.client.get(
-            "/admin/panel?range=custom&start=2026-01-01&end=2026-01-31"
+            "/admin/panel?range=custom&start=2018-01-01&end=2018-01-31"
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"No previous-year revenue to compare", response.data)
+
+    def test_dashboard_uses_the_supplied_2025_annual_revenue(self):
+        annual_response = self.client.get(
+            "/admin/panel?period=annual&range=custom&start=2025-01-01&end=2025-12-31"
+        )
+        comparison_response = self.client.get(
+            "/admin/panel?range=custom&start=2026-01-01&end=2026-01-31"
+        )
+
+        self.assertEqual(annual_response.status_code, 200)
+        self.assertIn(b"\xe2\x82\xb9553,500.00", annual_response.data)
+        self.assertEqual(comparison_response.status_code, 200)
+        self.assertIn(b"vs 2025 annual revenue", comparison_response.data)
 
 
 if __name__ == "__main__":

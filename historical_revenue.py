@@ -26,6 +26,11 @@ HISTORICAL_REVENUE = (
     ("2024-09", Decimal("79480")), ("2024-10", Decimal("33500")),
 )
 
+# The supplied 2025 figure is annual only; no monthly allocation is available.
+HISTORICAL_ANNUAL_REVENUE = {
+    2025: Decimal("553500"),
+}
+
 HISTORICAL_CATEGORY_TOTALS = {
     "Internal": Decimal("572000"),
     "External/Academic": Decimal("506092"),

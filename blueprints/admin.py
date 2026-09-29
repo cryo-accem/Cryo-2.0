@@ -32,7 +32,8 @@ from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import PI_USERS
 from historical_revenue import (
-    HISTORICAL_REVENUE, HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
+    HISTORICAL_REVENUE, HISTORICAL_ANNUAL_REVENUE,
+    HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
 )
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -751,6 +752,20 @@ def _revenue_dashboard(cur):
             period_key = month
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
+    comparison_label = "vs same period last year"
+    for year, amount in HISTORICAL_ANNUAL_REVENUE.items():
+        year_start = datetime.date(year, 1, 1)
+        year_end = datetime.date(year, 12, 31)
+        if (not start or start <= year_start) and (not end or end >= year_end):
+            totals["net"] += amount
+            totals["gross"] += amount
+            totals["billed"] += amount
+            if period == "annual":
+                monthly.setdefault(str(year), {"net": Decimal("0"), "slots": Decimal("0")})
+                monthly[str(year)]["net"] += amount
+        if previous_start.year == year and previous_end.year == year:
+            comparison_previous = amount
+            comparison_label = f"vs {year} annual revenue"
     if not start and not end:
         for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
             by_category[category] += amount
@@ -793,6 +808,7 @@ def _revenue_dashboard(cur):
         "start": start.isoformat() if start else "",
         "end": end.isoformat() if end else "",
         "comparison_change_pct": comparison_change_pct,
+        "comparison_label": comparison_label,
         "comparison_previous_height": comparison_previous_height,
         "comparison_current_height": comparison_current_height,
         "totals": {key: value.quantize(Decimal("0.01")) for key, value in totals.items()},
