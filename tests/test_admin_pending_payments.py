@@ -1,4 +1,3 @@
-import datetime
 import os
 import tempfile
 import unittest
@@ -110,7 +109,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb974,950.00", response.data)
         self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
 
-    def test_dashboard_shows_percentage_change_from_the_same_period_last_year(self):
+    def test_dashboard_bar_chart_uses_the_selected_period_and_date_range(self):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
@@ -131,20 +130,24 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"+50.0%", response.data)
-        self.assertIn(b"vs same period last year", response.data)
+        self.assertIn(b"Monthly net revenue bar chart", response.data)
+        self.assertIn(b'title="2024-01: \xe2\x82\xb945,000.00"', response.data)
+        self.assertNotIn(b"Revenue change", response.data)
 
-    def test_dashboard_omits_percentage_when_the_previous_year_has_no_revenue(self):
+    def test_dashboard_shows_empty_chart_when_selected_period_has_no_revenue(self):
         response = self.client.get(
             "/admin/panel?range=custom&start=2018-01-01&end=2018-01-31"
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"No previous-year revenue to compare", response.data)
+        self.assertIn(b"No completed revenue in this period.", response.data)
 
-    def test_dashboard_uses_the_supplied_2025_annual_revenue(self):
+    def test_dashboard_sums_supplied_fiscal_year_monthly_revenue(self):
         annual_response = self.client.get(
-            "/admin/panel?period=annual&range=custom&start=2025-01-01&end=2025-12-31"
+            "/admin/panel?period=annual&range=custom&start=2025-04-01&end=2026-03-31"
+        )
+        monthly_response = self.client.get(
+            "/admin/panel?period=monthly&range=custom&start=2025-01-01&end=2025-01-31"
         )
         comparison_response = self.client.get(
             "/admin/panel?range=custom&start=2026-01-01&end=2026-01-31"
@@ -152,10 +155,26 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
         self.assertEqual(annual_response.status_code, 200)
         self.assertIn(b"\xe2\x82\xb9553,500.00", annual_response.data)
+        self.assertIn(b"Annual net revenue bar chart", annual_response.data)
+        self.assertIn(b'title="FY 2025-26: \xe2\x82\xb9553,500.00"', annual_response.data)
+        self.assertEqual(monthly_response.status_code, 200)
+        self.assertIn(b'title="2025-01: \xe2\x82\xb90.00"', monthly_response.data)
         self.assertEqual(comparison_response.status_code, 200)
-        self.assertIn(b"vs 2025 annual revenue", comparison_response.data)
 
-    def test_dashboard_advances_the_year_and_compares_matching_year_to_date(self):
+    def test_dashboard_uses_supplied_2026_monthly_revenue_and_zeroes(self):
+        february_response = self.client.get(
+            "/admin/panel?range=custom&start=2026-02-01&end=2026-02-28"
+        )
+        may_response = self.client.get(
+            "/admin/panel?range=custom&start=2026-05-01&end=2026-05-31"
+        )
+
+        self.assertEqual(february_response.status_code, 200)
+        self.assertIn(b'title="2026-02: \xe2\x82\xb9167,000.00"', february_response.data)
+        self.assertEqual(may_response.status_code, 200)
+        self.assertIn(b'title="2026-05: \xe2\x82\xb90.00"', may_response.data)
+
+    def test_dashboard_plots_the_specified_custom_year(self):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
@@ -179,19 +198,15 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             cur.close()
             conn.close()
 
-        class FrozenDate(datetime.date):
-            @classmethod
-            def today(cls):
-                return cls(2027, 9, 29)
-
-        with patch("blueprints.admin.datetime.date", FrozenDate):
-            response = self.client.get("/admin/panel")
+        response = self.client.get(
+            "/admin/panel?period=annual&range=custom&start=2027-01-01&end=2027-09-29"
+        )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"+100.0%", response.data)
-        self.assertIn(b"vs same period last year", response.data)
+        self.assertIn(b"Annual net revenue bar chart", response.data)
+        self.assertIn(b'title="FY 2027-28: \xe2\x82\xb98,200.00"', response.data)
 
-    def test_detailed_prior_year_revenue_takes_precedence_over_annual_fallback(self):
+    def test_selected_year_bar_chart_uses_completed_booking_revenue(self):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
@@ -220,8 +235,8 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"+510.0%", response.data)
-        self.assertIn(b"vs same period last year", response.data)
+        self.assertIn(b"Monthly net revenue bar chart", response.data)
+        self.assertIn(b'title="2026-09: \xe2\x82\xb96,100.00"', response.data)
 
 
 if __name__ == "__main__":

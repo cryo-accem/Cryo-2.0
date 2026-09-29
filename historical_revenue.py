@@ -26,10 +26,22 @@ HISTORICAL_REVENUE = (
     ("2024-09", Decimal("79480")), ("2024-10", Decimal("33500")),
 )
 
-# The supplied 2025 figure is annual only; no monthly allocation is available.
-HISTORICAL_ANNUAL_REVENUE = {
-    2025: Decimal("553500"),
-}
+# Monthly historical revenue supplied for 2025 and 2026. Months not listed in
+# the source values are explicitly recorded as zero.
+HISTORICAL_REVENUE += (
+    ("2025-01", Decimal("0")), ("2025-02", Decimal("0")),
+    ("2025-03", Decimal("0")), ("2025-04", Decimal("0")),
+    ("2025-05", Decimal("0")), ("2025-06", Decimal("104000")),
+    ("2025-07", Decimal("0")), ("2025-08", Decimal("18500")),
+    ("2025-09", Decimal("0")), ("2025-10", Decimal("60000")),
+    ("2025-11", Decimal("154000")), ("2025-12", Decimal("0")),
+    ("2026-01", Decimal("0")), ("2026-02", Decimal("167000")),
+    ("2026-03", Decimal("50000")), ("2026-04", Decimal("50000")),
+    ("2026-05", Decimal("0")), ("2026-06", Decimal("0")),
+    ("2026-07", Decimal("0")), ("2026-08", Decimal("35000")),
+    ("2026-09", Decimal("0")), ("2026-10", Decimal("0")),
+    ("2026-11", Decimal("0")), ("2026-12", Decimal("0")),
+)
 
 HISTORICAL_CATEGORY_TOTALS = {
     "Internal": Decimal("572000"),

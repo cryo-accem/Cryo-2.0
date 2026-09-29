@@ -64,6 +64,52 @@
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
+            {% if not slot.charge_sheet_sent_at %}
+            <details class="history-edit">
+              <summary>Edit booking before sending</summary>
+              <form method="post" action="{{ url_for('admin.edit_completed_booking', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                <label>User name<input name="user_name" value="{{ slot.user_name }}" maxlength="100" required></label>
+                <label>PI name<input name="pi_name" value="{{ slot.pi_name }}" maxlength="100" required></label>
+                <label>Email<input type="email" name="email" value="{{ slot.email }}" maxlength="150" required></label>
+                <label>Origin
+                  <select name="origin" required>
+                    <option value="Internal" {{ 'selected' if slot.origin|lower == 'internal' else '' }}>Internal</option>
+                    <option value="External" {{ 'selected' if slot.origin|lower in ['external', 'academic'] else '' }}>External academic</option>
+                    <option value="Industry" {{ 'selected' if slot.origin|lower in ['industry', 'industrial'] else '' }}>Industry</option>
+                  </select>
+                </label>
+                {% if slot.origin|lower == 'internal' %}<label>PI email<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" maxlength="150"></label>{% endif %}
+                {% if service_key != 'freezing' %}<label>Institute<input name="esm" value="{{ slot.esm or '' }}" maxlength="150"></label>{% endif %}
+                <label>Sample name<input name="sample_name" value="{{ slot.sample_name }}" maxlength="150" required></label>
+                <label>Requested grids<input type="number" name="grids" min="1" max="{{ 8 if service_key == 'freezing' else 4 }}" value="{{ slot.grids }}" required></label>
+                {% if has_days %}<label>Requested days<input type="number" name="days" min="1" max="4" value="{{ slot.days }}" required></label>{% endif %}
+                <label>{{ 'Freezing date' if service_key == 'freezing' else 'Completion date' }}<input type="date" name="completion_date" value="{{ (slot.freezing_date if service_key == 'freezing' else slot.completion_date)|string|truncate(10, True, '') }}" required></label>
+                {% if service_key != 'freezing' %}<label>Actual slots<input type="number" name="actual_slots" min="1" step="1" value="{{ slot.actual_slots or 1 }}" required></label>{% endif %}
+                <label>Actual grids<input type="number" name="actual_grids" min="1" step="1" value="{{ slot.actual_grids or slot.number_of_grids or slot.grids }}" required></label>
+                <label>Grid source
+                  <select name="grid_source" required>
+                    <option value="facility" {{ 'selected' if slot.grid_source == 'facility' else '' }}>Facility provided</option>
+                    <option value="self_owned" {{ 'selected' if slot.grid_source == 'self_owned' else '' }}>Self owned / user provided</option>
+                  </select>
+                </label>
+                <label>Grid type
+                  <select name="grid_type">
+                    <option value="">Select one type or enter quantities below</option>
+                    <option value="normal_holey_carbon" {{ 'selected' if slot.grid_type == 'normal_holey_carbon' else '' }}>Normal holey carbon</option>
+                    <option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / graphene</option>
+                  </select>
+                </label>
+                <label>Normal grids<input type="number" name="normal_grids" min="0" value="{{ slot.grid_breakdown.normal_holey_carbon if slot.grid_breakdown else '' }}"></label>
+                <label>Gold / graphene grids<input type="number" name="gold_grids" min="0" value="{{ slot.grid_breakdown.gold_carbon_graphene if slot.grid_breakdown else '' }}"></label>
+                {% if service_key != 'freezing' %}
+                <label>Clipped grids<input type="number" name="clipped_grids" min="0" value="{{ slot.clipped_grids or 0 }}"></label>
+                <label class="history-edit__check"><input type="checkbox" name="processing_requested" value="1" {{ 'checked' if slot.processing_requested else '' }}> Data processing requested</label>
+                {% endif %}
+                <button class="button small" type="submit">Save changes &amp; recalculate charges</button>
+              </form>
+            </details>
+            {% endif %}
             <form method="post" action="{{ url_for('admin.delete_completed_booking', service_key=service_key, booking_id=slot.id) }}" onsubmit="return confirm('Delete this completed booking for {{ slot.user_name|e }}? This removes it from history and revenue totals and cannot be undone.');">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <button class="button small btn-delete" type="submit">Delete Booking</button>
@@ -180,6 +226,22 @@ document.querySelectorAll("form[action*='charge-sheet'] [name=grid_source]").for
   const type = form.querySelector("[name=grid_type]");
   const update = () => { type.disabled = source.value === "self_owned"; type.required = source.value === "facility"; if (type.disabled) type.value = ""; };
   source.addEventListener("change", update); update();
+});
+document.querySelectorAll(".history-edit [name=grid_source]").forEach((source) => {
+  const form = source.closest("form");
+  const type = form.querySelector("[name=grid_type]");
+  const quantities = form.querySelectorAll("[name=normal_grids], [name=gold_grids]");
+  const update = () => {
+    const facility = source.value === "facility";
+    type.disabled = !facility;
+    quantities.forEach((input) => { input.disabled = !facility; });
+    if (!facility) {
+      type.value = "";
+      quantities.forEach((input) => { input.value = ""; });
+    }
+  };
+  source.addEventListener("change", update);
+  update();
 });
 </script></main>
 {% endblock %}

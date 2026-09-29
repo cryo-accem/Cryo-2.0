@@ -32,7 +32,7 @@ from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import PI_USERS
 from historical_revenue import (
-    HISTORICAL_REVENUE, HISTORICAL_ANNUAL_REVENUE,
+    HISTORICAL_REVENUE,
     HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
 )
 
@@ -64,6 +64,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.send_charge_sheet",
     "admin.preview_charge_sheet",
     "admin.delete_completed_booking",
+    "admin.edit_completed_booking",
     "admin.send_combined_charge_sheet",
     "admin.update_payment",
     "admin.download_payment_proof",
@@ -585,11 +586,9 @@ def _revenue_components(row):
     return gross - gst, gst, gross
 
 
-def _date_one_year_earlier(value):
-    try:
-        return value.replace(year=value.year - 1)
-    except ValueError:
-        return value.replace(year=value.year - 1, day=28)
+def _fiscal_year_label(year, month):
+    fiscal_start_year = year if month >= 4 else year - 1
+    return f"FY {fiscal_start_year}-{(fiscal_start_year + 1) % 100:02d}"
 
 
 def _revenue_dashboard(cur):
@@ -619,13 +618,6 @@ def _revenue_dashboard(cur):
             start = end = None
             preset = "all"
 
-    comparison_start = start or today.replace(month=1, day=1)
-    comparison_end = end or today
-    previous_start = _date_one_year_earlier(comparison_start)
-    previous_end = _date_one_year_earlier(comparison_end)
-    comparison_current = Decimal("0")
-    comparison_previous = Decimal("0")
-
     rows = []
     detailed_revenue_years = set()
     for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
@@ -645,10 +637,6 @@ def _revenue_dashboard(cur):
             if not completion_date:
                 continue
             detailed_revenue_years.add(completion_date.year)
-            if comparison_start <= completion_date <= comparison_end:
-                comparison_current += _revenue_components(row)[0]
-            if previous_start <= completion_date <= previous_end:
-                comparison_previous += _revenue_components(row)[0]
             if (start and completion_date < start) or (end and completion_date > end):
                 continue
             rows.append((row, service, completion_date))
@@ -667,10 +655,6 @@ def _revenue_dashboard(cur):
         if not completion_date:
             continue
         detailed_revenue_years.add(completion_date.year)
-        if comparison_start <= completion_date <= comparison_end:
-            comparison_current += _revenue_components(row)[0]
-        if previous_start <= completion_date <= previous_end:
-            comparison_previous += _revenue_components(row)[0]
         if (start and completion_date < start) or (end and completion_date > end):
             continue
         rows.append((row, "Freezing", completion_date))
@@ -726,61 +710,29 @@ def _revenue_dashboard(cur):
         if period == "weekly":
             period_key = completion_date.strftime("%G-W%V")
         elif period == "annual":
-            period_key = completion_date.strftime("%Y")
+            period_key = _fiscal_year_label(completion_date.year, completion_date.month)
         else:
             period_key = completion_date.strftime("%Y-%m")
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += net
         monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
 
-    historical_revenue_years = {int(month[:4]) for month, _ in HISTORICAL_REVENUE}
     historical_start = start.strftime("%Y-%m") if start else None
     historical_end = end.strftime("%Y-%m") if end else None
     for month, amount in HISTORICAL_REVENUE:
-        month_start = datetime.date.fromisoformat(f"{month}-01")
-        month_end = (month_start.replace(day=28) + datetime.timedelta(days=4)).replace(day=1) - datetime.timedelta(days=1)
-        if month_start <= comparison_end and month_end >= comparison_start:
-            comparison_current += amount
-        if month_start <= previous_end and month_end >= previous_start:
-            comparison_previous += amount
         if historical_start and month < historical_start or historical_end and month > historical_end:
             continue
         totals["net"] += amount
         totals["gross"] += amount
         totals["billed"] += amount
         if period == "annual":
-            period_key = month[:4]
+            period_key = _fiscal_year_label(int(month[:4]), int(month[5:7]))
         elif period == "weekly":
             period_key = f"{month}-01"
         else:
             period_key = month
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
-    comparison_label = "vs same period last year"
-    for year, amount in HISTORICAL_ANNUAL_REVENUE.items():
-        year_start = datetime.date(year, 1, 1)
-        year_end = datetime.date(year, 12, 31)
-        has_dated_revenue = year in detailed_revenue_years or year in historical_revenue_years
-        if (
-            (not start or start <= year_start)
-            and (not end or end >= year_end)
-            and not has_dated_revenue
-        ):
-            totals["net"] += amount
-            totals["gross"] += amount
-            totals["billed"] += amount
-            if period == "annual":
-                monthly.setdefault(str(year), {"net": Decimal("0"), "slots": Decimal("0")})
-                monthly[str(year)]["net"] += amount
-        if comparison_start <= year_start and comparison_end >= year_end and not has_dated_revenue:
-            comparison_current += amount
-        if (
-            previous_start.year == year
-            and previous_end.year == year
-            and not has_dated_revenue
-        ):
-            comparison_previous = amount
-            comparison_label = f"vs {year} annual revenue"
     if not start and not end:
         for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
             by_category[category] += amount
@@ -801,31 +753,11 @@ def _revenue_dashboard(cur):
         for index, item in enumerate(monthly_items):
             item["x"] = 8 + (index * 84 / max(len(monthly_items) - 1, 1))
             item["y"] = 160 - float(item["value"] / monthly_max * 140)
-    comparison_change_pct = (
-        ((comparison_current - comparison_previous) / comparison_previous * 100).quantize(Decimal("0.1"))
-        if comparison_previous > 0
-        else None
-    )
-    comparison_scale = max(comparison_current, comparison_previous)
-    comparison_previous_height = (
-        (comparison_previous / comparison_scale * 100).quantize(Decimal("0.1"))
-        if comparison_scale > 0
-        else Decimal("0")
-    )
-    comparison_current_height = (
-        (comparison_current / comparison_scale * 100).quantize(Decimal("0.1"))
-        if comparison_scale > 0
-        else Decimal("0")
-    )
     return {
         "preset": preset,
         "period": period,
         "start": start.isoformat() if start else "",
         "end": end.isoformat() if end else "",
-        "comparison_change_pct": comparison_change_pct,
-        "comparison_label": comparison_label,
-        "comparison_previous_height": comparison_previous_height,
-        "comparison_current_height": comparison_current_height,
         "totals": {key: value.quantize(Decimal("0.01")) for key, value in totals.items()},
         "completed_bookings": len(rows),
         "by_category": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_category.items()],
@@ -1567,8 +1499,28 @@ def _history_rows(rows):
         item = dict(row)
         for key, default in defaults.items():
             item.setdefault(key, default)
+        breakdown = item.get("grid_breakdown")
+        if isinstance(breakdown, str):
+            try:
+                item["grid_breakdown"] = json.loads(breakdown)
+            except json.JSONDecodeError:
+                item["grid_breakdown"] = {}
         normalized.append(item)
     return normalized
+
+
+def _grid_breakdown(row):
+    breakdown = row.get("grid_breakdown") or {}
+    if isinstance(breakdown, str):
+        try:
+            breakdown = json.loads(breakdown)
+        except json.JSONDecodeError:
+            return None, None
+    if not isinstance(breakdown, dict):
+        return None, None
+    normal = breakdown.get("normal_holey_carbon")
+    gold = breakdown.get("gold_carbon_graphene")
+    return (normal or None), (gold or None)
 
 
 def _charge_sheet_record(service_key, booking_id):
@@ -1626,6 +1578,180 @@ def delete_completed_booking(service_key, booking_id):
         except OSError as exc:
             current_app.logger.warning("Could not remove payment proof for deleted booking %s: %s", booking_id, exc)
     flash("Completed booking deleted. Dashboard revenue and history totals have been updated.", "success")
+    return redirect(url_for("admin.history"))
+
+
+@admin_bp.route("/history/<service_key>/<int:booking_id>/edit", methods=["POST"])
+def edit_completed_booking(service_key, booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    table_info = _CHARGE_SHEET_TABLES.get(service_key)
+    if not table_info:
+        flash("Unknown booking type.")
+        return redirect(url_for("admin.history"))
+
+    table, service, date_column = table_info
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table} WHERE id=?", [booking_id])
+    row = cur.fetchone()
+    if not row or (service_key != "freezing" and row["status"] != "completed"):
+        cur.close()
+        conn.close()
+        flash("That completed booking could not be found.")
+        return redirect(url_for("admin.history"))
+    if row["charge_sheet_sent_at"]:
+        cur.close()
+        conn.close()
+        flash("Booking details cannot be edited after its charge sheet has been sent.")
+        return redirect(url_for("admin.history"))
+
+    updated = dict(row)
+    for field, limit in (
+        ("user_name", 100), ("pi_name", 100), ("email", 150),
+        ("esm", 150), ("sample_name", 150),
+    ):
+        value = request.form.get(field, "").strip()
+        if (field != "esm" and not value) or len(value) > limit:
+            cur.close()
+            conn.close()
+            flash(f"Enter a valid {field.replace('_', ' ')} (maximum {limit} characters).")
+            return redirect(url_for("admin.history"))
+        updated[field] = value
+    if not _valid_email(updated["email"]):
+        cur.close()
+        conn.close()
+        flash("Enter a valid email address.")
+        return redirect(url_for("admin.history"))
+    pi_email = request.form.get("pi_email", "").strip()
+    if pi_email and not _valid_email(pi_email):
+        cur.close()
+        conn.close()
+        flash("Enter a valid PI email address.")
+        return redirect(url_for("admin.history"))
+
+    origin = request.form.get("origin", "").strip()
+    if origin.casefold() not in {"internal", "external", "academic", "industry", "industrial"}:
+        cur.close()
+        conn.close()
+        flash("Select a valid user origin.")
+        return redirect(url_for("admin.history"))
+    updated["origin"] = origin
+
+    try:
+        requested_grids = parse_number_of_grids(request.form.get("grids"))
+        updated["grids"] = requested_grids
+        if service_key != "freezing":
+            days = parse_number_of_grids(request.form.get("days"))
+            if days > 4 or requested_grids > 4:
+                raise ValueError("Requested days and grids must not exceed 4.")
+            actual_slots = parse_number_of_grids(request.form.get("actual_slots"))
+        else:
+            if requested_grids > 8:
+                raise ValueError("Requested freezing grids must not exceed 8.")
+            days = None
+            actual_slots = Decimal("1")
+        actual_grids = parse_number_of_grids(request.form.get("actual_grids"))
+        completion_date = _parse_date(request.form.get("completion_date", "").strip())
+        if not completion_date:
+            raise ValueError("Enter a valid completion date.")
+        grid_source = request.form.get("grid_source", "").strip()
+        grid_type = request.form.get("grid_type", "").strip()
+        normal_grids = request.form.get("normal_grids", "").strip() or None
+        gold_grids = request.form.get("gold_grids", "").strip() or None
+        clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
+        if not clipped_grids.isdigit() or int(clipped_grids) > actual_grids:
+            raise ValueError("Clipped grids must be zero or no more than the actual grids.")
+        processing_requested = request.form.get("processing_requested") == "1"
+        charges = calculate_charge_sheet(
+            origin,
+            service,
+            actual_grids,
+            grid_source,
+            grid_type,
+            actual_slots,
+            processing_requested,
+            clipped_grids if service_key != "freezing" else 0,
+            normal_grids,
+            gold_grids,
+        )
+    except ValueError as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.history"))
+
+    updated.update(charges)
+    if is_non_billable_booking(updated):
+        for field in (
+            "grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
+            "processing_charge", "subtotal", "gst", "gst_amount", "grand_total",
+            "total_billed", "freezing_charge", "clipping_charge",
+        ):
+            updated[field] = Decimal("0.00")
+
+    values = {
+        "user_name": updated["user_name"],
+        "pi_name": updated["pi_name"],
+        "email": updated["email"],
+        "origin": origin,
+        "sample_name": updated["sample_name"],
+        "grids": requested_grids,
+        "actual_grids": charges["actual_grids"],
+        "number_of_grids": charges["number_of_grids"],
+        "grid_source": charges["grid_source"],
+        "grid_type": charges["grid_type"],
+        "grid_charge": str(updated["grid_charge"]),
+        "handling_charge": str(updated["handling_charge"]),
+        "clip_base_charge": str(updated["clip_base_charge"]),
+        "slot_charge": str(updated["slot_charge"]),
+        "freezing_charge": str(updated["freezing_charge"]),
+        "clipping_charge": str(updated["clipping_charge"]),
+        "processing_charge": str(updated["processing_charge"]),
+        "subtotal": str(updated["subtotal"]),
+        "gst_amount": str(updated["gst_amount"]),
+        "grand_total": str(updated["grand_total"]),
+        "total_billed": str(updated["total_billed"]),
+        "processing_requested": int(processing_requested),
+        "clipped_grids": int(clipped_grids) if service_key != "freezing" else 0,
+        "bill_generated_at": datetime.datetime.now().isoformat(sep=" ", timespec="seconds"),
+    }
+    if service_key != "freezing":
+        values.update({
+            "esm": updated["esm"],
+            "days": days,
+            date_column: completion_date.isoformat(),
+            "actual_slots": str(actual_slots),
+            "service_stage": charges["service_stage"],
+        })
+    else:
+        values.update({
+            "freezing_date": completion_date.isoformat(),
+            "service_stage": charges["service_stage"],
+        })
+    if "pi_email" in request.form:
+        values["pi_email"] = pi_email or None
+    values["grid_breakdown"] = json.dumps({
+        "normal_holey_carbon": charges["normal_grids"],
+        "gold_carbon_graphene": charges["gold_grids"],
+    })
+
+    assignments = ", ".join(f"{column}=?" for column in values)
+    cur.execute(
+        f"UPDATE {table} SET {assignments} "
+        "WHERE id=? AND charge_sheet_sent_at IS NULL",
+        [*values.values(), booking_id],
+    )
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("The booking could not be edited. Its charge sheet may have been sent.")
+        return redirect(url_for("admin.history"))
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("Booking details updated and charges recalculated.", "success")
     return redirect(url_for("admin.history"))
 
 
@@ -1703,6 +1829,7 @@ def send_charge_sheet(service_key, booking_id):
     # browser values are never treated as the financial source of truth.
     grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
     grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
+    normal_grids, gold_grids = _grid_breakdown(row)
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.history"))
@@ -1713,6 +1840,8 @@ def send_charge_sheet(service_key, booking_id):
             grid_source, grid_type,
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
+            normal_grids=normal_grids,
+            gold_grids=gold_grids,
         )
     except ValueError as exc:
         flash(str(exc))
@@ -1816,6 +1945,7 @@ def preview_charge_sheet(service_key, booking_id):
         return redirect(url_for("admin.history"))
     grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
     grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
+    normal_grids, gold_grids = _grid_breakdown(row)
     if not grid_source:
         flash("Please select the grid source before previewing the bill.")
         return redirect(url_for("admin.history"))
@@ -1826,6 +1956,8 @@ def preview_charge_sheet(service_key, booking_id):
             grid_source, grid_type,
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
+            normal_grids=normal_grids,
+            gold_grids=gold_grids,
         )
     except ValueError as exc:
         flash(str(exc))
@@ -1873,6 +2005,7 @@ def send_combined_charge_sheet():
                 raise ValueError("Only billable slots can be combined.")
             grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
             grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
+            normal_grids, gold_grids = _grid_breakdown(row)
             if not grid_source:
                 raise ValueError("Select a grid source for every selected slot.")
             row.update(calculate_charge_sheet(
@@ -1880,6 +2013,8 @@ def send_combined_charge_sheet():
                 row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
                 grid_source, grid_type, row.get("actual_slots") or 1,
                 bool(row.get("processing_requested")),
+                normal_grids=normal_grids,
+                gold_grids=gold_grids,
             ))
             row["combined_service"] = table_info[1]
             items.append((service_key, booking_id, row))
