@@ -600,7 +600,8 @@ def _revenue_dashboard(cur):
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
                        handling_charge, subtotal, processing_charge, gst_amount,
-                       grand_total, total_billed, amount_received, payment_status
+                       grand_total, total_billed, amount_received, payment_status,
+                       debit_head_status
                 FROM {table}
                 WHERE status='completed'"""
         )
@@ -615,7 +616,8 @@ def _revenue_dashboard(cur):
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
                   handling_charge, subtotal, processing_charge, gst_amount,
-                  grand_total, total_billed, amount_received, payment_status
+                  grand_total, total_billed, amount_received, payment_status,
+                  debit_head_status
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
@@ -656,10 +658,17 @@ def _revenue_dashboard(cur):
         billed = _money(row["total_billed"] or gross)
         recorded_received = row["amount_received"]
         payment_status = (row["payment_status"] or "").strip().casefold()
+        debit_head_status = (row["debit_head_status"] or "").strip().casefold()
+        internal_verified = (
+            (row["origin"] or "").strip().casefold() == "internal"
+            and debit_head_status == "debit head verified"
+        )
         received = _money(
             recorded_received
             if recorded_received is not None
-            else billed if payment_status == "payment verified" else 0
+            else billed
+            if payment_status == "payment verified" or internal_verified
+            else 0
         )
         totals["billed"] += billed
         totals["received"] += received

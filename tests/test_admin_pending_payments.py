@@ -85,12 +85,28 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertNotIn(b"Proof User", response.data)
 
     def test_accounting_counts_verified_bills_as_received_when_amount_is_blank(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed, debit_head_status)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?)""",
+                ("Internal Verified", "PI Internal", "internal-verified@example.com",
+                 "internal", "Sample Internal Verified", "2026-09-07", "74250.00",
+                 "Debit Head Verified"),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
         response = self.client.get(
             "/admin/panel?range=custom&start=2026-09-01&end=2026-09-30"
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb9700.00", response.data)
+        self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb974,950.00", response.data)
         self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
 
 
