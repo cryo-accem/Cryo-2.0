@@ -1831,6 +1831,18 @@ def update_payment(service_key, booking_id):
         flash("Unknown booking type.")
         return redirect(url_for("admin.history"))
     table = table_info[0]
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT pi_name FROM {table} WHERE id=?", [booking_id])
+    booking = cur.fetchone()
+    if booking and is_non_billable_booking(booking):
+        cur.close()
+        conn.close()
+        flash("Non-billable bookings are automatically marked completed.")
+        return redirect(url_for("admin.history"))
+    cur.close()
+    conn.close()
+
     origin = request.form.get("origin", "").strip().casefold()
     internal = origin == "internal"
     status = request.form.get("status", "").strip()

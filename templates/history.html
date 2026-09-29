@@ -70,7 +70,9 @@
             </form>
           </td>
           <td>
-            {% if slot.origin|lower == 'internal' %}
+            {% if is_non_billable_booking(slot) %}
+              <span class="status-badge completed">Completed — non-billable</span>
+            {% elif slot.origin|lower == 'internal' %}
               <strong>{{ slot.debit_head_status or 'Debit Head Pending' }}</strong>
               <form method="post" action="{{ url_for('admin.update_payment', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
