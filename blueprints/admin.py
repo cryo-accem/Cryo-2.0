@@ -235,6 +235,7 @@ def panel():
     screening_waiting = cur.fetchone()["count"]
     cur.execute("SELECT COUNT(*) AS count FROM freezing_bookings WHERE status='active'")
     freezing_active = cur.fetchone()["count"]
+    pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
     cur.close()
     conn.close()
@@ -263,9 +264,65 @@ def panel():
         pi_total=pi_total,
         waiting_chart=waiting_chart,
         waiting_total=waiting_total,
+        pending_payments=pending_payments,
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
+
+
+def _dashboard_pending_payments(cur):
+    pending_rows = []
+    sources = (
+        ("bookings", "Data collection", "completion_date", "completed"),
+        ("screening_bookings", "Screening", "completion_date", "completed"),
+        ("completed_freezing", "Freezing", "completed_at", None),
+    )
+    for table, service, completion_column, booking_status in sources:
+        where = " WHERE status='completed'" if booking_status else ""
+        cur.execute(
+            f"SELECT * FROM {table}{where} ORDER BY {completion_column} DESC"
+        )
+        for row in _history_rows(cur.fetchall()):
+            if is_non_billable_booking(row):
+                continue
+            internal = (row["origin"] or "").strip().casefold() == "internal"
+            tracking_status = (
+                row["debit_head_status"] if internal else row["payment_status"]
+            )
+            expected_status = "Debit Head Pending" if internal else "Payment Pending"
+            if tracking_status != expected_status:
+                continue
+
+            billed = _money(row.get("total_billed") or row.get("grand_total"))
+            received = _money(row.get("amount_received"))
+            pending_rows.append({
+                **row,
+                "service_label": service,
+                "completion_value": row.get(completion_column),
+                "tracking_label": "Debit head pending" if internal else "Payment pending",
+                "pending_amount": max(Decimal("0.00"), billed - received),
+            })
+
+    pending_rows.sort(
+        key=lambda item: str(item["completion_value"] or ""), reverse=True
+    )
+    return {
+        "rows": pending_rows,
+        "payment_count": sum(
+            item["tracking_label"] == "Payment pending" for item in pending_rows
+        ),
+        "payment_amount": sum(
+            (
+                item["pending_amount"]
+                for item in pending_rows
+                if item["tracking_label"] == "Payment pending"
+            ),
+            Decimal("0.00"),
+        ),
+        "debit_head_count": sum(
+            item["tracking_label"] == "Debit head pending" for item in pending_rows
+        ),
+    }
 
 
 def _pi_overview_counts(cur):

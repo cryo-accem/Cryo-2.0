@@ -40,6 +40,41 @@
       <section class="revenue-chart-card"><h3>Actual usage</h3><div class="usage-total"><strong>{{ revenue.totals.slots }}</strong><span>24-hour slots used</span></div><div class="usage-total"><strong>{{ revenue.totals.grids }}</strong><span>grids used</span></div>{% for item in revenue.monthly %}<div class="revenue-row"><span>{{ item.label }}</span><strong>{{ item.slots }} slots</strong></div>{% endfor %}</section>
     </div>
   </section>
+  <section class="revenue-dashboard" aria-labelledby="pending-payments-title">
+    <div class="revenue-heading">
+      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title">Pending payment tracking</h2><p>Completed billable records still marked pending in History. Internal accounts are listed separately as debit-head pending.</p></div>
+      <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
+    </div>
+    <div class="revenue-cards">
+      <div class="revenue-card"><span>Payment pending</span><strong>{{ pending_payments.payment_count }} records</strong></div>
+      <div class="revenue-card"><span>Payment balance outstanding</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
+      <div class="revenue-card"><span>Internal debit head pending</span><strong>{{ pending_payments.debit_head_count }} records</strong></div>
+    </div>
+    {% if pending_payments.rows %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Tracking status</th><th>Billed</th><th>Received</th><th>Balance</th></tr></thead>
+        <tbody>
+          {% for item in pending_payments.rows %}
+          <tr>
+            <td>{{ item.service_label }}</td>
+            <td><strong>{{ item.user_name }}</strong><br><small>PI: {{ item.pi_name }}</small></td>
+            <td>{{ item.origin }}</td>
+            <td>{{ item.completion_value or '—' }}</td>
+            <td>{{ item.charge_sheet_id or 'Not issued' }}</td>
+            <td><span class="status-badge waiting">{{ item.tracking_label }}</span></td>
+            <td>₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
+            <td>₹{{ "{:,.2f}".format(item.amount_received or 0) }}</td>
+            <td>₹{{ "{:,.2f}".format(item.pending_amount) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-message">No completed records are currently marked payment pending.</p>
+    {% endif %}
+  </section>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
     <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
