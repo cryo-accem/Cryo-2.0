@@ -1,3 +1,4 @@
+import datetime
 import os
 import tempfile
 import unittest
@@ -153,6 +154,74 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertIn(b"\xe2\x82\xb9553,500.00", annual_response.data)
         self.assertEqual(comparison_response.status_code, 200)
         self.assertIn(b"vs 2025 annual revenue", comparison_response.data)
+
+    def test_dashboard_advances_the_year_and_compares_matching_year_to_date(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Future Year User", "PI Future", "future@example.com",
+                 "academic", "Future sample", "2027-09-15", "8200.00"),
+            )
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("After Cutoff User", "PI Future", "after-cutoff@example.com",
+                 "academic", "After cutoff sample", "2027-09-30", "500000.00"),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        class FrozenDate(datetime.date):
+            @classmethod
+            def today(cls):
+                return cls(2027, 9, 29)
+
+        with patch("blueprints.admin.datetime.date", FrozenDate):
+            response = self.client.get("/admin/panel")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"+100.0%", response.data)
+        self.assertIn(b"vs same period last year", response.data)
+
+    def test_detailed_prior_year_revenue_takes_precedence_over_annual_fallback(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Detailed Prior User", "PI Detailed", "detailed-prior@example.com",
+                 "academic", "Detailed prior sample", "2025-09-10", "1000.00"),
+            )
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Detailed Current User", "PI Detailed", "detailed-current@example.com",
+                 "academic", "Detailed current sample", "2026-09-10", "2000.00"),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        response = self.client.get(
+            "/admin/panel?range=custom&start=2026-09-01&end=2026-09-30"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"+510.0%", response.data)
+        self.assertIn(b"vs same period last year", response.data)
 
 
 if __name__ == "__main__":

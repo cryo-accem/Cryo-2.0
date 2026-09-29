@@ -627,6 +627,7 @@ def _revenue_dashboard(cur):
     comparison_previous = Decimal("0")
 
     rows = []
+    detailed_revenue_years = set()
     for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
         cur.execute(
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
@@ -643,6 +644,7 @@ def _revenue_dashboard(cur):
             completion_date = _parse_date(str(row["completion_date"])[:10])
             if not completion_date:
                 continue
+            detailed_revenue_years.add(completion_date.year)
             if comparison_start <= completion_date <= comparison_end:
                 comparison_current += _revenue_components(row)[0]
             if previous_start <= completion_date <= previous_end:
@@ -664,6 +666,7 @@ def _revenue_dashboard(cur):
         completion_date = _parse_date(str(row["completion_date"])[:10])
         if not completion_date:
             continue
+        detailed_revenue_years.add(completion_date.year)
         if comparison_start <= completion_date <= comparison_end:
             comparison_current += _revenue_components(row)[0]
         if previous_start <= completion_date <= previous_end:
@@ -730,6 +733,7 @@ def _revenue_dashboard(cur):
         monthly[period_key]["net"] += net
         monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
 
+    historical_revenue_years = {int(month[:4]) for month, _ in HISTORICAL_REVENUE}
     historical_start = start.strftime("%Y-%m") if start else None
     historical_end = end.strftime("%Y-%m") if end else None
     for month, amount in HISTORICAL_REVENUE:
@@ -756,14 +760,25 @@ def _revenue_dashboard(cur):
     for year, amount in HISTORICAL_ANNUAL_REVENUE.items():
         year_start = datetime.date(year, 1, 1)
         year_end = datetime.date(year, 12, 31)
-        if (not start or start <= year_start) and (not end or end >= year_end):
+        has_dated_revenue = year in detailed_revenue_years or year in historical_revenue_years
+        if (
+            (not start or start <= year_start)
+            and (not end or end >= year_end)
+            and not has_dated_revenue
+        ):
             totals["net"] += amount
             totals["gross"] += amount
             totals["billed"] += amount
             if period == "annual":
                 monthly.setdefault(str(year), {"net": Decimal("0"), "slots": Decimal("0")})
                 monthly[str(year)]["net"] += amount
-        if previous_start.year == year and previous_end.year == year:
+        if comparison_start <= year_start and comparison_end >= year_end and not has_dated_revenue:
+            comparison_current += amount
+        if (
+            previous_start.year == year
+            and previous_end.year == year
+            and not has_dated_revenue
+        ):
             comparison_previous = amount
             comparison_label = f"vs {year} annual revenue"
     if not start and not end:
