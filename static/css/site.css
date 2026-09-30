@@ -498,6 +498,23 @@ a { color: inherit; }
 .revenue-bar-item strong { min-height: 14px; color: var(--navy); font-size: 10px; white-space: nowrap; }
 .revenue-bar-item span { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .revenue-bar { width: 42px; min-height: 3px; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #167da5, #32a889); box-shadow: 0 4px 10px rgba(22, 125, 165, .2); }
+.comparison-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.comparison-heading h3 { margin-bottom: 3px; }
+.comparison-heading p { margin: 0; color: var(--muted); font-size: 10px; }
+.comparison-legend { display: grid; gap: 5px; color: #52687a; font-size: 10px; white-space: nowrap; }
+.comparison-legend span { display: flex; align-items: center; gap: 5px; }
+.comparison-dot { width: 8px; height: 8px; border-radius: 50%; }
+.comparison-dot--current { background: #f47b20; }
+.comparison-dot--previous { background: #94a3b8; }
+.comparison-chart { min-height: 280px; padding: 18px 8px 8px; border-bottom: 1px solid #b9cbd5; background: repeating-linear-gradient(to bottom, transparent 0, transparent 24%, #edf2f5 25%, transparent 26%); }
+.comparison-chart svg { display: block; width: 100%; height: 205px; overflow: visible; }
+.comparison-axis { stroke: #b9cbd5; stroke-width: .5; }
+.comparison-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.comparison-line--current { stroke: #f47b20; }
+.comparison-line--previous { stroke: #94a3b8; }
+.comparison-point--current { fill: #f47b20; }
+.comparison-point--previous { fill: #94a3b8; }
+.comparison-labels { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 9px; text-align: center; }
 .revenue-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid #edf2f5; color: #43546a; font-size: 11px; }
 .revenue-row:last-child { border-bottom: 0; }
 .revenue-row strong { color: var(--navy); font-size: 12px; white-space: nowrap; }

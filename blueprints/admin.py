@@ -669,6 +669,10 @@ def _revenue_dashboard(cur):
                   "Freezing": Decimal("0"), "Clipping": Decimal("0"),
                   "Handling Charge": Decimal("0"), "Data Processing": Decimal("0")}
     monthly = {}
+    comparison = {
+        year: {month: Decimal("0") for month in range(1, 13)}
+        for year in (today.year - 1, today.year)
+    }
     for row, service, completion_date in rows:
         slot = _money(row["slot_charge"])
         freezing = _money(row["freezing_charge"])
@@ -716,6 +720,8 @@ def _revenue_dashboard(cur):
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += net
         monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
+        if completion_date.year in comparison:
+            comparison[completion_date.year][completion_date.month] += net
 
     historical_start = start.strftime("%Y-%m") if start else None
     historical_end = end.strftime("%Y-%m") if end else None
@@ -733,6 +739,10 @@ def _revenue_dashboard(cur):
             period_key = month
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
+        historical_year = int(month[:4])
+        historical_month = int(month[5:7])
+        if historical_year in comparison and historical_month <= today.month:
+            comparison[historical_year][historical_month] += amount
     if not start and not end:
         for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
             by_category[category] += amount
@@ -748,6 +758,23 @@ def _revenue_dashboard(cur):
          "slots": values["slots"].quantize(Decimal("0.01"))}
         for key, values in sorted(monthly.items())
     ]
+    comparison_items = [
+        {
+            "label": datetime.date(today.year, month, 1).strftime("%b"),
+            "current": comparison[today.year][month].quantize(Decimal("0.01")),
+            "previous": comparison[today.year - 1][month].quantize(Decimal("0.01")),
+        }
+        for month in range(1, today.month + 1)
+    ]
+    comparison_max = max(
+        (max(item["current"], item["previous"]) for item in comparison_items),
+        default=Decimal("0"),
+    )
+    for index, item in enumerate(comparison_items):
+        x = 5 + (index * 90 / max(len(comparison_items) - 1, 1))
+        item["x"] = x
+        item["current_y"] = 140 - float(item["current"] / comparison_max * 120) if comparison_max else 140
+        item["previous_y"] = 140 - float(item["previous"] / comparison_max * 120) if comparison_max else 140
     monthly_max = max((item["value"] for item in monthly_items), default=Decimal("0"))
     if monthly_max:
         for index, item in enumerate(monthly_items):
@@ -763,6 +790,13 @@ def _revenue_dashboard(cur):
         "by_category": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_category.items()],
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
+        "year_comparison": {
+            "current_year": today.year,
+            "previous_year": today.year - 1,
+            "months": comparison_items,
+            "current_points": " ".join(f'{item["x"]:.2f},{item["current_y"]:.2f}' for item in comparison_items),
+            "previous_points": " ".join(f'{item["x"]:.2f},{item["previous_y"]:.2f}' for item in comparison_items),
+        },
     }
 
 
