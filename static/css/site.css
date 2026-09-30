@@ -509,12 +509,14 @@ a { color: inherit; }
 .comparison-dot { width: 8px; height: 8px; border-radius: 50%; }
 .comparison-dot--current { background: #f47b20; }
 .comparison-dot--previous { background: #94a3b8; }
-.comparison-chart { min-height: 280px; padding: 18px 8px 8px; border-bottom: 1px solid #b9cbd5; background: repeating-linear-gradient(to bottom, transparent 0, transparent 24%, #edf2f5 25%, transparent 26%); }
-.comparison-chart svg { display: block; width: 100%; height: 205px; overflow: visible; }
-.comparison-axis { stroke: #b9cbd5; stroke-width: .5; }
-.comparison-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.comparison-chart { min-height: 280px; padding: 18px 8px 8px; border-bottom: 1px solid #b9cbd5; background: #fff; box-shadow: none; filter: none; }
+.comparison-chart svg { display: block; width: 100%; height: 205px; overflow: visible; filter: none; }
+.comparison-gridline { stroke: #e9eef2; stroke-width: .55; }
+.comparison-axis { stroke: #b9cbd5; stroke-width: .7; }
+.comparison-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.25; filter: none; }
 .comparison-line--current { stroke: #f47b20; }
 .comparison-line--previous { stroke: #94a3b8; }
+.comparison-point { stroke: none; filter: none; }
 .comparison-point--current { fill: #f47b20; }
 .comparison-point--previous { fill: #94a3b8; }
 .comparison-labels { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 9px; text-align: center; }

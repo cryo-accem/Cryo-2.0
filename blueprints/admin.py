@@ -591,6 +591,49 @@ def _fiscal_year_label(year, month):
     return f"FY {fiscal_start_year}-{(fiscal_start_year + 1) % 100:02d}"
 
 
+def _smooth_chart_path(points):
+    if len(points) < 2:
+        return ""
+
+    secants = [
+        (points[index + 1][1] - points[index][1])
+        / (points[index + 1][0] - points[index][0])
+        for index in range(len(points) - 1)
+    ]
+    tangents = [secants[0]]
+    for previous, following in zip(secants, secants[1:]):
+        tangents.append(
+            0 if previous * following <= 0 else (previous + following) / 2
+        )
+    tangents.append(secants[-1])
+
+    for index, secant in enumerate(secants):
+        if secant == 0:
+            tangents[index] = tangents[index + 1] = 0
+            continue
+        alpha = tangents[index] / secant
+        beta = tangents[index + 1] / secant
+        magnitude = alpha * alpha + beta * beta
+        if magnitude > 9:
+            scale = 3 / magnitude ** 0.5
+            tangents[index] = scale * alpha * secant
+            tangents[index + 1] = scale * beta * secant
+
+    path = f"M {points[0][0]:.2f} {points[0][1]:.2f}"
+    for index, secant in enumerate(secants):
+        start = points[index]
+        end = points[index + 1]
+        one_third_dx = (end[0] - start[0]) / 3
+        control_1 = (start[0] + one_third_dx, start[1] + tangents[index] * one_third_dx)
+        control_2 = (end[0] - one_third_dx, end[1] - tangents[index + 1] * one_third_dx)
+        path += (
+            f" C {control_1[0]:.2f} {control_1[1]:.2f},"
+            f" {control_2[0]:.2f} {control_2[1]:.2f},"
+            f" {end[0]:.2f} {end[1]:.2f}"
+        )
+    return path
+
+
 def _revenue_dashboard(cur):
     today = datetime.date.today()
     preset = request.args.get("range", "all")
@@ -794,8 +837,12 @@ def _revenue_dashboard(cur):
             "current_year": today.year,
             "previous_year": today.year - 1,
             "months": comparison_items,
-            "current_points": " ".join(f'{item["x"]:.2f},{item["current_y"]:.2f}' for item in comparison_items),
-            "previous_points": " ".join(f'{item["x"]:.2f},{item["previous_y"]:.2f}' for item in comparison_items),
+            "current_path": _smooth_chart_path(
+                [(item["x"], item["current_y"]) for item in comparison_items]
+            ),
+            "previous_path": _smooth_chart_path(
+                [(item["x"], item["previous_y"]) for item in comparison_items]
+            ),
         },
     }
 
