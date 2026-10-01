@@ -78,7 +78,6 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.delete_publication",
     "admin.save_instrument",
     "admin.delete_instrument",
-    "admin.save_page",
     "static",
 }
 
@@ -536,8 +535,6 @@ def maintenance():
     publications = cur.fetchall()
     cur.execute("SELECT * FROM managed_instruments ORDER BY id DESC")
     instruments = cur.fetchall()
-    cur.execute("SELECT * FROM managed_pages ORDER BY id")
-    pages = cur.fetchall()
     edit_publication = None
     edit_instrument = None
     publication_id = request.args.get("edit_publication", type=int)
@@ -556,34 +553,7 @@ def maintenance():
         instruments=instruments,
         edit_publication=edit_publication,
         edit_instrument=edit_instrument,
-        pages=pages,
     )
-
-
-@admin_bp.route("/maintenance/pages/save", methods=["POST"])
-def save_page():
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
-    page_id = request.form.get("id", type=int)
-    title = request.form.get("title", "").strip()
-    eyebrow = request.form.get("eyebrow", "").strip()
-    intro = request.form.get("intro", "").strip()
-    additional_content = request.form.get("additional_content", "").strip()
-    if not page_id or not title:
-        flash("Page title is required.", "error")
-        return redirect(url_for("admin.maintenance"))
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        """UPDATE managed_pages SET eyebrow=?, title=?, intro=?,
-           additional_content=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
-        [eyebrow or None, title, intro or None, additional_content or None, page_id],
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("Page content updated.", "success")
-    return redirect(url_for("admin.maintenance"))
 
 
 @admin_bp.route("/maintenance/publications/save", methods=["POST"])

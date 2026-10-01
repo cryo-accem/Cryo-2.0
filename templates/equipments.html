@@ -7,10 +7,10 @@
     {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
     {% if managed_instruments %}
     <section class="managed-content-section">
-      <div class="section-heading"><h2>Additional instrumentation</h2><p>Current equipment maintained by the ACCEM team.</p></div>
+      <div class="section-heading"><h2>Managed instruments</h2><p>Equipment entries maintained by the ACCEM team.</p></div>
       <div class="equipment-card-grid">
         {% for instrument in managed_instruments %}
-        <article class="equipment-tile">
+        <article class="equipment-tile{% if not instrument.image_url %} equipment-tile--text-only{% endif %}">
           {% if instrument.image_url %}<img src="{{ instrument.image_url }}" alt="{{ instrument.name }}" loading="lazy" decoding="async">{% endif %}
           <div><h3>{{ instrument.name }}</h3>{% if instrument.category %}<small>{{ instrument.category }}</small>{% endif %}<p>{{ instrument.description }}</p>{% if instrument.specifications %}<p>{{ instrument.specifications }}</p>{% endif %}</div>
         </article>
