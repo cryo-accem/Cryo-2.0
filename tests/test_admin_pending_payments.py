@@ -161,6 +161,46 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertIn(b'title="2025-01: \xe2\x82\xb90.00"', monthly_response.data)
         self.assertEqual(comparison_response.status_code, 200)
 
+    def test_year_comparison_uses_selected_custom_range_for_both_years(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Current Period", "PI Compare", "current-period@example.com",
+                 "academic", "Current sample", "2026-09-20", "3000.00"),
+            )
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Previous Period", "PI Compare", "previous-period@example.com",
+                 "academic", "Previous sample", "2025-09-20", "1000.00"),
+            )
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, status,
+                    completion_date, total_billed)
+                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                ("Outside Period", "PI Compare", "outside-period@example.com",
+                 "academic", "Outside sample", "2026-08-20", "500000.00"),
+            )
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        response = self.client.get(
+            "/admin/panel?range=custom&start=2026-09-01&end=2026-09-30"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Sep: 610.0% increase", response.data)
+        self.assertIn(b"vs 2025", response.data)
+
     def test_dashboard_uses_supplied_2026_monthly_revenue_and_zeroes(self):
         february_response = self.client.get(
             "/admin/panel?range=custom&start=2026-02-01&end=2026-02-28"

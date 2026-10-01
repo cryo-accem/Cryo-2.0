@@ -504,6 +504,12 @@ a { color: inherit; }
 .comparison-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .comparison-heading h3 { margin-bottom: 3px; }
 .comparison-heading p { margin: 0; color: var(--muted); font-size: 10px; }
+.comparison-heading .comparison-change { margin-top: 7px; color: #52687a; font-size: 10px; }
+.comparison-change strong { color: #52687a; }
+.comparison-change--increase strong { color: #23835d; }
+.comparison-change--decrease strong { color: #bf4c4c; }
+.comparison-change--unchanged strong { color: #52687a; }
+.comparison-change--neutral strong { color: #64748b; }
 .comparison-legend { display: grid; gap: 5px; color: #52687a; font-size: 10px; white-space: nowrap; }
 .comparison-legend span { display: flex; align-items: center; gap: 5px; }
 .comparison-dot { width: 8px; height: 8px; border-radius: 50%; }

@@ -591,6 +591,13 @@ def _fiscal_year_label(year, month):
     return f"FY {fiscal_start_year}-{(fiscal_start_year + 1) % 100:02d}"
 
 
+def _date_one_year_earlier(value):
+    try:
+        return value.replace(year=value.year - 1)
+    except ValueError:
+        return value.replace(year=value.year - 1, day=28)
+
+
 def _smooth_chart_path(points):
     if len(points) < 2:
         return ""
@@ -661,6 +668,28 @@ def _revenue_dashboard(cur):
             start = end = None
             preset = "all"
 
+    comparison_start = start or today.replace(month=1, day=1)
+    comparison_end = end or today
+    previous_start = _date_one_year_earlier(comparison_start)
+    previous_end = _date_one_year_earlier(comparison_end)
+    comparison_current = {}
+    comparison_previous = {}
+    comparison_months = []
+    historical_start = start.strftime("%Y-%m") if start else None
+    historical_end = end.strftime("%Y-%m") if end else None
+    month_start = comparison_start.replace(day=1)
+    last_month = comparison_end.replace(day=1)
+    while month_start <= last_month:
+        previous_month_start = _date_one_year_earlier(month_start)
+        current_key = month_start.strftime("%Y-%m")
+        previous_key = previous_month_start.strftime("%Y-%m")
+        comparison_current[current_key] = Decimal("0")
+        comparison_previous[previous_key] = Decimal("0")
+        comparison_months.append((month_start, previous_month_start))
+        if month_start.month == 12:
+            month_start = month_start.replace(year=month_start.year + 1, month=1)
+        else:
+            month_start = month_start.replace(month=month_start.month + 1)
     rows = []
     detailed_revenue_years = set()
     for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
@@ -680,6 +709,15 @@ def _revenue_dashboard(cur):
             if not completion_date:
                 continue
             detailed_revenue_years.add(completion_date.year)
+            net_revenue = _revenue_components(row)[0]
+            if comparison_start <= completion_date <= comparison_end:
+                key = completion_date.strftime("%Y-%m")
+                if key in comparison_current:
+                    comparison_current[key] += net_revenue
+            if previous_start <= completion_date <= previous_end:
+                key = completion_date.strftime("%Y-%m")
+                if key in comparison_previous:
+                    comparison_previous[key] += net_revenue
             if (start and completion_date < start) or (end and completion_date > end):
                 continue
             rows.append((row, service, completion_date))
@@ -698,6 +736,15 @@ def _revenue_dashboard(cur):
         if not completion_date:
             continue
         detailed_revenue_years.add(completion_date.year)
+        net_revenue = _revenue_components(row)[0]
+        if comparison_start <= completion_date <= comparison_end:
+            key = completion_date.strftime("%Y-%m")
+            if key in comparison_current:
+                comparison_current[key] += net_revenue
+        if previous_start <= completion_date <= previous_end:
+            key = completion_date.strftime("%Y-%m")
+            if key in comparison_previous:
+                comparison_previous[key] += net_revenue
         if (start and completion_date < start) or (end and completion_date > end):
             continue
         rows.append((row, "Freezing", completion_date))
@@ -712,10 +759,6 @@ def _revenue_dashboard(cur):
                   "Freezing": Decimal("0"), "Clipping": Decimal("0"),
                   "Handling Charge": Decimal("0"), "Data Processing": Decimal("0")}
     monthly = {}
-    comparison = {
-        year: {month: Decimal("0") for month in range(1, 13)}
-        for year in (today.year - 1, today.year)
-    }
     for row, service, completion_date in rows:
         slot = _money(row["slot_charge"])
         freezing = _money(row["freezing_charge"])
@@ -763,12 +806,24 @@ def _revenue_dashboard(cur):
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += net
         monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
-        if completion_date.year in comparison:
-            comparison[completion_date.year][completion_date.month] += net
 
-    historical_start = start.strftime("%Y-%m") if start else None
-    historical_end = end.strftime("%Y-%m") if end else None
     for month, amount in HISTORICAL_REVENUE:
+        historical_year = int(month[:4])
+        historical_month = int(month[5:7])
+        historical_month_date = datetime.date(historical_year, historical_month, 1)
+        historical_key = historical_month_date.strftime("%Y-%m")
+        if (
+            comparison_start.replace(day=1) <= historical_month_date
+            <= comparison_end.replace(day=1)
+            and historical_key in comparison_current
+        ):
+            comparison_current[historical_key] += amount
+        if (
+            previous_start.replace(day=1) <= historical_month_date
+            <= previous_end.replace(day=1)
+            and historical_key in comparison_previous
+        ):
+            comparison_previous[historical_key] += amount
         if historical_start and month < historical_start or historical_end and month > historical_end:
             continue
         totals["net"] += amount
@@ -782,10 +837,6 @@ def _revenue_dashboard(cur):
             period_key = month
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
-        historical_year = int(month[:4])
-        historical_month = int(month[5:7])
-        if historical_year in comparison and historical_month <= today.month:
-            comparison[historical_year][historical_month] += amount
     if not start and not end:
         for category, amount in HISTORICAL_CATEGORY_TOTALS.items():
             by_category[category] += amount
@@ -803,12 +854,54 @@ def _revenue_dashboard(cur):
     ]
     comparison_items = [
         {
-            "label": datetime.date(today.year, month, 1).strftime("%b"),
-            "current": comparison[today.year][month].quantize(Decimal("0.01")),
-            "previous": comparison[today.year - 1][month].quantize(Decimal("0.01")),
+            "label": (
+                current_month.strftime("%b")
+                if len(comparison_months) <= 12
+                else current_month.strftime("%b %Y")
+            ),
+            "current": comparison_current[current_month.strftime("%Y-%m")].quantize(Decimal("0.01")),
+            "previous": comparison_previous[previous_month.strftime("%Y-%m")].quantize(Decimal("0.01")),
         }
-        for month in range(1, today.month + 1)
+        for current_month, previous_month in comparison_months
     ]
+    comparison_current_total = sum(
+        (item["current"] for item in comparison_items), Decimal("0")
+    )
+    comparison_previous_total = sum(
+        (item["previous"] for item in comparison_items), Decimal("0")
+    )
+    comparison_change_percent = (
+        ((comparison_current_total - comparison_previous_total) / comparison_previous_total * 100)
+        .quantize(Decimal("0.1"))
+        if comparison_previous_total
+        else None
+    )
+    if comparison_change_percent is None:
+        comparison_change_label = (
+            "New revenue; no previous-year baseline"
+            if comparison_current_total
+            else "No revenue in either period"
+        )
+        comparison_change_direction = "neutral"
+    else:
+        comparison_change_direction = (
+            "increase" if comparison_change_percent > 0
+            else "decrease" if comparison_change_percent < 0
+            else "unchanged"
+        )
+        comparison_change_label = (
+            f"{abs(comparison_change_percent):.1f}% {comparison_change_direction}"
+        )
+    current_period_label = (
+        comparison_start.strftime("%Y")
+        if comparison_start.year == comparison_end.year
+        else f"{comparison_start.year}–{comparison_end.year}"
+    )
+    previous_period_label = (
+        previous_start.strftime("%Y")
+        if previous_start.year == previous_end.year
+        else f"{previous_start.year}–{previous_end.year}"
+    )
     comparison_max = max(
         (max(item["current"], item["previous"]) for item in comparison_items),
         default=Decimal("0"),
@@ -834,8 +927,15 @@ def _revenue_dashboard(cur):
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
         "year_comparison": {
-            "current_year": today.year,
-            "previous_year": today.year - 1,
+            "current_year": current_period_label,
+            "previous_year": previous_period_label,
+            "change_period": (
+                comparison_start.strftime("%b")
+                if comparison_start.strftime("%Y-%m") == comparison_end.strftime("%Y-%m")
+                else f"{comparison_start.strftime('%b')}–{comparison_end.strftime('%b')}"
+            ),
+            "change_label": comparison_change_label,
+            "change_direction": comparison_change_direction,
             "months": comparison_items,
             "current_path": _smooth_chart_path(
                 [(item["x"], item["current_y"]) for item in comparison_items]
