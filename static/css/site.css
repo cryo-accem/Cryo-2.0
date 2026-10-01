@@ -251,16 +251,16 @@ a { color: inherit; }
 }
 .page-header h1 { color: #fff; font-family: Inter, sans-serif; font-size: clamp(30px, 3.4vw, 40px); margin: 0; letter-spacing: -.03em; }
 .page-header p { color: #c5d8e8; margin: 7px 0 0; max-width: 720px; }
-.page-header--science { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/about-banner-cryo.png"); background-position: center 45%; }
-.page-header--facility { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .65)), url("../images/facility-banner.png"); background-position: center 48%; }
-.page-header--equipment { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .60)), url("../images/equipment-banner.png"); background-position: center 45%; }
-.page-header--team { background-image: linear-gradient(90deg, rgba(3, 20, 43, .94), rgba(6, 34, 62, .58)), url("../images/team-banner.png"); background-position: center 42%; }
-.page-header--publications { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/web/laboratory.jpg"); background-position: center 45%; }
-.page-header--events { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/events-training-banner.png"); background-position: center 42%; }
-.page-header--workflow { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/workflow-banner.png"); background-position: center 42%; }
-.page-header--portal { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .52)), url("../images/web/register-header.png"); background-position: center 52%; }
-.page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/schedule-header.png"); background-position: center 50%; }
-.page-header--admin { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .65)), url("../images/web/microscopy.jpg"); background-position: center 45%; }
+.page-header--science { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/about-banner-cryo.webp"); background-position: center 45%; }
+.page-header--facility { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .65)), url("../images/facility-banner.webp"); background-position: center 48%; }
+.page-header--equipment { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .60)), url("../images/equipment-banner.webp"); background-position: center 45%; }
+.page-header--team { background-image: linear-gradient(90deg, rgba(3, 20, 43, .94), rgba(6, 34, 62, .58)), url("../images/team-banner.webp"); background-position: center 42%; }
+.page-header--publications { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/web/laboratory.webp"); background-position: center 45%; }
+.page-header--events { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/events-training-banner.webp"); background-position: center 42%; }
+.page-header--workflow { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .62)), url("../images/workflow-banner.webp"); background-position: center 42%; }
+.page-header--portal { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .52)), url("../images/web/register-header.webp"); background-position: center 52%; }
+.page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/schedule-header.webp"); background-position: center 50%; }
+.page-header--admin { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .65)), url("../images/web/microscopy.webp"); background-position: center 45%; }
 .admin-login-page .page-content { padding-bottom: 58px; }
 .admin-login-page .page-header { min-height: 178px; }
 .admin-login-card {
