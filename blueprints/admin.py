@@ -22,7 +22,7 @@ from werkzeug.utils import secure_filename
 from monthly_activity_report import build_monthly_activity_report
 from database import get_db
 from database import _is_sqlite_url
-from extensions import send_email
+from extensions import send_email, send_email_sync
 from revenue import (
     calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
     parse_number_of_grids,
@@ -67,6 +67,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.edit_completed_booking",
     "admin.send_combined_charge_sheet",
     "admin.update_payment",
+    "admin.send_payment_reminder",
     "admin.download_payment_proof",
     "admin.download_registrations_csv",
     "admin.download_database_backup",
@@ -274,6 +275,15 @@ def panel():
 
 def _dashboard_pending_payments(cur):
     pending_rows = []
+    cur.execute(
+        """SELECT service_key, booking_id, COUNT(*) AS reminder_count
+           FROM payment_reminder_history
+           GROUP BY service_key, booking_id"""
+    )
+    reminder_counts = {
+        (row["service_key"], row["booking_id"]): row["reminder_count"]
+        for row in cur.fetchall()
+    }
     sources = (
         ("bookings", "Data collection", "completion_date", "completed"),
         ("screening_bookings", "Screening", "completion_date", "completed"),
@@ -300,9 +310,23 @@ def _dashboard_pending_payments(cur):
             pending_rows.append({
                 **row,
                 "service_label": service,
+                "service_key": (
+                    "imaging" if table == "bookings"
+                    else "screening" if table == "screening_bookings"
+                    else "freezing"
+                ),
                 "completion_value": row.get(completion_column),
                 "tracking_label": "Debit head pending" if internal else "Payment pending",
                 "pending_amount": max(Decimal("0.00"), billed - received),
+                "reminder_count": reminder_counts.get(
+                    (
+                        "imaging" if table == "bookings"
+                        else "screening" if table == "screening_bookings"
+                        else "freezing",
+                        row["id"],
+                    ),
+                    0,
+                ),
             })
 
     pending_rows.sort(
@@ -325,6 +349,122 @@ def _dashboard_pending_payments(cur):
             item["tracking_label"] == "Debit head pending" for item in pending_rows
         ),
     }
+
+
+@admin_bp.route("/payment-reminder/<service_key>/<int:booking_id>", methods=["POST"])
+def send_payment_reminder(service_key, booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    table_info = _CHARGE_SHEET_TABLES.get(service_key)
+    if not table_info:
+        flash("Unknown booking type.")
+        return redirect(url_for("admin.panel"))
+
+    table = table_info[0]
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table} WHERE id=?", [booking_id])
+    booking_row = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if not booking_row:
+        flash("That booking could not be found.")
+        return redirect(url_for("admin.panel"))
+    booking = _history_rows([booking_row])[0]
+    if is_non_billable_booking(booking):
+        flash("This booking does not require a payment reminder.")
+        return redirect(url_for("admin.panel"))
+
+    internal = (booking.get("origin") or "").strip().casefold() == "internal"
+    tracking_status = (
+        booking.get("debit_head_status") if internal
+        else booking.get("payment_status")
+    )
+    expected_status = "Debit Head Pending" if internal else "Payment Pending"
+    if tracking_status != expected_status:
+        flash("This booking is no longer marked as pending.")
+        return redirect(url_for("admin.panel"))
+
+    recipient = (booking.get("email") or "").strip()
+    if not recipient:
+        flash("A reminder could not be sent because this booking has no email address.")
+        return redirect(url_for("admin.panel"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT COUNT(*) AS reminder_count
+           FROM payment_reminder_history
+           WHERE service_key=? AND booking_id=?""",
+        [service_key, booking_id],
+    )
+    reminder_number = cur.fetchone()["reminder_count"] + 1
+    cur.close()
+    conn.close()
+
+    billed = _money(booking.get("total_billed") or booking.get("grand_total"))
+    received = _money(booking.get("amount_received"))
+    balance = max(Decimal("0.00"), billed - received)
+    charge_sheet_id = booking.get("charge_sheet_id") or "not yet issued"
+    service_label = table_info[1]
+    completion_date = booking.get(table_info[2]) or "not available"
+    greeting_name = booking.get("user_name") or "there"
+
+    if internal:
+        subject = f"Reminder {reminder_number}: debit-head documents for {charge_sheet_id}"
+        message = (
+            f"Dear {greeting_name},\n\n"
+            "I hope you are doing well. This is a gentle reminder regarding the "
+            "completed service below. When convenient, could you please share the "
+            "debit-head document, duly signed by your PI, along with the charge "
+            "sheet at your earliest convenience?\n\n"
+        )
+    else:
+        subject = f"Reminder {reminder_number}: payment details for {charge_sheet_id}"
+        message = (
+            f"Dear {greeting_name},\n\n"
+            "I hope you are doing well. This is a gentle reminder regarding the "
+            "completed service below. When convenient, could you please share the "
+            "payment details or proof of payment (for example, the transaction "
+            "reference or receipt) against the charge sheet?\n\n"
+        )
+
+    message += (
+        f"Service: {service_label}\n"
+        f"Sample: {booking.get('sample_name') or 'Not provided'}\n"
+        f"Completed: {completion_date}\n"
+        f"Charge sheet: {charge_sheet_id}\n"
+        f"Amount billed: ₹{billed:,.2f}\n"
+        f"Amount received: ₹{received:,.2f}\n"
+        f"Balance pending: ₹{balance:,.2f}\n\n"
+        "Please let us know if you have already shared these details or need any "
+        "assistance. Thank you for your kind cooperation.\n\n"
+        "Warm regards,\n"
+        "Cryo-EM Team"
+    )
+    if not send_email_sync(recipient, subject, message):
+        flash(
+            f"Payment reminder {reminder_number} could not be sent. "
+            "Please try again later.",
+            "error",
+        )
+        return redirect(url_for("admin.panel"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """INSERT INTO payment_reminder_history
+           (service_key, booking_id, reminder_number)
+           VALUES (?, ?, ?)""",
+        [service_key, booking_id, reminder_number],
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(f"Payment reminder {reminder_number} sent to {recipient}.", "success")
+    return redirect(url_for("admin.panel"))
 
 
 def _pi_overview_counts(cur):

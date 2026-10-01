@@ -529,6 +529,7 @@ a { color: inherit; }
 .revenue-row { display: flex; justify-content: space-between; gap: 14px; padding: 11px 0; border-bottom: 1px solid #edf2f5; color: #43546a; font-size: 11px; }
 .revenue-row:last-child { border-bottom: 0; }
 .revenue-row strong { color: var(--navy); font-size: 12px; white-space: nowrap; }
+.reminder-count { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; text-align: center; }
 .usage-total { display: inline-flex; flex-direction: column; width: 48%; padding: 8px 0 14px; color: var(--muted); font-size: 10px; }
 .usage-total strong { color: var(--navy); font-size: 25px; }
 .chart-legend { display: grid; flex: 1; gap: 10px; }

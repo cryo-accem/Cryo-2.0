@@ -84,6 +84,120 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertNotIn(b"Paid User", response.data)
         self.assertNotIn(b"Proof User", response.data)
 
+    def test_payment_reminders_are_numbered_and_tracked_per_booking(self):
+        response = self.client.get("/admin/panel")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Send reminder mail (Reminder 1)", response.data)
+        with self.client.session_transaction() as session:
+            csrf_token = session["_csrf_token"]
+
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM bookings WHERE email=?", ["payment@example.com"])
+            booking_id = cur.fetchone()["id"]
+            cur.close()
+            conn.close()
+
+        with patch("blueprints.admin.send_email_sync", return_value=True) as send_email:
+            for reminder_number in (1, 2):
+                response = self.client.post(
+                    f"/admin/payment-reminder/imaging/{booking_id}",
+                    data={"_csrf_token": csrf_token},
+                )
+                self.assertEqual(response.status_code, 302)
+                self.assertIn(
+                    f"Reminder {reminder_number}: payment details".encode(),
+                    send_email.call_args.args[1].encode(),
+                )
+                self.assertEqual(send_email.call_args.args[0], "payment@example.com")
+
+        response = self.client.get("/admin/panel")
+        self.assertIn(b"Send reminder mail (Reminder 3)", response.data)
+        self.assertIn(b"2 sent", response.data)
+
+    def test_internal_payment_reminder_requests_pi_signed_debit_head_and_charge_sheet(self):
+        response = self.client.get("/admin/panel")
+        self.assertEqual(response.status_code, 200)
+        with self.client.session_transaction() as session:
+            csrf_token = session["_csrf_token"]
+
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM screening_bookings WHERE email=?",
+                ["internal@example.com"],
+            )
+            booking_id = cur.fetchone()["id"]
+            cur.close()
+            conn.close()
+
+        with patch("blueprints.admin.send_email_sync", return_value=True) as send_email:
+            response = self.client.post(
+                f"/admin/payment-reminder/screening/{booking_id}",
+                data={"_csrf_token": csrf_token},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(send_email.call_args.args[0], "internal@example.com")
+        self.assertIn("duly signed by your PI", send_email.call_args.args[2])
+        self.assertIn("debit-head document", send_email.call_args.args[2])
+        self.assertIn("charge sheet", send_email.call_args.args[2])
+        self.assertIn("Reminder 1:", send_email.call_args.args[1])
+
+    def test_payment_reminder_does_not_send_for_no_longer_pending_booking(self):
+        response = self.client.get("/admin/panel")
+        self.assertEqual(response.status_code, 200)
+        with self.client.session_transaction() as session:
+            csrf_token = session["_csrf_token"]
+
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM bookings WHERE email=?",
+                ["paid@example.com"],
+            )
+            booking_id = cur.fetchone()["id"]
+            cur.close()
+            conn.close()
+
+        with patch("blueprints.admin.send_email_sync") as send_email:
+            response = self.client.post(
+                f"/admin/payment-reminder/imaging/{booking_id}",
+                data={"_csrf_token": csrf_token},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        send_email.assert_not_called()
+
+    def test_failed_payment_reminder_is_not_counted_as_sent(self):
+        response = self.client.get("/admin/panel")
+        self.assertEqual(response.status_code, 200)
+        with self.client.session_transaction() as session:
+            csrf_token = session["_csrf_token"]
+
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM bookings WHERE email=?", ["payment@example.com"])
+            booking_id = cur.fetchone()["id"]
+            cur.close()
+            conn.close()
+
+        with patch("blueprints.admin.send_email_sync", return_value=False):
+            response = self.client.post(
+                f"/admin/payment-reminder/imaging/{booking_id}",
+                data={"_csrf_token": csrf_token},
+                follow_redirects=True,
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"could not be sent", response.data)
+        self.assertIn(b"Send reminder mail (Reminder 1)", response.data)
+        self.assertIn(b"0 sent", response.data)
+
     def test_accounting_counts_verified_bills_as_received_when_amount_is_blank(self):
         with self.app.app_context():
             conn = database.get_db()

@@ -622,6 +622,26 @@ def init_db():
                 PRIMARY KEY (academic_year, category)
             )
         """)
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_reminder_history (
+                service_key     TEXT NOT NULL,
+                booking_id      INTEGER NOT NULL,
+                reminder_number INTEGER NOT NULL,
+                sent_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (service_key, booking_id, reminder_number)
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_reminder_history (
+                service_key     VARCHAR(20) NOT NULL,
+                booking_id      INT NOT NULL,
+                reminder_number INT NOT NULL,
+                sent_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (service_key, booking_id, reminder_number)
+            )
+        """)
     _ensure_global_charge_sheet_sequence(cur)
 
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────

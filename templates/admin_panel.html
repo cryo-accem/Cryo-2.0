@@ -54,7 +54,7 @@
     {% if pending_payments.rows %}
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Tracking status</th><th>Billed</th><th>Received</th><th>Balance</th></tr></thead>
+        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Tracking status</th><th>Billed</th><th>Received</th><th>Balance</th><th>Reminder</th></tr></thead>
         <tbody>
           {% for item in pending_payments.rows %}
           <tr>
@@ -67,6 +67,7 @@
             <td>₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
             <td>₹{{ "{:,.2f}".format(item.amount_received or 0) }}</td>
             <td>₹{{ "{:,.2f}".format(item.pending_amount) }}</td>
+            <td><form method="post" action="{{ url_for('admin.send_payment_reminder', service_key=item.service_key, booking_id=item.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}"><button class="button small secondary" type="submit">Send reminder mail (Reminder {{ item.reminder_count + 1 }})</button><small class="reminder-count">{{ item.reminder_count }} sent</small></form></td>
           </tr>
           {% endfor %}
         </tbody>
