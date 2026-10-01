@@ -783,7 +783,7 @@ def _smooth_chart_path(points):
 
 def _revenue_dashboard(cur):
     today = datetime.date.today()
-    preset = request.args.get("range", "all")
+    preset = request.args.get("range", "this_year")
     period = request.args.get("period", "monthly")
     if period not in {"weekly", "monthly", "annual"}:
         period = "monthly"

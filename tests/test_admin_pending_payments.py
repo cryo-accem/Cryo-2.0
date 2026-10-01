@@ -84,10 +84,34 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertNotIn(b"Paid User", response.data)
         self.assertNotIn(b"Proof User", response.data)
 
+    def test_dashboard_defaults_to_this_year_and_monthly_with_hidden_custom_dates(self):
+        response = self.client.get("/admin/panel")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<option value="monthly" selected>Monthly</option>', response.data)
+        self.assertIn(b'<option value="this_year" selected>This year</option>', response.data)
+        self.assertIn(b"Showing this year revenue.", response.data)
+        self.assertIn(b'<span class="custom-range-fields" hidden>', response.data)
+        self.assertIn(b"Send reminder mail</button>", response.data)
+        self.assertIn(b"0 sent", response.data)
+        self.assertNotIn(b"Reminder 1", response.data)
+
+    def test_custom_date_fields_are_visible_for_custom_range(self):
+        response = self.client.get(
+            "/admin/panel?range=custom&start=2026-01-01&end=2026-09-30"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<span class="custom-range-fields">', response.data)
+        self.assertNotIn(
+            b'<span class="custom-range-fields" hidden>', response.data
+        )
+
     def test_payment_reminders_are_numbered_and_tracked_per_booking(self):
         response = self.client.get("/admin/panel")
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Send reminder mail (Reminder 1)", response.data)
+        self.assertIn(b"Send reminder mail</button>", response.data)
+        self.assertIn(b"0 sent", response.data)
         with self.client.session_transaction() as session:
             csrf_token = session["_csrf_token"]
 
@@ -113,8 +137,9 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
                 self.assertEqual(send_email.call_args.args[0], "payment@example.com")
 
         response = self.client.get("/admin/panel")
-        self.assertIn(b"Send reminder mail (Reminder 3)", response.data)
+        self.assertIn(b"Send reminder mail</button>", response.data)
         self.assertIn(b"2 sent", response.data)
+        self.assertNotIn(b"Reminder 3", response.data)
 
     def test_internal_payment_reminder_requests_pi_signed_debit_head_and_charge_sheet(self):
         response = self.client.get("/admin/panel")
@@ -195,7 +220,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"could not be sent", response.data)
-        self.assertIn(b"Send reminder mail (Reminder 1)", response.data)
+        self.assertIn(b"Send reminder mail</button>", response.data)
         self.assertIn(b"0 sent", response.data)
 
     def test_accounting_counts_verified_bills_as_received_when_amount_is_blank(self):
