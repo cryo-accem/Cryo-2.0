@@ -36,3 +36,34 @@ services:
         value: cryo-accem/Cryo-2.0
       - key: GITHUB_BRANCH
         value: main
+  # Render cron schedules are UTC: 04:30 UTC = 10:00 IST; 11:30 UTC = 17:00 IST.
+  - type: cron
+    name: cryo-freezing-slot-day-reminders
+    runtime: python
+    schedule: "30 4 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python freezing_reminders.py --when slot_day
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPS_SCRIPT_URL
+        sync: false
+      - key: GOOGLE_APPS_SCRIPT_TOKEN
+        sync: false
+      - key: FREEZING_REMINDER_EMAIL
+        value: cryoem.iisc@gmail.com
+  - type: cron
+    name: cryo-freezing-day-before-reminders
+    runtime: python
+    schedule: "30 11 * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python freezing_reminders.py --when day_before
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_APPS_SCRIPT_URL
+        sync: false
+      - key: GOOGLE_APPS_SCRIPT_TOKEN
+        sync: false
+      - key: FREEZING_REMINDER_EMAIL
+        value: cryoem.iisc@gmail.com
