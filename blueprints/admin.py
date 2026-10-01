@@ -1206,7 +1206,12 @@ def complete_freezing(booking_id):
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.freezing_admin"))
-    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+    has_grid_breakdown = bool(normal_grids or gold_grids)
+    if (
+        not grid_type
+        and not has_grid_breakdown
+        and grid_source.casefold() in {"facility", "facility provided"}
+    ):
         flash("Please select the grid type for facility-provided grids.")
         return redirect(url_for("admin.freezing_admin"))
     try:
