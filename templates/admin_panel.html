@@ -5,7 +5,7 @@
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Admin dashboard</h1><p>Manage registrations and monitor facility activity.</p></div></header>
   <div class="dashboard-charts">
     <section class="chart-card">
-      <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><i class="fa-solid fa-users" aria-hidden="true"></i></div>
+      <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><a class="button small secondary" href="{{ url_for('admin.download_pi_users_csv') }}">Download CSV</a></div>
       <div class="donut-layout">
         <div class="donut-chart" data-donut>
           <svg viewBox="0 0 120 120" aria-label="Users grouped by PI">
@@ -30,14 +30,53 @@
     </section>
   </div>
   <section class="revenue-dashboard">
-    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Net revenue combines completed booking revenue and CSIC net amounts. Booking GST and gross billed remain based on completed bills.</p></div><form class="revenue-filter" method="get"><select name="range" onchange="this.form.submit()"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom range</option></select>{% if revenue.preset == 'custom' %}<input type="date" name="start" value="{{ revenue.start }}" required><input type="date" name="end" value="{{ revenue.end }}" required><button class="button" type="submit">Apply</button>{% endif %}</form></div>
-    <div class="revenue-cards">{% for label, key in [('Net Revenue','net'),('CSIC Project Net Revenue','csic_net'),('GST','gst'),('Gross Billed','gross'),('Completed Bookings','bookings'),('Used 24-hour Slots','slots'),('CSIC Project Slots','csic_slots'),('Actual Grids','grids')] %}<div class="revenue-card"><span>{{ label }}</span><strong>{% if key in ['net','csic_net','gst','gross'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>{% endfor %}</div>
+    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values with CSIC project revenue included; GST and outstanding balances are based on completed bills.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
+    <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
+    <div class="revenue-cards">{% for label, key in [('Net Revenue','net'),('GST','gst'),('Gross Billed','gross'),('Amount Billed','billed'),('Amount Received','received'),('Outstanding','outstanding'),('Completed Bookings','bookings'),('Actual 24-hour Slots','slots'),('Actual Grids','grids')] %}<div class="revenue-card"><span>{{ label }}</span><strong>{% if key in ['net','gst','gross','billed','received','outstanding'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>{% endfor %}</div>
+    <div class="revenue-cards"><div class="revenue-card"><span>CSIC Project Net Revenue</span><strong>₹{{ "{:,.2f}".format(revenue.totals.csic_net) }}</strong></div><div class="revenue-card"><span>CSIC Project Slots</span><strong>{{ revenue.totals.csic_slots }}</strong></div></div>
     <div class="revenue-charts">
-      <section class="revenue-chart-card"><h3>Monthly booked net revenue</h3>{% if revenue.monthly %}<div class="line-chart"><svg viewBox="0 0 100 180" role="img" aria-label="Monthly booked net revenue">{% if revenue.monthly|length > 1 %}<polyline points="{% for item in revenue.monthly %}{{ item.x }},{{ item.y }} {% endfor %}" fill="none" stroke="#167da5" stroke-width="2" vector-effect="non-scaling-stroke"/>{% endif %}{% for item in revenue.monthly %}<circle cx="{{ item.x }}" cy="{{ item.y }}" r="2.5" fill="#32a889"><title>{{ item.label }}: ₹{{ "{:,.2f}".format(item.value) }}</title></circle>{% endfor %}</svg><div class="line-chart-labels">{% for item in revenue.monthly %}<small>{{ item.label }}</small>{% endfor %}</div></div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
+      <section class="revenue-chart-card"><div class="revenue-chart-title"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<button class="button small secondary download-revenue-chart" type="button" aria-label="Download {{ revenue.period|title }} net revenue chart as PNG"><i class="fa-solid fa-download" aria-hidden="true"></i> Download PNG</button>{% endif %}</div>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart" data-chart-title="{{ revenue.period|title }} net revenue">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}" data-label="{{ item.label }}" data-value="{{ item.value }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
+      <section class="revenue-chart-card revenue-comparison-card"><div class="comparison-heading"><div><h3>Revenue comparison</h3><p>Current year versus the previous year.</p><p class="comparison-change comparison-change--{{ revenue.year_comparison.change_direction }}"><strong>{{ revenue.year_comparison.change_period }}: {{ revenue.year_comparison.change_label }}</strong> vs {{ revenue.year_comparison.previous_year }}</p></div><div class="comparison-legend"><span><i class="comparison-dot comparison-dot--current"></i>{{ revenue.year_comparison.current_year }}</span><span><i class="comparison-dot comparison-dot--previous"></i>{{ revenue.year_comparison.previous_year }}</span></div></div><div class="comparison-chart" role="img" aria-label="Revenue comparison for {{ revenue.year_comparison.current_year }} and {{ revenue.year_comparison.previous_year }}"><svg viewBox="0 0 100 160" preserveAspectRatio="none"><line x1="5" y1="20" x2="95" y2="20" class="comparison-gridline"></line><line x1="5" y1="60" x2="95" y2="60" class="comparison-gridline"></line><line x1="5" y1="100" x2="95" y2="100" class="comparison-gridline"></line><line x1="5" y1="140" x2="95" y2="140" class="comparison-axis"></line><path d="{{ revenue.year_comparison.previous_path }}" class="comparison-line comparison-line--previous"></path><path d="{{ revenue.year_comparison.current_path }}" class="comparison-line comparison-line--current"></path>{% for item in revenue.year_comparison.months %}<circle cx="{{ item.x }}" cy="{{ item.previous_y }}" r="2.2" class="comparison-point comparison-point--previous"></circle><circle cx="{{ item.x }}" cy="{{ item.current_y }}" r="2.5" class="comparison-point comparison-point--current"></circle>{% endfor %}</svg><div class="comparison-labels">{% for item in revenue.year_comparison.months %}<span title="{{ item.label }}: {{ revenue.year_comparison.current_year }} ₹{{ '{:,.2f}'.format(item.current) }}, {{ revenue.year_comparison.previous_year }} ₹{{ '{:,.2f}'.format(item.previous) }}">{{ item.label }}</span>{% endfor %}</div></div></section>
       <section class="revenue-chart-card"><h3>Revenue by user category</h3>{% for item in revenue.by_category %}<div class="revenue-row"><span>{{ item.label }}</span><strong>₹{{ "{:,.2f}".format(item.value) }}</strong></div>{% endfor %}</section>
       <section class="revenue-chart-card"><h3>Revenue by service</h3>{% for item in revenue.by_service %}<div class="revenue-row"><span>{{ item.label }}</span><strong>₹{{ "{:,.2f}".format(item.value) }}</strong></div>{% endfor %}</section>
       <section class="revenue-chart-card"><h3>Actual usage</h3><div class="usage-total"><strong>{{ revenue.totals.slots }}</strong><span>24-hour slots used</span></div><div class="usage-total"><strong>{{ revenue.totals.grids }}</strong><span>grids used</span></div>{% for item in revenue.monthly %}<div class="revenue-row"><span>{{ item.label }}</span><strong>{{ item.slots }} slots</strong></div>{% endfor %}</section>
     </div>
+  </section>
+  <section class="revenue-dashboard" aria-labelledby="pending-payments-title">
+    <div class="revenue-heading">
+      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title">Pending payment tracking</h2><p>Completed billable records still marked pending in History. Internal accounts are listed separately as debit-head pending.</p></div>
+      <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
+    </div>
+    <div class="revenue-cards">
+      <div class="revenue-card"><span>Payment pending</span><strong>{{ pending_payments.payment_count }} records</strong></div>
+      <div class="revenue-card"><span>Payment balance outstanding</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
+      <div class="revenue-card"><span>Internal debit head pending</span><strong>{{ pending_payments.debit_head_count }} records</strong></div>
+    </div>
+    {% if pending_payments.rows %}
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Tracking status</th><th>Billed</th><th>Received</th><th>Balance</th><th>Reminder</th></tr></thead>
+        <tbody>
+          {% for item in pending_payments.rows %}
+          <tr>
+            <td>{{ item.service_label }}</td>
+            <td><strong>{{ item.user_name }}</strong><br><small>PI: {{ item.pi_name }}</small></td>
+            <td>{{ item.origin }}</td>
+            <td>{{ item.completion_value or '—' }}</td>
+            <td>{{ item.charge_sheet_id or 'Not issued' }}</td>
+            <td><span class="status-badge waiting">{{ item.tracking_label }}</span></td>
+            <td>₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
+            <td>₹{{ "{:,.2f}".format(item.amount_received or 0) }}</td>
+            <td>₹{{ "{:,.2f}".format(item.pending_amount) }}</td>
+            <td><form class="payment-reminder-form" method="post" action="{{ url_for('admin.send_payment_reminder', service_key=item.service_key, booking_id=item.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button small secondary payment-reminder-button" type="submit">Send reminder mail</button><small class="reminder-count">{{ item.reminder_count }} sent</small></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-message">No completed records are currently marked payment pending.</p>
+    {% endif %}
   </section>
   <section class="csic-project-box" id="csic-projects">
     <div class="csic-project-box__heading"><div><span class="chart-kicker">Industry proposals</span><h3>CSIC projects</h3><p>Enter net amounts before GST. Each saved project contributes its amount to net revenue and one 24-hour slot; GST is not calculated for these entries. Year-only amounts are included in full whenever the selected date range overlaps that calendar year; they are not prorated.</p></div></div>
@@ -56,10 +95,122 @@
   </section>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
-    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" onsubmit="return confirm('This will save completed registrations to an archive and permanently remove them from the database. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-      <button class="button archive-button" type="submit">Archive and remove completed</button>
+    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <button class="button archive-button" type="submit">Email backup and remove completed</button>
     </form>
-    <strong class="archive-warning">WARNING: Completed records are archived locally in <code>instance/registration_archives/</code> before being permanently deleted. GitHub synchronization is attempted when configured.</strong>
+    <strong class="archive-warning">A full backup is emailed to cryoem.iisc@gmail.com before completed records are permanently removed. No archive is saved on this server.</strong>
   </div>
+  <section class="activity-report-panel" aria-labelledby="activity-report-title">
+    <div><span class="chart-kicker">Monthly operations review</span><h2 id="activity-report-title">Download activity report</h2><p>Editable Word report covering completed freezing, clipping, screening and data collection, revenue and grid usage.</p></div>
+    <form class="activity-report-filter" method="get" action="{{ url_for('admin.download_activity_report') }}">
+      <label>Period
+        <select name="range">
+          <option value="this_month">This month</option>
+          <option value="last_month">Last month</option>
+          <option value="this_year">This year</option>
+          <option value="custom">Custom period selection</option>
+        </select>
+      </label>
+      <span class="activity-report-dates" hidden>
+        <label>From date <input type="date" name="start_date"></label>
+        <label>To date <input type="date" name="end_date"></label>
+      </span>
+      <button class="button" type="submit"><i class="fa-solid fa-file-word" aria-hidden="true"></i> Download .docx report</button>
+    </form>
+  </section>
 </section></main>
+<script>
+(() => {
+  const form = document.querySelector(".revenue-filter");
+  const range = form?.querySelector("[name=range]");
+  const custom = form?.querySelector(".custom-range-fields");
+  if (range && custom) {
+    const update = () => {
+      custom.hidden = range.value !== "custom";
+      custom.querySelectorAll("input").forEach((input) => { input.required = range.value === "custom"; });
+    };
+    range.addEventListener("change", update);
+    update();
+  }
+})();
+(() => {
+  const button = document.querySelector(".download-revenue-chart");
+  const chart = document.querySelector(".revenue-bars");
+  if (!button || !chart) return;
+
+  button.addEventListener("click", () => {
+    const items = [...chart.querySelectorAll(".revenue-bar-item")];
+    const canvas = document.createElement("canvas");
+    const width = Math.max(900, items.length * 110 + 100);
+    const height = 560;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    canvas.width = width;
+    canvas.height = height;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.fillStyle = "#14243a";
+    context.font = "700 26px Inter, Arial, sans-serif";
+    context.fillText(chart.dataset.chartTitle || "Net revenue", 50, 52);
+
+    const values = items.map((item) => Number(item.dataset.value) || 0);
+    const maximum = Math.max(...values, 1);
+    const left = 70;
+    const right = width - 40;
+    const top = 100;
+    const bottom = height - 75;
+    const plotHeight = bottom - top;
+    const slotWidth = (right - left) / Math.max(items.length, 1);
+    const barWidth = Math.min(58, slotWidth * 0.55);
+
+    context.strokeStyle = "#dce4eb";
+    context.lineWidth = 1;
+    for (let row = 0; row <= 4; row += 1) {
+      const y = top + (plotHeight * row / 4);
+      context.beginPath();
+      context.moveTo(left, y);
+      context.lineTo(right, y);
+      context.stroke();
+    }
+    items.forEach((item, index) => {
+      const value = values[index];
+      const x = left + slotWidth * index + (slotWidth - barWidth) / 2;
+      const barHeight = (value / maximum) * plotHeight;
+      const y = bottom - barHeight;
+      const gradient = context.createLinearGradient(0, y, 0, bottom);
+      gradient.addColorStop(0, "#167da5");
+      gradient.addColorStop(1, "#32a889");
+      context.fillStyle = gradient;
+      context.fillRect(x, y, barWidth, Math.max(barHeight, 2));
+      context.fillStyle = "#14243a";
+      context.font = "600 13px Inter, Arial, sans-serif";
+      context.textAlign = "center";
+      context.fillText(`₹${Math.round(value).toLocaleString("en-IN")}`, x + barWidth / 2, Math.max(y - 10, top - 8));
+      context.fillStyle = "#64748b";
+      context.font = "12px Inter, Arial, sans-serif";
+      context.fillText(item.dataset.label, x + barWidth / 2, bottom + 28);
+    });
+    context.textAlign = "left";
+    const link = document.createElement("a");
+    link.download = `revenue-${chart.dataset.chartTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  });
+})();
+(() => {
+  const form = document.querySelector(".activity-report-filter");
+  const range = form?.querySelector("[name=range]");
+  const dates = form?.querySelector(".activity-report-dates");
+  if (range && dates) {
+    const update = () => {
+      dates.hidden = range.value !== "custom";
+      dates.querySelectorAll("input").forEach((input) => {
+        input.required = range.value === "custom";
+      });
+    };
+    range.addEventListener("change", update);
+    update();
+  }
+})();
+</script>
 {% endblock %}

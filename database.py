@@ -121,6 +121,215 @@ def _drop_unique_email(cur, table: str):
             print(f"  Could not drop index {idx} on {table}: {e}")
 
 
+def _drop_users_email_unique(cur):
+    """Allow shared admin mailboxes while preserving existing user accounts."""
+    if not _is_sqlite_url():
+        _drop_unique_email(cur, "users")
+        cur.execute(
+            "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s "
+            "AND COLUMN_NAME=%s",
+            ["users", "email_unique_guard"],
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN email_unique_guard VARCHAR(150) "
+                "GENERATED ALWAYS AS "
+                "(CASE WHEN role = 'admin' THEN NULL ELSE email END) STORED"
+            )
+        cur.execute(
+            "SELECT INDEX_NAME FROM information_schema.STATISTICS "
+            "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s AND INDEX_NAME=%s",
+            ["users", "users_unique_non_admin_email"],
+        )
+        if not cur.fetchone():
+            cur.execute(
+                "CREATE UNIQUE INDEX users_unique_non_admin_email "
+                "ON users (email_unique_guard)"
+            )
+        return
+
+    cur.execute("PRAGMA index_list(users)")
+    for index in cur.fetchall():
+        if not index["unique"]:
+            continue
+        index_name = str(index["name"]).replace('"', '""')
+        cur.execute(f'PRAGMA index_info("{index_name}")')
+        columns = [row["name"] for row in cur.fetchall()]
+        if columns == ["email"]:
+            cur.execute("PRAGMA table_info(users)")
+            existing_columns = {row["name"] for row in cur.fetchall()}
+            password_change_value = (
+                "must_change_password"
+                if "must_change_password" in existing_columns
+                else "0"
+            )
+            cur.execute("""
+                CREATE TABLE users_without_email_unique (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username      VARCHAR(100),
+                    email         VARCHAR(150),
+                    password_hash VARCHAR(255),
+                    role          TEXT CHECK(role IN ('user', 'admin')) DEFAULT 'user',
+                    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    must_change_password INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            cur.execute(f"""
+                INSERT INTO users_without_email_unique
+                    (id, username, email, password_hash, role, created_at, must_change_password)
+                SELECT id, username, email, password_hash, role, created_at, {password_change_value}
+                FROM users
+            """)
+            cur.execute("DROP TABLE users")
+            cur.execute("ALTER TABLE users_without_email_unique RENAME TO users")
+            break
+
+    cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS users_unique_non_admin_email
+        ON users (email)
+        WHERE role != 'admin' AND email IS NOT NULL
+    """)
+
+
+def _ensure_password_change_column(cur):
+    if _is_sqlite_url():
+        cur.execute("PRAGMA table_info(users)")
+        columns = {row["name"] for row in cur.fetchall()}
+        if "must_change_password" not in columns:
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN must_change_password "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+            cur.execute(
+                "UPDATE users SET must_change_password=? "
+                "WHERE username=? AND role=?",
+                [1, "convenor", "admin"],
+            )
+        return
+
+    cur.execute(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s "
+        "AND COLUMN_NAME=%s",
+        ["users", "must_change_password"],
+    )
+    if not cur.fetchone():
+        cur.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password "
+            "BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+        cur.execute(
+            "UPDATE users SET must_change_password=%s "
+            "WHERE username=%s AND role=%s",
+            [True, "convenor", "admin"],
+        )
+
+
+def _seed_bootstrap_admin(cur):
+    username = os.environ.get("BOOTSTRAP_ADMIN_USERNAME", "").strip().lower()
+    email = os.environ.get("BOOTSTRAP_ADMIN_EMAIL", "").strip().lower()
+    password = os.environ.get("BOOTSTRAP_ADMIN_PASSWORD", "")
+    if not any((username, email, password)):
+        return
+    if not all((username, email, password)):
+        raise RuntimeError(
+            "BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL, and "
+            "BOOTSTRAP_ADMIN_PASSWORD must all be configured together."
+        )
+    if len(password) < 12:
+        raise RuntimeError("The bootstrap admin password must be at least 12 characters.")
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS bootstrap_admins (
+            username VARCHAR(100) NOT NULL PRIMARY KEY
+        )
+    """)
+    cur.execute("SELECT username FROM bootstrap_admins WHERE username=?", [username])
+    if cur.fetchone():
+        return
+
+    cur.execute(
+        "SELECT id, role FROM users WHERE username=?",
+        [username],
+    )
+    existing = cur.fetchone()
+    if existing:
+        if existing["role"] != "admin":
+            raise RuntimeError(
+                "The configured bootstrap admin username already belongs to a non-admin user."
+            )
+        user_id = existing["id"]
+    else:
+        user_id = None
+
+    cur.execute(
+        "SELECT id FROM users WHERE email=? AND role<>?",
+        [email, "admin"],
+    )
+    if cur.fetchone():
+        raise RuntimeError(
+            "The bootstrap admin email is already assigned to a non-admin user."
+        )
+
+    password_hash = generate_password_hash(password, method="pbkdf2:sha256")
+    if user_id is None:
+        cur.execute(
+            "INSERT INTO users "
+            "(username, email, password_hash, role, must_change_password) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [username, email, password_hash, "admin", 1],
+        )
+    else:
+        cur.execute(
+            "UPDATE users SET email=?, password_hash=?, must_change_password=? "
+            "WHERE id=? AND role=?",
+            [email, password_hash, 1, user_id, "admin"],
+        )
+    cur.execute("INSERT INTO bootstrap_admins (username) VALUES (?)", [username])
+
+
+def _ensure_global_charge_sheet_sequence(cur):
+    """Seed one shared bill counter without reusing numbers already issued."""
+    latest_number = 75
+    cur.execute(
+        "SELECT next_number FROM charge_sheet_sequences"
+    )
+    latest_number = max(
+        latest_number,
+        max((int(row["next_number"] or 0) for row in cur.fetchall()), default=0),
+    )
+    for table in ("bookings", "screening_bookings", "completed_freezing"):
+        cur.execute(
+            f"SELECT charge_sheet_id FROM {table} "
+            "WHERE charge_sheet_id IS NOT NULL"
+        )
+        for row in cur.fetchall():
+            value = str(row["charge_sheet_id"] or "")
+            suffix = value.rsplit("_", 1)[-1]
+            if suffix.isdigit():
+                latest_number = max(latest_number, int(suffix))
+
+    cur.execute(
+        "SELECT next_number FROM charge_sheet_sequences "
+        "WHERE academic_year=? AND category=?",
+        [0, "all"],
+    )
+    sequence = cur.fetchone()
+    if not sequence:
+        cur.execute(
+            "INSERT INTO charge_sheet_sequences "
+            "(academic_year, category, next_number) VALUES (?, ?, ?)",
+            [0, "all", latest_number],
+        )
+    elif int(sequence["next_number"] or 0) < latest_number:
+        cur.execute(
+            "UPDATE charge_sheet_sequences SET next_number=? "
+            "WHERE academic_year=? AND category=?",
+            [latest_number, 0, "all"],
+        )
+
+
 def init_db():
     """
     Create tables if not exist. Never modifies existing data.
@@ -136,7 +345,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 username      VARCHAR(100),
-                email         VARCHAR(150) UNIQUE,
+                email         VARCHAR(150),
                 password_hash VARCHAR(255),
                 role          TEXT CHECK(role IN ('user', 'admin')) DEFAULT 'user',
                 created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -212,10 +421,13 @@ def init_db():
             CREATE TABLE IF NOT EXISTS users (
                 id            INT AUTO_INCREMENT PRIMARY KEY,
                 username      VARCHAR(100),
-                email         VARCHAR(150) UNIQUE,
+                email         VARCHAR(150),
                 password_hash VARCHAR(255),
                 role          ENUM('user','admin') DEFAULT 'user',
-                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                email_unique_guard VARCHAR(150)
+                    GENERATED ALWAYS AS
+                    (CASE WHEN role = 'admin' THEN NULL ELSE email END) STORED
             )
         """)
 
@@ -413,9 +625,52 @@ def init_db():
     _add_completion_columns(cur, "screening_bookings")
     _add_completion_columns(cur, "completed_freezing")
 
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS charge_sheet_sequences (
+                academic_year INTEGER NOT NULL,
+                category      TEXT NOT NULL,
+                next_number   INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (academic_year, category)
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS charge_sheet_sequences (
+                academic_year INT NOT NULL,
+                category      VARCHAR(10) NOT NULL,
+                next_number   INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (academic_year, category)
+            )
+        """)
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_reminder_history (
+                service_key     TEXT NOT NULL,
+                booking_id      INTEGER NOT NULL,
+                reminder_number INTEGER NOT NULL,
+                sent_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (service_key, booking_id, reminder_number)
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_reminder_history (
+                service_key     VARCHAR(20) NOT NULL,
+                booking_id      INT NOT NULL,
+                reminder_number INT NOT NULL,
+                sent_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (service_key, booking_id, reminder_number)
+            )
+        """)
+    _ensure_global_charge_sheet_sequence(cur)
+
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
     # Completely safe — if no unique index exists, nothing happens.
+    _drop_users_email_unique(cur)
+    _ensure_password_change_column(cur)
+    _seed_bootstrap_admin(cur)
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
@@ -462,6 +717,7 @@ def _add_completion_columns(cur, table: str):
             "generated_by": "INTEGER",
             "processing_requested": "INTEGER NOT NULL DEFAULT 0",
             "clipped_grids": "INTEGER NOT NULL DEFAULT 0",
+            "charge_sheet_id": "TEXT",
         }
     else:
         cur.execute(
@@ -493,6 +749,7 @@ def _add_completion_columns(cur, table: str):
             "generated_by": "INT NULL",
             "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",
             "clipped_grids": "INT NOT NULL DEFAULT 0",
+            "charge_sheet_id": "VARCHAR(30)",
         }
 
     for column, column_type in column_types.items():

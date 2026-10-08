@@ -40,25 +40,6 @@
     </tbody></table></div>{% else %}<p class="empty-message">No managed publications yet.</p>{% endif %}
   </section>
 
-  <section class="data-panel maintenance-list">
-    <h2>Editable public pages</h2>
-    <p class="maintenance-help">Update page headings and add a plain-text content block. Existing operational sections stay in place, so the site remains safe and consistent while future operators can refresh messaging without code.</p>
-    {% for page in pages %}
-    <form method="post" action="{{ url_for('admin.save_page') }}" class="page-editor">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="id" value="{{ page.id }}">
-      <div class="page-editor__title"><strong>{{ page.page_name }}</strong><span>/{{ 'publication' if page.page_key == 'publications' else page.page_key }}</span></div>
-      <div class="maintenance-form">
-        <label class="form-field"><span>Eyebrow</span><input name="eyebrow" value="{{ page.eyebrow or '' }}"></label>
-        <label class="form-field"><span>Page title</span><input name="title" required value="{{ page.title }}"></label>
-        <label class="form-field full"><span>Introduction</span><textarea name="intro" rows="2">{{ page.intro or '' }}</textarea></label>
-        <label class="form-field full"><span>Additional content</span><textarea name="additional_content" rows="3" placeholder="Add announcements, contact notes or page information.">{{ page.additional_content or '' }}</textarea></label>
-      </div>
-      <button class="button" type="submit">Save {{ page.page_name }} page</button>
-    </form>
-    {% endfor %}
-  </section>
-
   <section class="data-panel maintenance-list"><h2>Managed instruments</h2>
     {% if instruments %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Category</th><th>Description</th><th>Actions</th></tr></thead><tbody>
       {% for instrument in instruments %}<tr><td>{{ instrument.name }}</td><td>{{ instrument.category or '—' }}</td><td>{{ instrument.description }}</td><td class="action-buttons"><a class="btn btn-load" href="{{ url_for('admin.maintenance', edit_instrument=instrument.id) }}">Edit</a><form method="post" action="{{ url_for('admin.delete_instrument', instrument_id=instrument.id) }}" style="display:inline" onsubmit="return confirm('Remove this instrument from the website?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="btn btn-delete" type="submit">Delete</button></form></td></tr>{% endfor %}

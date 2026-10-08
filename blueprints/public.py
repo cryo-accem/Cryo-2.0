@@ -8,6 +8,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify
 from database import get_db
+from normalization import clean_display_name
 
 public_bp = Blueprint("public", __name__)
 _publication_cache = {"timestamp": 0.0, "count": 36, "source": "curated fallback"}
@@ -27,14 +28,30 @@ PI_USERS = [
     ("Prof. Dipshikha Chakravortty", 1), ("Prof. Dipankar Chatterji", 1), ("Prof. K. Suguna", 1),
     ("Prof. B. Gopal", 1), ("Dr. Aravind Pentamasa", 5), ("Dr. Somnath Dutta", 8),
     ("Dr. Ashok Sekhar", 1), ("Dr. Jayanta Chatterjee", 1), ("Dr. Mahavir Singh", 2),
-    ("Dr. Tanweer Hussain", 4), ("Dr. Raghavan Varadarajan", 5), ("Dr. Vidhya Mangala Prasad", 8),
+    ("Dr. Tanweer Hussain", 7), ("Dr. Raghavan Varadarajan", 5), ("Dr. Vidhya Mangala Prasad", 8),
     ("Dr. Amit Baidya", 3), ("Dr. Mahipal Ganji", 2), ("Dr. Saibal Chatterjee", 1),
     ("Dr. Saravanan Palani", 1), ("Dr. Srimonta Gayen", 3), ("Prof. Siddhartha P. Sarma", 2),
     ("Dr. Amit Singh", 2), ("Dr. Deepak K. Saini", 1), ("Dr. Kartik Sunagar", 1),
     ("Prof. P. K. Das", 1), ("Prof. Aninda J. Bhattacharyya", 1), ("Dr. Subinoy Rana", 1),
-    ("Dr. Debasis Das", 3), ("Prof. Uday Maitra", 9), ("Prof. Joydeep Basu", 1),
+    ("Dr. Debasis Das", 2), ("Prof. Uday Maitra", 5), ("Prof. Joydeep Basu", 1),
     ("Dr. Sivaprakasam Ramamoorthy", 2),
+    ("Dr. Mrinmoy De", 4),
 ]
+
+
+def get_combined_ongoing_slots(cur):
+    """Return ongoing data-collection and screening slots in one schedule."""
+    cur.execute(
+        """SELECT id AS booking_ref, user_name, pi_name, origin, esm,
+                  registration_date, 'Data collection' AS service, id
+           FROM bookings WHERE status='ongoing'
+           UNION ALL
+           SELECT id AS booking_ref, user_name, pi_name, origin, esm,
+                  registration_date, 'Screening' AS service, id
+           FROM screening_bookings WHERE status='ongoing'
+           ORDER BY registration_date, id"""
+    )
+    return cur.fetchall()
 
 ACADEMIC_USERS = [
     ("NCCS, Pune", 2), ("IIT-Bombay", 3), ("InStem", 1), ("Bose Institute", 4),
@@ -91,18 +108,28 @@ def get_slideshow_images():
 
 def get_user_statistics():
     """Combine the published baseline with newly logged registrations."""
-    baseline = {"Internal": 72, "External": 54, "Industry": 44}
+    baseline = {"Internal": 74, "External": 64, "Industry": 25}
     try:
         conn = get_db()
         cur = conn.cursor()
         registrations = []
         for table in ("bookings", "screening_bookings", "freezing_bookings"):
-            cur.execute(f"SELECT origin FROM {table} WHERE origin IS NOT NULL AND origin != ''")
+            cur.execute(
+                f"SELECT origin, user_name, email FROM {table} "
+                "WHERE origin IS NOT NULL AND origin != ''"
+            )
             registrations.extend(cur.fetchall())
         conn.close()
 
+        seen_users = set()
         for row in registrations:
             origin = row["origin"] if isinstance(row, dict) else row[0]
+            user_name = row["user_name"] if isinstance(row, dict) else row[1]
+            email = row["email"] if isinstance(row, dict) else row[2]
+            identity = clean_display_name(email or user_name).casefold()
+            if not identity or identity in seen_users:
+                continue
+            seen_users.add(identity)
             normalized = origin.strip().lower()
             category = (
                 "Industry" if "industry" in normalized
