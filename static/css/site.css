@@ -489,6 +489,14 @@ a { color: inherit; }
 .revenue-card:nth-child(3) { border-top: 3px solid #32a889; }
 .revenue-card:nth-child(4) { border-top: 3px solid #7d6bb5; }
 .revenue-card:nth-child(5), .revenue-card:nth-child(6) { border-top: 3px solid #55aec5; }
+.csic-project-box { margin-top: 18px; padding: 22px; border: 1px solid #dce8ed; border-radius: 14px; background: rgba(255,255,255,.82); }
+.csic-project-box__heading h3 { margin: 4px 0 5px; color: var(--navy); font-size: 17px; }
+.csic-project-box__heading p { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.csic-project-form { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(100px, .8fr) minmax(150px, 1.2fr) auto; align-items: end; gap: 12px; margin-top: 18px; }
+.csic-project-form .button { min-height: 42px; white-space: nowrap; }
+.csic-project-table { margin-top: 18px; }
+.csic-project-table td form { margin: 0; }
+.csic-project-table .button { min-height: 34px; padding: 7px 12px; }
 .revenue-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
 .revenue-chart-card { min-width: 0; min-height: 220px; padding: 20px; border: 1px solid #dfebef; border-radius: 14px; background: rgba(255,255,255,.82); }
 .revenue-chart-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -1259,4 +1267,11 @@ a { color: inherit; }
 @media (max-width: 760px) {
   .maintenance-grid, .maintenance-form { grid-template-columns: 1fr; }
   .maintenance-form .form-actions { grid-column: auto; }
+}
+@media (max-width: 800px) {
+  .admin-area .csic-project-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 480px) {
+  .admin-area .csic-project-box { padding: 16px 12px; }
+  .admin-area .csic-project-form { grid-template-columns: minmax(0, 1fr); }
 }
