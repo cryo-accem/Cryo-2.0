@@ -71,6 +71,80 @@ class AdminCsicProjectTests(unittest.TestCase):
         self.assertIn(b"0.05", response.data)
         self.assertIn(b"0.30", response.data)
 
+    def test_existing_csic_project_can_be_edited_and_totals_are_recalculated(self):
+        current_year = datetime.date.today().year
+        created = self.client.post(
+            "/admin/csic-projects",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Old Company",
+                "year": str(current_year),
+                "net_amount": "1000.00",
+            },
+        )
+        self.assertEqual(created.status_code, 302)
+        with self.app.app_context():
+            conn = database.get_db()
+            project_id = conn.execute(
+                "SELECT id FROM csic_projects WHERE company_name=?",
+                ["Old Company"],
+            ).fetchone()["id"]
+            conn.close()
+
+        response = self.client.post(
+            f"/admin/csic-projects/{project_id}/edit",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Updated Company",
+                "year": str(current_year),
+                "net_amount": "2500.00",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Updated Company", response.data)
+        self.assertNotIn(b"Old Company", response.data)
+        self.assertIn(b"2,500.00", response.data)
+        self.assertIn(b"450.00", response.data)
+        self.assertIn(b"2,950.00", response.data)
+        self.assertIn(b"CSIC project updated.", response.data)
+
+    def test_invalid_csic_edit_does_not_change_the_existing_project(self):
+        current_year = datetime.date.today().year
+        self.client.post(
+            "/admin/csic-projects",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Keep This Company",
+                "year": str(current_year),
+                "net_amount": "1000.00",
+            },
+        )
+        with self.app.app_context():
+            conn = database.get_db()
+            project_id = conn.execute(
+                "SELECT id FROM csic_projects WHERE company_name=?",
+                ["Keep This Company"],
+            ).fetchone()["id"]
+            conn.close()
+
+        response = self.client.post(
+            f"/admin/csic-projects/{project_id}/edit",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Should Not Save",
+                "year": str(current_year),
+                "net_amount": "-1",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Keep This Company", response.data)
+        self.assertNotIn(b"Should Not Save", response.data)
+        self.assertIn(b"positive net amount", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -74,6 +74,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.archive_completed_registrations",
     "admin.billing_preview",
     "admin.add_csic_project",
+    "admin.edit_csic_project",
     "admin.delete_csic_project",
     "admin.maintenance",
     "admin.save_publication",
@@ -519,39 +520,74 @@ def download_pi_users_csv():
     )
 
 
-@admin_bp.route("/csic-projects", methods=["POST"])
-def add_csic_project():
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
-
+def _validated_csic_project_form():
     company_name = request.form.get("company_name", "").strip()
     year_text = request.form.get("year", "").strip()
     amount_text = request.form.get("net_amount", "").strip()
     if not company_name or len(company_name) > 180:
         flash("Enter a company name of 1 to 180 characters.", "error")
-        return redirect(url_for("admin.panel"))
+        return None
     if not re.fullmatch(r"\d{4}", year_text) or not 1900 <= int(year_text) <= 2100:
         flash("Enter a valid four-digit year between 1900 and 2100.", "error")
-        return redirect(url_for("admin.panel"))
+        return None
     if not re.fullmatch(r"\d{1,10}(?:\.\d{1,2})?", amount_text):
         flash("Enter a positive net amount with up to two decimal places.", "error")
-        return redirect(url_for("admin.panel"))
+        return None
 
     amount = Decimal(amount_text)
     if amount <= 0 or amount > Decimal("9999999999.99"):
         flash("Net amount must be greater than zero and no more than ₹9,999,999,999.99.", "error")
+        return None
+    return company_name, int(year_text), str(amount.quantize(Decimal("0.01")))
+
+
+@admin_bp.route("/csic-projects", methods=["POST"])
+def add_csic_project():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    project = _validated_csic_project_form()
+    if project is None:
         return redirect(url_for("admin.panel"))
 
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
         "INSERT INTO csic_projects (company_name, year, net_amount) VALUES (?, ?, ?)",
-        [company_name, int(year_text), str(amount.quantize(Decimal("0.01")))],
+        project,
     )
     conn.commit()
     cur.close()
     conn.close()
     flash("CSIC project added to revenue and slot usage.", "success")
+    return redirect(url_for("admin.panel"))
+
+
+@admin_bp.route("/csic-projects/<int:project_id>/edit", methods=["POST"])
+def edit_csic_project(project_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    project = _validated_csic_project_form()
+    if project is None:
+        return redirect(url_for("admin.panel"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM csic_projects WHERE id=?", [project_id])
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        flash("CSIC project not found.", "error")
+        return redirect(url_for("admin.panel"))
+    cur.execute(
+        "UPDATE csic_projects SET company_name=?, year=?, net_amount=? WHERE id=?",
+        [*project, project_id],
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("CSIC project updated.", "success")
     return redirect(url_for("admin.panel"))
 
 

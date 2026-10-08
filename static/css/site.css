@@ -498,6 +498,11 @@ a { color: inherit; }
 .csic-tax-preview strong { color: var(--navy); }
 .csic-project-table { margin-top: 18px; }
 .csic-project-table td form { margin: 0; }
+.csic-project-table td form + form { margin-top: 6px; }
+.csic-edit-input { width: 170px; min-width: 0; padding: 7px 9px; border: 1px solid #c9dbe3; border-radius: 7px; color: #43546a; font: inherit; font-size: 11px; }
+.csic-edit-input:focus { outline: 0; border-color: #167da5; box-shadow: 0 0 0 3px rgba(72, 200, 232, .14); }
+.csic-edit-input--number { width: 82px; }
+.csic-edit-input--amount { width: 125px; }
 .csic-project-table .button { min-height: 34px; padding: 7px 12px; }
 .revenue-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
 .revenue-chart-card { min-width: 0; min-height: 220px; padding: 20px; border: 1px solid #dfebef; border-radius: 14px; background: rgba(255,255,255,.82); }
