@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.request
 import uuid
 import zipfile
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
     redirect, url_for, session, flash,
@@ -918,13 +918,20 @@ def _revenue_dashboard(cur):
         project_year = int(project["year"])
         if start and project_year < start.year or end and project_year > end.year:
             continue
+        project = dict(project)
+        project["net_amount"] = _money(project["net_amount"])
+        project["gst_amount"] = (project["net_amount"] * Decimal("0.18")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        project["gross_amount"] = project["net_amount"] + project["gst_amount"]
         csic_projects.append(project)
 
     totals = {
         "net": Decimal("0"), "gst": Decimal("0"), "gross": Decimal("0"),
         "billed": Decimal("0"), "received": Decimal("0"), "outstanding": Decimal("0"),
         "slots": Decimal("0"), "grids": Decimal("0"),
-        "csic_net": Decimal("0"), "csic_slots": Decimal("0"),
+        "csic_net": Decimal("0"), "csic_gst": Decimal("0"),
+        "csic_gross": Decimal("0"), "csic_slots": Decimal("0"),
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
     by_service = {"Data Collection": Decimal("0"), "Screening": Decimal("0"),
@@ -1022,9 +1029,13 @@ def _revenue_dashboard(cur):
 
     for project in csic_projects:
         net = _money(project["net_amount"])
+        gst = project["gst_amount"]
         totals["net"] += net
-        totals["gross"] += net
+        totals["gst"] += gst
+        totals["gross"] += net + gst
         totals["csic_net"] += net
+        totals["csic_gst"] += gst
+        totals["csic_gross"] += net + gst
         totals["slots"] += Decimal("1")
         totals["csic_slots"] += Decimal("1")
         by_category["Industrial"] += net

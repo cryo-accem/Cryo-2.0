@@ -30,10 +30,10 @@
     </section>
   </div>
   <section class="revenue-dashboard">
-    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values with CSIC project revenue included; GST and outstanding balances are based on completed bills.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
+    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values with CSIC project revenue included. CSIC GST is calculated at 18% of the entered net amount.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
     <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
     <div class="revenue-cards">{% for label, key in [('Net Revenue','net'),('GST','gst'),('Gross Billed','gross'),('Amount Billed','billed'),('Amount Received','received'),('Outstanding','outstanding'),('Completed Bookings','bookings'),('Actual 24-hour Slots','slots'),('Actual Grids','grids')] %}<div class="revenue-card"><span>{{ label }}</span><strong>{% if key in ['net','gst','gross','billed','received','outstanding'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>{% endfor %}</div>
-    <div class="revenue-cards"><div class="revenue-card"><span>CSIC Project Net Revenue</span><strong>₹{{ "{:,.2f}".format(revenue.totals.csic_net) }}</strong></div><div class="revenue-card"><span>CSIC Project Slots</span><strong>{{ revenue.totals.csic_slots }}</strong></div></div>
+    <div class="revenue-cards"><div class="revenue-card"><span>CSIC Project Net Revenue</span><strong>₹{{ "{:,.2f}".format(revenue.totals.csic_net) }}</strong></div><div class="revenue-card"><span>CSIC Project GST (18%)</span><strong>₹{{ "{:,.2f}".format(revenue.totals.csic_gst) }}</strong></div><div class="revenue-card"><span>CSIC Project Gross</span><strong>₹{{ "{:,.2f}".format(revenue.totals.csic_gross) }}</strong></div><div class="revenue-card"><span>CSIC Project Slots</span><strong>{{ revenue.totals.csic_slots }}</strong></div></div>
     <div class="revenue-charts">
       <section class="revenue-chart-card"><div class="revenue-chart-title"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<button class="button small secondary download-revenue-chart" type="button" aria-label="Download {{ revenue.period|title }} net revenue chart as PNG"><i class="fa-solid fa-download" aria-hidden="true"></i> Download PNG</button>{% endif %}</div>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart" data-chart-title="{{ revenue.period|title }} net revenue">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}" data-label="{{ item.label }}" data-value="{{ item.value }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
       <section class="revenue-chart-card revenue-comparison-card"><div class="comparison-heading"><div><h3>Revenue comparison</h3><p>Current year versus the previous year.</p><p class="comparison-change comparison-change--{{ revenue.year_comparison.change_direction }}"><strong>{{ revenue.year_comparison.change_period }}: {{ revenue.year_comparison.change_label }}</strong> vs {{ revenue.year_comparison.previous_year }}</p></div><div class="comparison-legend"><span><i class="comparison-dot comparison-dot--current"></i>{{ revenue.year_comparison.current_year }}</span><span><i class="comparison-dot comparison-dot--previous"></i>{{ revenue.year_comparison.previous_year }}</span></div></div><div class="comparison-chart" role="img" aria-label="Revenue comparison for {{ revenue.year_comparison.current_year }} and {{ revenue.year_comparison.previous_year }}"><svg viewBox="0 0 100 160" preserveAspectRatio="none"><line x1="5" y1="20" x2="95" y2="20" class="comparison-gridline"></line><line x1="5" y1="60" x2="95" y2="60" class="comparison-gridline"></line><line x1="5" y1="100" x2="95" y2="100" class="comparison-gridline"></line><line x1="5" y1="140" x2="95" y2="140" class="comparison-axis"></line><path d="{{ revenue.year_comparison.previous_path }}" class="comparison-line comparison-line--previous"></path><path d="{{ revenue.year_comparison.current_path }}" class="comparison-line comparison-line--current"></path>{% for item in revenue.year_comparison.months %}<circle cx="{{ item.x }}" cy="{{ item.previous_y }}" r="2.2" class="comparison-point comparison-point--previous"></circle><circle cx="{{ item.x }}" cy="{{ item.current_y }}" r="2.5" class="comparison-point comparison-point--current"></circle>{% endfor %}</svg><div class="comparison-labels">{% for item in revenue.year_comparison.months %}<span title="{{ item.label }}: {{ revenue.year_comparison.current_year }} ₹{{ '{:,.2f}'.format(item.current) }}, {{ revenue.year_comparison.previous_year }} ₹{{ '{:,.2f}'.format(item.previous) }}">{{ item.label }}</span>{% endfor %}</div></div></section>
@@ -79,17 +79,18 @@
     {% endif %}
   </section>
   <section class="csic-project-box" id="csic-projects">
-    <div class="csic-project-box__heading"><div><span class="chart-kicker">Industry proposals</span><h3>CSIC projects</h3><p>Enter net amounts before GST. Each saved project contributes its amount to net revenue and one 24-hour slot; GST is not calculated for these entries. Year-only amounts are included in full whenever the selected date range overlaps that calendar year; they are not prorated.</p></div></div>
+    <div class="csic-project-box__heading"><div><span class="chart-kicker">Industry proposals</span><h3>CSIC projects</h3><p>Enter the net amount before GST. GST is calculated automatically at 18%; each saved project contributes one 24-hour slot. Year-only amounts are included in full whenever the selected date range overlaps that calendar year; they are not prorated.</p></div></div>
     <form class="csic-project-form" method="post" action="{{ url_for('admin.add_csic_project') }}">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
       <div class="form-field"><label for="csic-company">Company name</label><input id="csic-company" name="company_name" maxlength="180" required></div>
       <div class="form-field"><label for="csic-year">Year</label><input id="csic-year" name="year" type="number" min="1900" max="2100" value="{{ current_year }}" required></div>
-      <div class="form-field"><label for="csic-amount">Net amount (₹)</label><input id="csic-amount" name="net_amount" type="number" min="0.01" step="0.01" required></div>
+      <div class="form-field"><label for="csic-amount">Net amount (₹, before GST)</label><input id="csic-amount" name="net_amount" type="number" min="0.01" step="0.01" required></div>
       <button class="button" type="submit">Add CSIC project</button>
+      <div class="csic-tax-preview" aria-live="polite"><span>GST (18%): <strong id="csic-gst-preview">₹0.00</strong></span><span>Gross total: <strong id="csic-gross-preview">₹0.00</strong></span></div>
     </form>
     {% if revenue.csic_projects %}
-    <div class="table-wrap csic-project-table"><table><thead><tr><th>Company</th><th>Year</th><th>Net amount</th><th>Slots</th><th>Action</th></tr></thead><tbody>
-      {% for project in revenue.csic_projects %}<tr><td>{{ project.company_name }}</td><td>{{ project.year }}</td><td>₹{{ "{:,.2f}".format(project.net_amount) }}</td><td>1</td><td><form method="post" action="{{ url_for('admin.delete_csic_project', project_id=project.id) }}" onsubmit="return confirm('Remove this CSIC project from revenue and slot usage?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button button--secondary" type="submit">Remove</button></form></td></tr>{% endfor %}
+    <div class="table-wrap csic-project-table"><table><thead><tr><th>Company</th><th>Year</th><th>Net amount</th><th>GST (18%)</th><th>Gross total</th><th>Slots</th><th>Action</th></tr></thead><tbody>
+      {% for project in revenue.csic_projects %}<tr><td>{{ project.company_name }}</td><td>{{ project.year }}</td><td>₹{{ "{:,.2f}".format(project.net_amount) }}</td><td>₹{{ "{:,.2f}".format(project.gst_amount) }}</td><td>₹{{ "{:,.2f}".format(project.gross_amount) }}</td><td>1</td><td><form method="post" action="{{ url_for('admin.delete_csic_project', project_id=project.id) }}" onsubmit="return confirm('Remove this CSIC project from revenue and slot usage?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button button--secondary" type="submit">Remove</button></form></td></tr>{% endfor %}
     </tbody></table></div>
     {% else %}<p class="empty-message">No CSIC projects in this reporting period.</p>{% endif %}
   </section>
@@ -132,6 +133,33 @@
     range.addEventListener("change", update);
     update();
   }
+})();
+(() => {
+  const amount = document.querySelector("#csic-amount");
+  const gstPreview = document.querySelector("#csic-gst-preview");
+  const grossPreview = document.querySelector("#csic-gross-preview");
+  if (!(amount instanceof HTMLInputElement) || !gstPreview || !grossPreview) return;
+
+  const currency = new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    minimumFractionDigits: 2,
+  });
+  const update = () => {
+    const net = Number(amount.value);
+    if (!Number.isFinite(net) || net <= 0) {
+      gstPreview.textContent = currency.format(0);
+      grossPreview.textContent = currency.format(0);
+      return;
+    }
+    const netPaise = Math.round((net + Number.EPSILON) * 100);
+    const gstPaise = Math.floor((netPaise * 18 + 50) / 100);
+    gstPreview.textContent = currency.format(gstPaise / 100);
+    grossPreview.textContent = currency.format((netPaise + gstPaise) / 100);
+  };
+
+  amount.addEventListener("input", update);
+  update();
 })();
 (() => {
   const button = document.querySelector(".download-revenue-chart");

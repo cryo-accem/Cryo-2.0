@@ -494,6 +494,8 @@ a { color: inherit; }
 .csic-project-box__heading p { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .csic-project-form { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(100px, .8fr) minmax(150px, 1.2fr) auto; align-items: end; gap: 12px; margin-top: 18px; }
 .csic-project-form .button { min-height: 42px; white-space: nowrap; }
+.csic-tax-preview { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 20px; padding: 12px 14px; border-radius: 10px; background: #f3f8fa; color: #607789; font-size: 12px; }
+.csic-tax-preview strong { color: var(--navy); }
 .csic-project-table { margin-top: 18px; }
 .csic-project-table td form { margin: 0; }
 .csic-project-table .button { min-height: 34px; padding: 7px 12px; }
