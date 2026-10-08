@@ -53,6 +53,8 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
     "admin.billing_preview",
+    "admin.add_csic_project",
+    "admin.delete_csic_project",
     "admin.maintenance",
     "admin.save_publication",
     "admin.delete_publication",
@@ -185,6 +187,57 @@ def panel():
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
+
+
+@admin_bp.route("/csic-projects", methods=["POST"])
+def add_csic_project():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    company_name = request.form.get("company_name", "").strip()
+    year_text = request.form.get("year", "").strip()
+    amount_text = request.form.get("net_amount", "").strip()
+    if not company_name or len(company_name) > 180:
+        flash("Enter a company name of 1 to 180 characters.", "error")
+        return redirect(url_for("admin.panel"))
+    if not re.fullmatch(r"\d{4}", year_text) or not 1900 <= int(year_text) <= 2100:
+        flash("Enter a valid four-digit year between 1900 and 2100.", "error")
+        return redirect(url_for("admin.panel"))
+    if not re.fullmatch(r"\d{1,10}(?:\.\d{1,2})?", amount_text):
+        flash("Enter a positive net amount with up to two decimal places.", "error")
+        return redirect(url_for("admin.panel"))
+
+    amount = Decimal(amount_text)
+    if amount <= 0 or amount > Decimal("9999999999.99"):
+        flash("Net amount must be greater than zero and no more than ₹9,999,999,999.99.", "error")
+        return redirect(url_for("admin.panel"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO csic_projects (company_name, year, net_amount) VALUES (?, ?, ?)",
+        [company_name, int(year_text), str(amount.quantize(Decimal("0.01")))],
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("CSIC project added to revenue and slot usage.", "success")
+    return redirect(url_for("admin.panel"))
+
+
+@admin_bp.route("/csic-projects/<int:project_id>/delete", methods=["POST"])
+def delete_csic_project(project_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM csic_projects WHERE id=?", [project_id])
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("CSIC project removed." if deleted else "CSIC project not found.", "success" if deleted else "error")
+    return redirect(url_for("admin.panel"))
 
 
 def _content_url_is_safe(value):
@@ -434,14 +487,24 @@ def _revenue_dashboard(cur):
             continue
         rows.append((row, "Freezing", completion_date))
 
+    cur.execute("SELECT id, company_name, year, net_amount FROM csic_projects ORDER BY year DESC, company_name, id")
+    csic_projects = []
+    for project in cur.fetchall():
+        project_year = int(project["year"])
+        if start and project_year < start.year or end and project_year > end.year:
+            continue
+        csic_projects.append(project)
+
     totals = {
         "net": Decimal("0"), "gst": Decimal("0"), "gross": Decimal("0"),
         "slots": Decimal("0"), "grids": Decimal("0"),
+        "csic_net": Decimal("0"), "csic_slots": Decimal("0"),
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
     by_service = {"Data Collection": Decimal("0"), "Screening": Decimal("0"),
                   "Freezing": Decimal("0"), "Clipping": Decimal("0"),
-                  "Handling Charge": Decimal("0"), "Data Processing": Decimal("0")}
+                  "Handling Charge": Decimal("0"), "Data Processing": Decimal("0"),
+                  "CSIC Projects": Decimal("0")}
     monthly = {}
     for row, service, completion_date in rows:
         slot = _money(row["slot_charge"])
@@ -475,6 +538,16 @@ def _revenue_dashboard(cur):
         monthly[month]["net"] += net
         monthly[month]["slots"] += Decimal(str(row["actual_slots"] or 0))
 
+    for project in csic_projects:
+        net = _money(project["net_amount"])
+        totals["net"] += net
+        totals["gross"] += net
+        totals["csic_net"] += net
+        totals["slots"] += Decimal("1")
+        totals["csic_slots"] += Decimal("1")
+        by_category["Industrial"] += net
+        by_service["CSIC Projects"] += net
+
     monthly_items = [
         {"label": key, "value": values["net"].quantize(Decimal("0.01")),
          "slots": values["slots"].quantize(Decimal("0.01"))}
@@ -494,6 +567,7 @@ def _revenue_dashboard(cur):
         "by_category": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_category.items()],
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
+        "csic_projects": csic_projects,
     }
 
 

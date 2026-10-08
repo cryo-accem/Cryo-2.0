@@ -286,6 +286,27 @@ def init_db():
 
     if _is_sqlite_url():
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS csic_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                company_name VARCHAR(180) NOT NULL,
+                year INTEGER NOT NULL,
+                net_amount NUMERIC NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS csic_projects (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                company_name VARCHAR(180) NOT NULL,
+                year INT NOT NULL,
+                net_amount DECIMAL(12,2) NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    if _is_sqlite_url():
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS managed_publications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 citation TEXT NOT NULL,
