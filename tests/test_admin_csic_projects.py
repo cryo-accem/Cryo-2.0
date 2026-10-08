@@ -145,6 +145,25 @@ class AdminCsicProjectTests(unittest.TestCase):
         self.assertNotIn(b"Should Not Save", response.data)
         self.assertIn(b"positive net amount", response.data)
 
+    def test_projects_outside_dashboard_range_remain_available_for_editing(self):
+        current_year = datetime.date.today().year
+        self.client.post(
+            "/admin/csic-projects",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Older Project Ltd",
+                "year": str(current_year - 1),
+                "net_amount": "1000.00",
+            },
+        )
+
+        response = self.client.get("/admin/panel?range=this_year")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Older Project Ltd", response.data)
+        self.assertIn(b"Save changes", response.data)
+        self.assertIn(b"CSIC Project Net Revenue</span><strong>\xe2\x82\xb90.00", response.data)
+
 
 if __name__ == "__main__":
     unittest.main()

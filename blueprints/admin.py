@@ -950,10 +950,9 @@ def _revenue_dashboard(cur):
 
     cur.execute("SELECT id, company_name, year, net_amount FROM csic_projects ORDER BY year DESC, company_name, id")
     csic_projects = []
+    report_csic_projects = []
     for project in cur.fetchall():
         project_year = int(project["year"])
-        if start and project_year < start.year or end and project_year > end.year:
-            continue
         project = dict(project)
         project["net_amount"] = _money(project["net_amount"])
         project["gst_amount"] = (project["net_amount"] * Decimal("0.18")).quantize(
@@ -961,6 +960,9 @@ def _revenue_dashboard(cur):
         )
         project["gross_amount"] = project["net_amount"] + project["gst_amount"]
         csic_projects.append(project)
+        if (start and project_year < start.year) or (end and project_year > end.year):
+            continue
+        report_csic_projects.append(project)
 
     totals = {
         "net": Decimal("0"), "gst": Decimal("0"), "gross": Decimal("0"),
@@ -1063,7 +1065,7 @@ def _revenue_dashboard(cur):
             for category, amount in category_amounts.items():
                 by_category[category] += amount
 
-    for project in csic_projects:
+    for project in report_csic_projects:
         net = _money(project["net_amount"])
         gst = project["gst_amount"]
         totals["net"] += net
