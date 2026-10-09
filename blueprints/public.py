@@ -100,7 +100,21 @@ def get_slideshow_images():
         if not os.path.exists(slideshow_dir):
             return []
         valid = (".jpg", ".jpeg", ".png", ".gif")
-        return [f for f in os.listdir(slideshow_dir) if f.lower().endswith(valid)]
+        filenames = os.listdir(slideshow_dir)
+        webp_stems = {
+            os.path.splitext(filename)[0].casefold()
+            for filename in filenames
+            if filename.lower().endswith(".webp")
+        }
+        return [
+            filename
+            for filename in filenames
+            if filename.lower().endswith(".webp")
+            or (
+                filename.lower().endswith(valid)
+                and os.path.splitext(filename)[0].casefold() not in webp_stems
+            )
+        ]
     except Exception as exc:
         current_app.logger.error(f"Slideshow error: {exc}")
         return []
