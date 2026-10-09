@@ -142,6 +142,10 @@ a { color: inherit; }
 .summary-card__label { color: #6a7d8d; font-size: 10px; font-weight: 700; }
 .summary-card strong { color: var(--navy); font-size: 21px; line-height: 1.1; }
 .summary-card small { grid-column: 2; color: #91a0ac; font-size: 9px; }
+@media (min-width: 801px) and (max-width: 1100px) {
+  .header-inner { flex-wrap: wrap; gap: 12px 20px; padding: 12px 24px; }
+  .site-nav { order: 3; flex: 1 1 100%; justify-content: center; gap: 8px 17px; flex-wrap: wrap; overflow: visible; padding-bottom: 3px; }
+}
 @media (max-width: 800px) {
   .site-shell, .admin-area .site-shell { width: 100%; }
   .header-inner { padding: 12px 18px; flex-wrap: wrap; }
