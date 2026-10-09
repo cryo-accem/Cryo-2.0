@@ -1,7 +1,11 @@
 import datetime
+import io
+import json
 import os
 import tempfile
 import unittest
+import urllib.error
+import urllib.parse
 from unittest.mock import patch
 
 import database
@@ -33,6 +37,13 @@ class AdminAssistantTests(unittest.TestCase):
         return self.client.post(
             "/admin/assistant/query",
             json={"question": question},
+            headers={"X-CSRF-Token": "assistant-test-token"},
+        )
+
+    def transcribe(self, audio=b"\x00" * 128, content_type="audio/webm"):
+        return self.client.post(
+            "/admin/assistant/transcribe",
+            data={"audio": (io.BytesIO(audio), "question.webm", content_type)},
             headers={"X-CSRF-Token": "assistant-test-token"},
         )
 
@@ -116,6 +127,78 @@ class AdminAssistantTests(unittest.TestCase):
             "/admin/assistant/query",
             json={"question": "Summarize revenue"},
         )
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(missing_csrf.status_code, 400)
+
+    def test_transcription_requires_configured_provider_key(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": ""}):
+            response = self.transcribe()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Deepgram API key", response.get_json()["error"])
+
+    def test_transcription_rejects_unsupported_audio_format_and_oversized_clips(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):
+            unsupported = self.transcribe(content_type="application/octet-stream")
+            empty = self.transcribe(audio=b"")
+            oversized = self.transcribe(audio=b"\x00" * (8 * 1024 * 1024 + 1))
+
+        self.assertEqual(unsupported.status_code, 415)
+        self.assertEqual(empty.status_code, 400)
+        self.assertEqual(oversized.status_code, 413)
+
+    def test_transcription_sends_audio_with_zero_retention_opt_out(self):
+        provider_response = io.BytesIO(json.dumps({
+            "results": {
+                "channels": [{"alternatives": [{"transcript": "  Freezing today?  "}]}]
+            }
+        }).encode("utf-8"))
+        audio_data = b"\x01\x02sample-audio"
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
+            patch(
+                "blueprints.admin.urllib.request.urlopen",
+                return_value=provider_response,
+            ) as urlopen,
+        ):
+            response = self.transcribe(audio=audio_data)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["transcript"], "Freezing today?")
+        provider_request = urlopen.call_args.args[0]
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(provider_request.full_url).query)
+        self.assertEqual(provider_request.data, audio_data)
+        self.assertEqual(provider_request.get_header("Authorization"), "Token test-key")
+        self.assertEqual(query["mip_opt_out"], ["true"])
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
+
+    def test_transcription_reports_provider_quota_exhaustion(self):
+        provider_error = urllib.error.HTTPError(
+            "https://api.deepgram.com/v1/listen",
+            429,
+            "quota exceeded",
+            {},
+            io.BytesIO(b""),
+        )
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
+            patch("blueprints.admin.urllib.request.urlopen", side_effect=provider_error),
+        ):
+            response = self.transcribe()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("free quota is exhausted", response.get_json()["error"])
+
+    def test_transcription_requires_admin_session_and_csrf_token(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):
+            with self.client.session_transaction() as session:
+                session.pop("admin_logged_in")
+            unauthorized = self.transcribe()
+            missing_csrf = self.client.post(
+                "/admin/assistant/transcribe",
+                data={"audio": (io.BytesIO(b"sample"), "question.webm", "audio/webm")},
+            )
 
         self.assertEqual(unauthorized.status_code, 401)
         self.assertEqual(missing_csrf.status_code, 400)

@@ -66,18 +66,18 @@
     </button>
     <div class="admin-assistant__panel" id="admin-assistant-panel" data-assistant-panel hidden>
       <header class="admin-assistant__header">
-        <div><span class="admin-assistant__eyebrow">Private admin assistant</span><h2>Mira</h2></div>
+        <div><span class="admin-assistant__eyebrow">Admin assistant</span><h2>Mira</h2></div>
         <button class="admin-assistant__close" type="button" data-assistant-close aria-label="Close assistant"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </header>
-      <p class="admin-assistant__privacy">Answers use read-only admin records. Enabling “Hey Mira” activates your browser’s speech recognition while you’re signed in.</p>
+      <p class="admin-assistant__privacy">Answers use read-only admin records. Tap the microphone to record, then tap again to transcribe. Audio is sent to Deepgram with model-improvement opt-out and is retained only as needed to process the request. <a href="https://developers.deepgram.com/trust-security/your-data" target="_blank" rel="noopener noreferrer">Deepgram data controls</a>.</p>
       <div class="admin-assistant__messages" data-assistant-messages aria-live="polite" aria-relevant="additions"></div>
-      <form class="admin-assistant__form" data-assistant-form action="{{ url_for('admin.assistant_query') }}" method="post">
+      <form class="admin-assistant__form" data-assistant-form action="{{ url_for('admin.assistant_query') }}" data-transcription-url="{{ url_for('admin.assistant_transcribe') }}" method="post">
         <input type="hidden" data-assistant-csrf value="{{ csrf_token }}">
-        <label class="sr-only" for="admin-assistant-question">Say “Hey Mira” or type a question about revenue or freezing availability</label>
-        <textarea id="admin-assistant-question" data-assistant-question rows="2" maxlength="500" placeholder="Tap the microphone and speak. Your words will appear here..." required></textarea>
-        <p class="admin-assistant__status" data-assistant-status role="status">Enable “Hey Mira” to listen while signed in, or type a question.</p>
+        <label class="sr-only" for="admin-assistant-question">Speak or type a question about revenue or freezing availability</label>
+        <textarea id="admin-assistant-question" data-assistant-question rows="2" maxlength="500" placeholder="Tap the microphone, speak, then tap again to send your recording..." required></textarea>
+        <p class="admin-assistant__status" data-assistant-status role="status">Tap the microphone to record a question, or type one below.</p>
         <div class="admin-assistant__actions">
-          <button class="button admin-assistant__voice-button" type="button" data-assistant-mic aria-label="Enable Hey Mira wake word"><i class="fa-solid fa-microphone" aria-hidden="true"></i><span>Enable Hey Mira</span></button>
+          <button class="button admin-assistant__voice-button" type="button" data-assistant-mic aria-label="Start voice recording" aria-pressed="false"><i class="fa-solid fa-microphone" aria-hidden="true"></i><span>Start recording</span></button>
           <button class="button secondary" type="submit" data-assistant-submit><i class="fa-solid fa-paper-plane" aria-hidden="true"></i><span>Ask ACCEM</span></button>
         </div>
       </form>
@@ -301,7 +301,7 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 </script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-network-error') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-deepgram-recording') }}" defer></script>
 {% endif %}
 </body>
 </html>

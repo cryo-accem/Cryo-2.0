@@ -9,6 +9,7 @@ import re
 import tempfile
 import urllib.error
 import urllib.parse
+import urllib.error
 import urllib.request
 import uuid
 import zipfile
@@ -47,6 +48,7 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
     "admin.assistant_query",
+    "admin.assistant_transcribe",
     "admin.download_pi_users_csv",
     "admin.download_activity_report",
     "admin.change_password",
@@ -317,6 +319,90 @@ def assistant_query():
             "Try “Summarize revenue this year” or “What freezing is available today?”"
         )
     return jsonify({"answer": answer})
+
+
+@admin_bp.route("/assistant/transcribe", methods=["POST"])
+def assistant_transcribe():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to use voice input."}), 401
+
+    if not os.environ.get("DEEPGRAM_API_KEY", "").strip():
+        return jsonify({
+            "error": "Voice input is not configured. Add a Deepgram API key in Render environment settings."
+        }), 503
+
+    audio = request.files.get("audio")
+    if audio is None:
+        return jsonify({"error": "Record a short voice question before sending it."}), 400
+
+    content_type = (audio.mimetype or "").lower()
+    supported_audio_types = {
+        "audio/aac",
+        "audio/flac",
+        "audio/mp4",
+        "audio/mpeg",
+        "audio/ogg",
+        "audio/wav",
+        "audio/webm",
+        "audio/x-m4a",
+        "audio/x-wav",
+    }
+    if content_type not in supported_audio_types:
+        return jsonify({"error": "This browser's audio format is not supported."}), 415
+
+    audio_data = audio.stream.read(8 * 1024 * 1024 + 1)
+    if not audio_data:
+        return jsonify({"error": "The recording was empty. Try recording again."}), 400
+    if len(audio_data) > 8 * 1024 * 1024:
+        return jsonify({"error": "Keep voice recordings under 8 MB and try again."}), 413
+
+    api_url = "https://api.deepgram.com/v1/listen?" + urllib.parse.urlencode({
+        "model": "nova-3",
+        "smart_format": "true",
+        "language": "en-IN",
+        "mip_opt_out": "true",
+    })
+    provider_request = urllib.request.Request(
+        api_url,
+        data=audio_data,
+        headers={
+            "Authorization": f"Token {os.environ['DEEPGRAM_API_KEY'].strip()}",
+            "Content-Type": content_type,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(provider_request, timeout=30) as provider_response:
+            result = json.loads(provider_response.read(1024 * 1024).decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            message = "Voice transcription is temporarily unavailable because the free quota is exhausted."
+            status_code = 503
+        elif exc.code in {401, 403}:
+            message = "Voice transcription is not configured correctly. An administrator must check the Deepgram API key."
+            status_code = 503
+        else:
+            message = "The transcription service could not process this recording. Try again or type your question."
+            status_code = 502
+        current_app.logger.warning("Deepgram transcription request failed with HTTP %s.", exc.code)
+        exc.close()
+        return jsonify({"error": message}), status_code
+    except (urllib.error.URLError, TimeoutError) as exc:
+        current_app.logger.warning("Deepgram transcription service is unreachable: %s", exc)
+        return jsonify({
+            "error": "The transcription service could not be reached. Try again or type your question."
+        }), 502
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        current_app.logger.warning("Deepgram returned an invalid transcription response: %s", exc)
+        return jsonify({"error": "The transcription service returned an invalid response."}), 502
+
+    try:
+        transcript = result["results"]["channels"][0]["alternatives"][0]["transcript"].strip()
+    except (KeyError, IndexError, TypeError, AttributeError):
+        transcript = ""
+    if not transcript:
+        return jsonify({"error": "No speech was detected. Try recording again or type your question."}), 422
+    return jsonify({"transcript": transcript})
 
 
 def _admin_assistant_revenue(question):

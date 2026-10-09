@@ -12,18 +12,13 @@
   const mic = assistant.querySelector("[data-assistant-mic]");
   const status = assistant.querySelector("[data-assistant-status]");
   const csrfToken = assistant.querySelector("[data-assistant-csrf]").value;
-  const wakePreferenceKey = "accemAssistantWakeWordEnabled";
-  let recognition = null;
-  let isListening = false;
-  let isStarting = false;
-  let recognitionFailed = false;
-  let wakeWordEnabled = false;
-  let wakePhraseHeard = false;
-  let wakeResultIndex = null;
-  let commandFinalTranscript = "";
-  let commandInterimTranscript = "";
-  let submitTimer = null;
-  let restartTimer = null;
+  const transcriptionUrl = form.dataset.transcriptionUrl;
+  let mediaRecorder = null;
+  let recordingStream = null;
+  let recordedChunks = [];
+  let recordingTimer = null;
+  let isRecording = false;
+  let discardRecording = false;
   let assistantBusy = false;
   let isSpeaking = false;
   let speechVoices = window.speechSynthesis?.getVoices() || [];
@@ -58,73 +53,138 @@
     messages.scrollTop = messages.scrollHeight;
   };
 
-  const updateWakeButton = () => {
-    mic.classList.toggle("is-listening", wakeWordEnabled);
-    mic.setAttribute("aria-pressed", String(wakeWordEnabled));
-    mic.setAttribute(
-      "aria-label",
-      wakeWordEnabled ? "Disable Hey Mira wake word" : "Enable Hey Mira wake word"
-    );
-    mic.querySelector("span").textContent = wakeWordEnabled ? "Hey Mira on" : "Enable Hey Mira";
-    toggle.querySelector("span").textContent = wakeWordEnabled ? "Mira is listening" : "Ask Mira";
+  const updateMicButton = () => {
+    mic.classList.toggle("is-listening", isRecording);
+    mic.setAttribute("aria-pressed", String(isRecording));
+    mic.setAttribute("aria-label", isRecording ? "Stop recording and transcribe" : "Start voice recording");
+    mic.querySelector("span").textContent = isRecording ? "Stop & transcribe" : "Start recording";
   };
 
-  const persistWakePreference = () => {
+  const stopRecordingTracks = () => {
+    recordingStream?.getTracks().forEach((track) => track.stop());
+    recordingStream = null;
+  };
+
+  const transcribeRecording = async (recording) => {
+    if (!recording.size) {
+      status.textContent = "The recording was empty. Try recording again or type your question.";
+      return;
+    }
+
+    const extension = recording.type.includes("mp4") ? "m4a"
+      : recording.type.includes("ogg") ? "ogg"
+        : recording.type.includes("wav") ? "wav" : "webm";
+    const audio = new FormData();
+    audio.append("audio", recording, `mira-question.${extension}`);
+    mic.disabled = true;
+    status.textContent = "Transcribing your recording…";
     try {
-      if (wakeWordEnabled) {
-        window.localStorage.setItem(wakePreferenceKey, "true");
-      } else {
-        window.localStorage.removeItem(wakePreferenceKey);
-      }
+      const response = await fetch(transcriptionUrl, {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrfToken },
+        body: audio,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Voice transcription failed.");
+      input.value = result.transcript;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      status.textContent = "Transcript ready. Checking the admin records…";
+      mic.disabled = false;
+      form.requestSubmit();
     } catch (error) {
-      console.warn("Could not save Mira wake-word preference:", error);
+      console.error("Admin assistant transcription failed:", error);
+      status.textContent = error instanceof Error
+        ? error.message
+        : "Voice transcription failed. You can type your question instead.";
+      mic.disabled = false;
     }
   };
 
-  const disableWakeWord = (message) => {
-    wakeWordEnabled = false;
-    recognitionFailed = true;
-    clearTimeout(restartTimer);
-    clearTimeout(submitTimer);
-    persistWakePreference();
-    updateWakeButton();
-    status.textContent = message;
+  const stopRecording = () => {
+    clearTimeout(recordingTimer);
+    if (!mediaRecorder || mediaRecorder.state !== "recording") return;
+    status.textContent = "Sending your recording for transcription…";
+    mediaRecorder.stop();
   };
 
-  const startRecognition = () => {
-    if (!recognition || !wakeWordEnabled || assistantBusy || isSpeaking || isListening || isStarting) return;
+  const cancelRecording = () => {
+    clearTimeout(recordingTimer);
+    if (mediaRecorder?.state === "recording") {
+      discardRecording = true;
+      mediaRecorder.stop();
+    } else {
+      stopRecordingTracks();
+    }
+    isRecording = false;
+    updateMicButton();
+  };
+
+  const startRecording = async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      status.textContent = "Voice recording is not supported by this browser. You can type your question instead.";
+      return;
+    }
+
+    mic.disabled = true;
+    status.textContent = "Requesting microphone access…";
     try {
-      isStarting = true;
-      recognition.start();
+      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = [
+        "audio/webm;codecs=opus",
+        "audio/mp4",
+        "audio/ogg;codecs=opus",
+      ].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      mediaRecorder = mimeType
+        ? new MediaRecorder(recordingStream, { mimeType })
+        : new MediaRecorder(recordingStream);
+      recordedChunks = [];
+      mediaRecorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size) recordedChunks.push(event.data);
+      });
+      mediaRecorder.addEventListener("stop", () => {
+        const mimeType = mediaRecorder.mimeType;
+        const recording = new Blob(recordedChunks, { type: mimeType });
+        mediaRecorder = null;
+        recordedChunks = [];
+        isRecording = false;
+        updateMicButton();
+        stopRecordingTracks();
+        if (discardRecording) {
+          discardRecording = false;
+          status.textContent = "Recording discarded.";
+          return;
+        }
+        transcribeRecording(recording);
+      }, { once: true });
+      mediaRecorder.start();
+      isRecording = true;
+      updateMicButton();
+      mic.disabled = false;
+      status.textContent = "Recording… Ask your question, then tap “Stop & transcribe”.";
+      recordingTimer = window.setTimeout(stopRecording, 30000);
     } catch (error) {
-      isStarting = false;
-      console.error("Could not start Mira wake-word recognition:", error);
-      disableWakeWord("Wake-word listening could not start. Check microphone permission and try again.");
+      console.error("Could not start Mira voice recording:", error);
+      stopRecordingTracks();
+      mediaRecorder = null;
+      isRecording = false;
+      updateMicButton();
+      mic.disabled = false;
+      status.textContent = error instanceof Error && error.name === "NotAllowedError"
+        ? "Microphone access was denied. Allow microphone access in browser settings or type your question."
+        : "Recording could not start. Check microphone access or type your question.";
     }
-  };
-
-  const scheduleRecognitionRestart = () => {
-    clearTimeout(restartTimer);
-    if (wakeWordEnabled && !assistantBusy && !isSpeaking && !recognitionFailed && !submitTimer) {
-      restartTimer = window.setTimeout(startRecognition, 350);
-    }
-  };
-
-  const stopRecognition = () => {
-    clearTimeout(restartTimer);
-    clearTimeout(submitTimer);
-    if (isListening || isStarting) recognition.stop();
   };
 
   const speakReply = (text) => {
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
       status.textContent = "Speech output is not supported by this browser. The reply is shown above.";
       assistantBusy = false;
-      scheduleRecognitionRestart();
+      mic.disabled = false;
       return;
     }
 
     isSpeaking = true;
+    mic.disabled = true;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     const voice = selectFeminineVoice();
@@ -139,17 +199,15 @@
     utterance.onend = () => {
       isSpeaking = false;
       assistantBusy = false;
-      status.textContent = wakeWordEnabled
-        ? "Answer read aloud. Say “Hey Mira” to ask another question."
-        : "Answer read aloud. You can type another question.";
-      scheduleRecognitionRestart();
+      mic.disabled = false;
+      status.textContent = "Answer read aloud. You can ask another question.";
     };
     utterance.onerror = (event) => {
       console.error("Admin assistant speech output failed:", event.error);
       isSpeaking = false;
       assistantBusy = false;
+      mic.disabled = false;
       status.textContent = "Speech output failed. The reply is still shown above.";
-      scheduleRecognitionRestart();
     };
     window.speechSynthesis.speak(utterance);
   };
@@ -162,29 +220,32 @@
 
   addMessage(
     "assistant",
-    "I’m Mira. Enable my wake word and say “Hey Mira” followed by a question about revenue, billing, or freezing availability."
+    "I’m Mira. Tap the microphone, ask a question about revenue, billing, or freezing availability, then tap again to transcribe and send it."
   );
-  toggle.addEventListener("click", () => setOpen(panel.hidden));
+  toggle.addEventListener("click", () => {
+    const open = panel.hidden;
+    if (!open) cancelRecording();
+    setOpen(open);
+  });
   close.addEventListener("click", () => {
+    cancelRecording();
     setOpen(false);
     toggle.focus();
   });
+  window.addEventListener("pagehide", cancelRecording);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     const question = input.value.trim();
     if (!question || assistantBusy) return;
 
+    cancelRecording();
     assistantBusy = true;
-    wakePhraseHeard = false;
-    wakeResultIndex = null;
-    commandFinalTranscript = "";
-    commandInterimTranscript = "";
     let answerToSpeak = null;
     addMessage("user", question);
     input.value = "";
     submit.disabled = true;
-    stopRecognition();
+    mic.disabled = true;
     status.textContent = "Checking the admin records...";
     try {
       const response = await fetch(form.action, {
@@ -207,141 +268,28 @@
       );
     } finally {
       submit.disabled = false;
+      mic.disabled = false;
       if (answerToSpeak) {
         status.textContent = "Preparing spoken answer…";
       } else {
         assistantBusy = false;
-        status.textContent = wakeWordEnabled
-          ? "Say “Hey Mira” when you’re ready to ask another question."
-          : "Enable “Hey Mira” to listen while signed in, or type a question.";
-        scheduleRecognitionRestart();
+        status.textContent = "Tap the microphone to record a question, or type one below.";
       }
-      if (!wakeWordEnabled) input.focus();
+      input.focus();
     }
     if (answerToSpeak) speakReply(answerToSpeak);
   });
 
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     mic.disabled = true;
-    mic.title = "Wake-word recognition is not supported by this browser.";
-    mic.querySelector("span").textContent = "Wake word unavailable";
-    status.textContent = "Wake-word recognition is not supported by this browser. You can type a question instead.";
+    mic.title = "Voice recording is not supported by this browser.";
+    status.textContent = "Voice recording is not supported by this browser. You can type a question instead.";
   } else {
-    recognition = new SpeechRecognition();
-    recognition.lang = "en-IN";
-    recognition.interimResults = true;
-    recognition.continuous = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      isStarting = false;
-      isListening = true;
-      recognitionFailed = false;
-      status.textContent = wakePhraseHeard
-        ? "Mira heard you. Listening for your question…"
-        : "Wake word is on. Say “Hey Mira” followed by your question.";
-    };
-
-    recognition.onresult = (event) => {
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const result = event.results[index];
-        const transcript = result[0].transcript.trim();
-        const wakeMatch = transcript.match(/\b(?:hey\s+)?mira\b[\s,!.?;:-]*(.*)/i);
-        if (!wakePhraseHeard || (wakeMatch && index === wakeResultIndex)) {
-          if (!wakeMatch) continue;
-          if (!wakePhraseHeard) wakeResultIndex = index;
-          wakePhraseHeard = true;
-          const command = wakeMatch[1].trim();
-          if (result.isFinal) {
-            commandFinalTranscript = command;
-            commandInterimTranscript = "";
-            wakeResultIndex = null;
-          } else {
-            commandInterimTranscript = command;
-          }
-        } else if (result.isFinal) {
-          commandFinalTranscript = `${commandFinalTranscript} ${transcript}`.trim();
-          commandInterimTranscript = "";
-        } else {
-          commandInterimTranscript = transcript;
-        }
-      }
-      if (!wakePhraseHeard) return;
-
-      input.value = `${commandFinalTranscript} ${commandInterimTranscript}`.trim();
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      status.textContent = commandInterimTranscript
-        ? `Mira heard you: ${commandInterimTranscript.trim()}`
-        : "Mira heard you. Listening for your question…";
-      messages.scrollTop = messages.scrollHeight;
-
-      if (commandFinalTranscript) {
-        clearTimeout(submitTimer);
-        submitTimer = window.setTimeout(() => {
-          if (!assistantBusy && input.value.trim()) form.requestSubmit();
-        }, 1200);
-      }
-    };
-
-    recognition.onerror = (event) => {
-      if (recognitionFailed) return;
-
-      const details = event.error === "network"
-        ? "Browser speech recognition is unavailable because of a network error. You can type a question instead."
-        : event.error === "not-allowed"
-          ? "Microphone access was not allowed. You can type a question or enable the microphone in browser settings."
-          : `Wake-word listening failed (${event.error}). You can type a question instead.`;
-      if (["not-allowed", "service-not-allowed", "audio-capture", "network"].includes(event.error)) {
-        disableWakeWord(details);
-      } else {
-        status.textContent = details;
-      }
-    };
-
-    recognition.onend = () => {
-      isListening = false;
-      isStarting = false;
-      if (!recognitionFailed) {
-        if (wakePhraseHeard && input.value.trim() && !assistantBusy) {
-          status.textContent = "Mira heard you. Finishing your question…";
-          if (!submitTimer) submitTimer = window.setTimeout(() => form.requestSubmit(), 500);
-        } else if (wakeWordEnabled && !assistantBusy && !isSpeaking) {
-          status.textContent = "Wake word is on. Say “Hey Mira” followed by your question.";
-        }
-        scheduleRecognitionRestart();
-      }
-    };
-
+    updateMicButton();
     mic.addEventListener("click", () => {
-      wakeWordEnabled = !wakeWordEnabled;
-      recognitionFailed = false;
-      persistWakePreference();
-      updateWakeButton();
-      if (wakeWordEnabled) {
-        wakePhraseHeard = false;
-        wakeResultIndex = null;
-        commandFinalTranscript = "";
-        commandInterimTranscript = "";
-        input.value = "";
-        status.textContent = "Starting continuous wake-word listening…";
-        startRecognition();
-      } else {
-        stopRecognition();
-        wakePhraseHeard = false;
-        status.textContent = "Wake word off. You can type a question or turn “Hey Mira” back on.";
-      }
+      if (assistantBusy || isSpeaking) return;
+      if (isRecording) stopRecording();
+      else startRecording();
     });
-
-    try {
-      wakeWordEnabled = window.localStorage.getItem(wakePreferenceKey) === "true";
-    } catch (error) {
-      console.warn("Could not restore Mira wake-word preference:", error);
-    }
-    updateWakeButton();
-    if (wakeWordEnabled) {
-      status.textContent = "Starting saved “Hey Mira” wake word…";
-      startRecognition();
-    }
   }
 })();

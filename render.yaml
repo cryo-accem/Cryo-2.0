@@ -16,6 +16,8 @@ services:
         sync: false
       - key: SECRET_KEY
         generateValue: true
+      - key: DEEPGRAM_API_KEY
+        sync: false
       - key: SECURE_COOKIES
         value: "true"
       - key: MAIL_USERNAME
