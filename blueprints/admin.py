@@ -428,6 +428,8 @@ def assistant_speak():
 
     api_url = "https://api.deepgram.com/v1/speak?" + urllib.parse.urlencode({
         "model": "aura-2-thalia-en",
+        "encoding": "linear16",
+        "container": "wav",
         "mip_opt_out": "true",
     })
     provider_request = urllib.request.Request(
@@ -463,9 +465,12 @@ def assistant_speak():
 
     if len(audio_data) > 10 * 1024 * 1024:
         return jsonify({"error": "The speech service returned an audio file that was too large."}), 502
-    if not audio_data:
-        return jsonify({"error": "The speech service returned an empty audio file."}), 502
-    return Response(audio_data, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
+    if len(audio_data) < 12 or audio_data[:4] != b"RIFF" or audio_data[8:12] != b"WAVE":
+        current_app.logger.warning("Deepgram returned an invalid WAV audio response.")
+        return jsonify({
+            "error": "The speech service returned an audio file the browser cannot play."
+        }), 502
+    return Response(audio_data, mimetype="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 def _admin_assistant_revenue(question):

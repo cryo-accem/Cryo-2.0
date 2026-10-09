@@ -68,6 +68,24 @@
     status.textContent = message;
   };
 
+  const showAudioFallback = (messageText) => {
+    isSpeaking = false;
+    assistantBusy = false;
+    mic.disabled = false;
+    const message = document.createElement("article");
+    message.className = "admin-assistant__message admin-assistant__message--assistant";
+    const instruction = document.createElement("p");
+    instruction.textContent = messageText;
+    const download = document.createElement("a");
+    download.href = currentAudioUrl;
+    download.download = "mira-spoken-answer.wav";
+    download.textContent = "Download Mira’s spoken answer";
+    message.append(instruction, download);
+    messages.append(message);
+    messages.scrollTop = messages.scrollHeight;
+    status.textContent = messageText;
+  };
+
   const transcribeRecording = async (recording) => {
     if (!recording.size) {
       status.textContent = "The recording was empty. Try recording again or type your question.";
@@ -211,23 +229,28 @@
           status.textContent = "Speaking the answer in Mira’s feminine voice…";
         });
         currentAudio.addEventListener("error", () => {
-          finishSpokenAudio("Mira’s audio could not be played. The answer is still shown above.");
+          showAudioFallback("This browser couldn’t play the audio. Download Mira’s spoken answer.");
         }, { once: true });
         status.textContent = "Speaking the answer in Mira’s feminine voice…";
         return currentAudio.play().catch((error) => {
           if (error.name !== "NotAllowedError") throw error;
           currentAudio.controls = true;
-          isSpeaking = false;
-          assistantBusy = false;
-          mic.disabled = false;
           currentAudio.setAttribute("aria-label", "Play Mira’s feminine spoken answer");
           const message = document.createElement("article");
           message.className = "admin-assistant__message admin-assistant__message--assistant";
           const instruction = document.createElement("p");
           instruction.textContent = "Tap to hear Mira’s feminine spoken answer.";
+          const download = document.createElement("a");
+          download.href = currentAudioUrl;
+          download.download = "mira-spoken-answer.wav";
+          download.textContent = "Download Mira’s spoken answer";
           message.append(instruction, currentAudio);
+          message.append(download);
           messages.append(message);
           messages.scrollTop = messages.scrollHeight;
+          isSpeaking = false;
+          assistantBusy = false;
+          mic.disabled = false;
           status.textContent = "Tap the audio player to hear Mira’s feminine voice.";
         });
       })

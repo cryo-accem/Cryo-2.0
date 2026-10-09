@@ -2,6 +2,7 @@ import datetime
 import io
 import json
 import os
+import struct
 import tempfile
 import unittest
 import urllib.error
@@ -243,7 +244,23 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn("free quota is exhausted", response.get_json()["error"])
 
     def test_spoken_answer_uses_feminine_thalia_model_with_opt_out(self):
-        audio_data = b"\xff\xfb\x90mp3-audio"
+        pcm_data = b"\x00\x00" * 4
+        audio_data = struct.pack(
+            "<4sI4s4sIHHIIHH4sI",
+            b"RIFF",
+            len(pcm_data) + 36,
+            b"WAVE",
+            b"fmt ",
+            16,
+            1,
+            1,
+            24000,
+            48000,
+            2,
+            16,
+            b"data",
+            len(pcm_data),
+        ) + pcm_data
         provider_response = io.BytesIO(audio_data)
         with (
             patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
@@ -255,12 +272,14 @@ class AdminAssistantTests(unittest.TestCase):
             response = self.speak("  Freezing availability is eight grids today.  ")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.mimetype, "audio/mpeg")
+        self.assertEqual(response.mimetype, "audio/wav")
         self.assertEqual(response.data, audio_data)
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         provider_request = urlopen.call_args.args[0]
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(provider_request.full_url).query)
         self.assertEqual(query["model"], ["aura-2-thalia-en"])
+        self.assertEqual(query["encoding"], ["linear16"])
+        self.assertEqual(query["container"], ["wav"])
         self.assertEqual(query["mip_opt_out"], ["true"])
         self.assertEqual(provider_request.get_header("Authorization"), "Token test-key")
         self.assertEqual(
@@ -268,6 +287,19 @@ class AdminAssistantTests(unittest.TestCase):
             {"text": "Freezing availability is eight grids today."},
         )
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
+
+    def test_spoken_answer_rejects_non_wav_provider_response(self):
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
+            patch(
+                "blueprints.admin.urllib.request.urlopen",
+                return_value=io.BytesIO(b"provider error text"),
+            ),
+        ):
+            response = self.speak()
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("browser cannot play", response.get_json()["error"])
 
     def test_spoken_answer_requires_admin_session_and_csrf_token(self):
         with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):

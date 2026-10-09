@@ -301,7 +301,7 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 </script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-thalia-tts') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-thalia-wav') }}" defer></script>
 {% endif %}
 </body>
 </html>

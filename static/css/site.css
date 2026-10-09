@@ -1543,6 +1543,7 @@ a { color: inherit; }
 .admin-assistant__message--error { align-self: flex-start; border-color: #f1c8c8; background: #fff3f3; color: #8a2f37; }
 .admin-assistant__message p { margin: 0; white-space: pre-line; font-size: 11px; line-height: 1.55; overflow-wrap: anywhere; }
 .admin-assistant__message audio { display: block; max-width: 100%; margin-top: 8px; }
+.admin-assistant__message a { display: inline-block; margin-top: 8px; color: #0b6688; font-size: 11px; font-weight: 700; }
 .admin-assistant__form { display: grid; gap: 8px; padding: 12px; border-top: 1px solid #e1e9ee; }
 .admin-assistant__form textarea { width: 100%; min-height: 52px; resize: vertical; padding: 10px 11px; border: 1px solid #cbd9e1; border-radius: 9px; color: #14243a; font: inherit; font-size: 11px; }
 .admin-assistant__form textarea:focus { outline: 2px solid rgba(22, 125, 165, .25); border-color: #2588aa; }
