@@ -53,6 +53,10 @@ class AdminCsicProjectTests(unittest.TestCase):
         self.assertIn(b"before GST", response.data)
         self.assertIn(b"GST (18%):", response.data)
         self.assertIn(b"Gross total:", response.data)
+        self.assertIn(b'class="csic-project-labels"', response.data)
+        self.assertIn(b"<span>GST (18%)</span>", response.data)
+        self.assertIn(b'<article class="csic-project-row">', response.data)
+        self.assertIn(b"Save changes", response.data)
 
     def test_csic_gst_rounds_half_up_to_two_decimal_places(self):
         current_year = datetime.date.today().year
