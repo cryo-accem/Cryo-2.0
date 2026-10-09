@@ -45,10 +45,14 @@ class AdminCsicProjectTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"CSIC Project GST (18%)", response.data)
+        self.assertIn(b"CSIC GST (18%)", response.data)
         self.assertIn(b"18,000.00", response.data)
-        self.assertIn(b"CSIC Project Gross", response.data)
+        self.assertIn(b"CSIC gross", response.data)
         self.assertIn(b"118,000.00", response.data)
+        self.assertIn(b'class="revenue-primary-stat"', response.data)
+        self.assertIn(b'<details class="revenue-details">', response.data)
+        self.assertIn(b"<summary>Billing &amp; usage details</summary>", response.data)
+        self.assertEqual(response.data.count(b'class="revenue-primary-stat"'), 1)
         self.assertIn(b"Example CSIC Ltd", response.data)
         self.assertIn(b"before GST", response.data)
         self.assertIn(b"GST (18%):", response.data)
@@ -166,7 +170,7 @@ class AdminCsicProjectTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Older Project Ltd", response.data)
         self.assertIn(b"Save changes", response.data)
-        self.assertIn(b"CSIC Project Net Revenue</span><strong>\xe2\x82\xb90.00", response.data)
+        self.assertIn(b"CSIC net revenue</span><strong>\xe2\x82\xb90.00", response.data)
 
 
 if __name__ == "__main__":

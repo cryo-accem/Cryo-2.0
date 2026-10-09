@@ -245,7 +245,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Amount Received</span><strong>\xe2\x82\xb974,950.00", response.data)
+        self.assertIn(b"Amount received</span><strong>\xe2\x82\xb974,950.00", response.data)
         self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
 
     def test_dashboard_bar_chart_uses_the_selected_period_and_date_range(self):
