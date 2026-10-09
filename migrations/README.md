@@ -19,4 +19,7 @@ and support generated columns (MySQL 5.7+); they enforce a single active
 location per grid and prevent two grids occupying the same active container,
 box, and position. Position capacity is deliberately not assumed.
 
-The application does not automatically execute this migration during startup.
+The Render web service applies this migration before starting Gunicorn. The
+migration is idempotent, so it can safely run again when the service restarts.
+For other environments, apply it manually with the command above after backing
+up the configured database.
