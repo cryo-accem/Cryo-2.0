@@ -190,9 +190,9 @@ a { color: inherit; }
   .header-inner { gap: 14px; padding: 12px 16px; }
   .brand-mark { width: 34px; height: 34px; }
   .brand strong { font-size: 17px; }
-  .site-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; gap: 8px 10px; flex-wrap: wrap; overflow: visible; font-size: 10px; }
-  .site-nav a { min-width: 0; }
-  .portal-link { padding: 8px 11px; }
+  .site-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; justify-content: stretch; gap: 6px 8px; flex-wrap: wrap; overflow: visible; font-size: 10px; }
+  .site-nav a { display: flex; min-width: 0; min-height: 36px; align-items: center; justify-content: center; text-align: center; }
+  .site-nav .portal-link { width: 100%; padding: 6px 4px; line-height: 1.2; }
   .workflow, .card-grid, .portal-grid, .footer-grid { grid-template-columns: 1fr; }
   .hero { min-height: 480px; }
   .hero-copy { padding: 42px 22px; }
