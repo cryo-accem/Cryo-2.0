@@ -21,27 +21,8 @@
   let discardRecording = false;
   let assistantBusy = false;
   let isSpeaking = false;
-  let speechVoices = window.speechSynthesis?.getVoices() || [];
-  const preferredVoiceNames = [
-    "samantha", "ava", "karen", "kathy", "moira", "victoria",
-    "fiona", "tessa", "allison", "susan", "zoe", "lekha",
-  ];
-
-  window.speechSynthesis?.addEventListener("voiceschanged", () => {
-    speechVoices = window.speechSynthesis.getVoices();
-  });
-
-  const selectFeminineVoice = () => {
-    const voices = speechVoices.length ? speechVoices : window.speechSynthesis.getVoices();
-    const englishVoices = voices.filter((voice) => /^en(?:-|$)/i.test(voice.lang));
-    for (const preferredName of preferredVoiceNames) {
-      const voice = englishVoices.find((candidate) =>
-        candidate.name.toLowerCase().startsWith(preferredName)
-      );
-      if (voice) return voice;
-    }
-    return englishVoices.find((voice) => voice.default) || englishVoices[0] || null;
-  };
+  let currentAudio = null;
+  let currentAudioUrl = null;
 
   const addMessage = (kind, text) => {
     const message = document.createElement("article");
@@ -63,6 +44,28 @@
   const stopRecordingTracks = () => {
     recordingStream?.getTracks().forEach((track) => track.stop());
     recordingStream = null;
+  };
+
+  const releaseSpokenAudio = () => {
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.removeAttribute("src");
+      currentAudio.load();
+      currentAudio = null;
+    }
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
+    }
+    isSpeaking = false;
+    assistantBusy = false;
+    mic.disabled = false;
+  };
+
+  const finishSpokenAudio = (message) => {
+    releaseSpokenAudio();
+    assistantBusy = false;
+    status.textContent = message;
   };
 
   const transcribeRecording = async (recording) => {
@@ -176,40 +179,66 @@
   };
 
   const speakReply = (text) => {
-    if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) {
-      status.textContent = "Speech output is not supported by this browser. The reply is shown above.";
-      assistantBusy = false;
-      mic.disabled = false;
-      return;
-    }
-
+    releaseSpokenAudio();
     isSpeaking = true;
     mic.disabled = true;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voice = selectFeminineVoice();
-    if (voice) {
-      utterance.voice = voice;
-      utterance.lang = voice.lang;
-    }
-    utterance.pitch = 1.05;
-    utterance.onstart = () => {
-      status.textContent = "Speaking the answer…";
-    };
-    utterance.onend = () => {
-      isSpeaking = false;
-      assistantBusy = false;
-      mic.disabled = false;
-      status.textContent = "Answer read aloud. You can ask another question.";
-    };
-    utterance.onerror = (event) => {
-      console.error("Admin assistant speech output failed:", event.error);
-      isSpeaking = false;
-      assistantBusy = false;
-      mic.disabled = false;
-      status.textContent = "Speech output failed. The reply is still shown above.";
-    };
-    window.speechSynthesis.speak(utterance);
+    status.textContent = "Preparing Mira’s feminine spoken answer…";
+    fetch(assistant.dataset.speechUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify({ text }),
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          const result = await response.json();
+          throw new Error(result.error || "Spoken answer generation failed.");
+        }
+        return response.blob();
+      })
+      .then((audioBlob) => {
+        currentAudioUrl = URL.createObjectURL(audioBlob);
+        currentAudio = new Audio(currentAudioUrl);
+        currentAudio.addEventListener("ended", () => {
+          finishSpokenAudio("Answer read aloud in Mira’s feminine voice. You can ask another question.");
+        }, { once: true });
+        currentAudio.addEventListener("play", () => {
+          isSpeaking = true;
+          assistantBusy = true;
+          mic.disabled = true;
+          status.textContent = "Speaking the answer in Mira’s feminine voice…";
+        });
+        currentAudio.addEventListener("error", () => {
+          finishSpokenAudio("Mira’s audio could not be played. The answer is still shown above.");
+        }, { once: true });
+        status.textContent = "Speaking the answer in Mira’s feminine voice…";
+        return currentAudio.play().catch((error) => {
+          if (error.name !== "NotAllowedError") throw error;
+          currentAudio.controls = true;
+          isSpeaking = false;
+          assistantBusy = false;
+          mic.disabled = false;
+          currentAudio.setAttribute("aria-label", "Play Mira’s feminine spoken answer");
+          const message = document.createElement("article");
+          message.className = "admin-assistant__message admin-assistant__message--assistant";
+          const instruction = document.createElement("p");
+          instruction.textContent = "Tap to hear Mira’s feminine spoken answer.";
+          message.append(instruction, currentAudio);
+          messages.append(message);
+          messages.scrollTop = messages.scrollHeight;
+          status.textContent = "Tap the audio player to hear Mira’s feminine voice.";
+        });
+      })
+      .catch((error) => {
+        console.error("Admin assistant spoken answer failed:", error);
+        finishSpokenAudio(
+          error instanceof Error
+            ? error.message
+            : "Spoken answer generation failed. The answer is still shown above."
+        );
+      });
   };
 
   const setOpen = (open) => {
@@ -224,15 +253,22 @@
   );
   toggle.addEventListener("click", () => {
     const open = panel.hidden;
-    if (!open) cancelRecording();
+    if (!open) {
+      cancelRecording();
+      releaseSpokenAudio();
+    }
     setOpen(open);
   });
   close.addEventListener("click", () => {
     cancelRecording();
+    releaseSpokenAudio();
     setOpen(false);
     toggle.focus();
   });
-  window.addEventListener("pagehide", cancelRecording);
+  window.addEventListener("pagehide", () => {
+    cancelRecording();
+    releaseSpokenAudio();
+  });
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

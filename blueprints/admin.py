@@ -49,6 +49,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
     "admin.assistant_query",
     "admin.assistant_transcribe",
+    "admin.assistant_speak",
     "admin.download_pi_users_csv",
     "admin.download_activity_report",
     "admin.change_password",
@@ -403,6 +404,68 @@ def assistant_transcribe():
     if not transcript:
         return jsonify({"error": "No speech was detected. Try recording again or type your question."}), 422
     return jsonify({"transcript": transcript})
+
+
+@admin_bp.route("/assistant/speak", methods=["POST"])
+def assistant_speak():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to use spoken answers."}), 401
+
+    api_key = os.environ.get("DEEPGRAM_API_KEY", "").strip()
+    if not api_key:
+        return jsonify({
+            "error": "Spoken answers are not configured. Add a Deepgram API key in Render environment settings."
+        }), 503
+
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Send the answer text in JSON format."}), 400
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return jsonify({"error": "There is no answer text to speak."}), 400
+    if len(text) > 5000:
+        return jsonify({"error": "Spoken answers must be 5,000 characters or fewer."}), 400
+
+    api_url = "https://api.deepgram.com/v1/speak?" + urllib.parse.urlencode({
+        "model": "aura-2-thalia-en",
+        "mip_opt_out": "true",
+    })
+    provider_request = urllib.request.Request(
+        api_url,
+        data=json.dumps({"text": text.strip()}).encode("utf-8"),
+        headers={
+            "Authorization": f"Token {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(provider_request, timeout=30) as provider_response:
+            audio_data = provider_response.read(10 * 1024 * 1024 + 1)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 429:
+            message = "Spoken answers are temporarily unavailable because the free quota is exhausted."
+            status_code = 503
+        elif exc.code in {401, 403}:
+            message = "Spoken answers are not configured correctly. An administrator must check the Deepgram API key."
+            status_code = 503
+        else:
+            message = "The speech service could not generate audio. The answer is still shown above."
+            status_code = 502
+        current_app.logger.warning("Deepgram speech request failed with HTTP %s.", exc.code)
+        exc.close()
+        return jsonify({"error": message}), status_code
+    except (urllib.error.URLError, TimeoutError) as exc:
+        current_app.logger.warning("Deepgram speech service is unreachable: %s", exc)
+        return jsonify({
+            "error": "The speech service could not be reached. The answer is still shown above."
+        }), 502
+
+    if len(audio_data) > 10 * 1024 * 1024:
+        return jsonify({"error": "The speech service returned an audio file that was too large."}), 502
+    if not audio_data:
+        return jsonify({"error": "The speech service returned an empty audio file."}), 502
+    return Response(audio_data, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 def _admin_assistant_revenue(question):

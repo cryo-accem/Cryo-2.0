@@ -60,7 +60,7 @@
   {% endwith %}
   {% block content %}{% endblock %}
   {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant">
+  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant" data-speech-url="{{ url_for('admin.assistant_speak') }}">
     <button class="admin-assistant__toggle" type="button" data-assistant-toggle aria-expanded="false" aria-controls="admin-assistant-panel">
       <i class="fa-solid fa-comment-dots" aria-hidden="true"></i><span>Ask Mira</span>
     </button>
@@ -69,7 +69,7 @@
         <div><span class="admin-assistant__eyebrow">Admin assistant</span><h2>Mira</h2></div>
         <button class="admin-assistant__close" type="button" data-assistant-close aria-label="Close assistant"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </header>
-      <p class="admin-assistant__privacy">Answers use read-only admin records. Tap the microphone to record, then tap again to transcribe. Audio is sent to Deepgram with model-improvement opt-out and is retained only as needed to process the request. <a href="https://developers.deepgram.com/trust-security/your-data" target="_blank" rel="noopener noreferrer">Deepgram data controls</a>.</p>
+      <p class="admin-assistant__privacy">Answers use read-only admin records. Tap the microphone to record, then tap again to transcribe. Voice recordings and spoken answer text are sent to Deepgram with model-improvement opt-out and retained only as needed to process each request. <a href="https://developers.deepgram.com/trust-security/your-data" target="_blank" rel="noopener noreferrer">Deepgram data controls</a>.</p>
       <div class="admin-assistant__messages" data-assistant-messages aria-live="polite" aria-relevant="additions"></div>
       <form class="admin-assistant__form" data-assistant-form action="{{ url_for('admin.assistant_query') }}" data-transcription-url="{{ url_for('admin.assistant_transcribe') }}" method="post">
         <input type="hidden" data-assistant-csrf value="{{ csrf_token }}">
@@ -301,7 +301,7 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 </script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-deepgram-recording') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261009-mira-thalia-tts') }}" defer></script>
 {% endif %}
 </body>
 </html>

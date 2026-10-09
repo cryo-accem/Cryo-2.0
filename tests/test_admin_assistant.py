@@ -47,6 +47,13 @@ class AdminAssistantTests(unittest.TestCase):
             headers={"X-CSRF-Token": "assistant-test-token"},
         )
 
+    def speak(self, text="Freezing availability is eight grids today."):
+        return self.client.post(
+            "/admin/assistant/speak",
+            json={"text": text},
+            headers={"X-CSRF-Token": "assistant-test-token"},
+        )
+
     def test_freezing_answer_reads_active_and_completed_log_entries(self):
         today = datetime.date.today().isoformat()
         conn = database.get_db()
@@ -198,6 +205,78 @@ class AdminAssistantTests(unittest.TestCase):
             missing_csrf = self.client.post(
                 "/admin/assistant/transcribe",
                 data={"audio": (io.BytesIO(b"sample"), "question.webm", "audio/webm")},
+            )
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(missing_csrf.status_code, 400)
+
+    def test_spoken_answer_requires_configured_provider_key(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": ""}):
+            response = self.speak()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Deepgram API key", response.get_json()["error"])
+
+    def test_spoken_answer_rejects_empty_and_oversized_text(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):
+            empty = self.speak(" ")
+            oversized = self.speak("x" * 5001)
+
+        self.assertEqual(empty.status_code, 400)
+        self.assertEqual(oversized.status_code, 400)
+
+    def test_spoken_answer_reports_provider_quota_exhaustion(self):
+        provider_error = urllib.error.HTTPError(
+            "https://api.deepgram.com/v1/speak",
+            429,
+            "quota exceeded",
+            {},
+            io.BytesIO(b""),
+        )
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
+            patch("blueprints.admin.urllib.request.urlopen", side_effect=provider_error),
+        ):
+            response = self.speak()
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("free quota is exhausted", response.get_json()["error"])
+
+    def test_spoken_answer_uses_feminine_thalia_model_with_opt_out(self):
+        audio_data = b"\xff\xfb\x90mp3-audio"
+        provider_response = io.BytesIO(audio_data)
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
+            patch(
+                "blueprints.admin.urllib.request.urlopen",
+                return_value=provider_response,
+            ) as urlopen,
+        ):
+            response = self.speak("  Freezing availability is eight grids today.  ")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, "audio/mpeg")
+        self.assertEqual(response.data, audio_data)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        provider_request = urlopen.call_args.args[0]
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(provider_request.full_url).query)
+        self.assertEqual(query["model"], ["aura-2-thalia-en"])
+        self.assertEqual(query["mip_opt_out"], ["true"])
+        self.assertEqual(provider_request.get_header("Authorization"), "Token test-key")
+        self.assertEqual(
+            json.loads(provider_request.data),
+            {"text": "Freezing availability is eight grids today."},
+        )
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
+
+    def test_spoken_answer_requires_admin_session_and_csrf_token(self):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):
+            with self.client.session_transaction() as session:
+                session.pop("admin_logged_in")
+            unauthorized = self.speak()
+            missing_csrf = self.client.post(
+                "/admin/assistant/speak",
+                json={"text": "Freezing availability is eight grids today."},
             )
 
         self.assertEqual(unauthorized.status_code, 401)
