@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Grid inventory activity{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Inventory activity history</h1><p>Append-only record of registration, clipping, storage, data collection, and disposal events.</p></div><a class="button secondary" href="{{ url_for('inventory.activity', format='csv') }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export history CSV</a></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a href="{{ url_for('inventory.sessions') }}">Data collection</a><a class="active" href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
+  <section class="inventory-panel"><div class="inventory-panel__heading"><div><h2>All inventory events</h2><p>{{ total }} event(s)</p></div></div>
+    {% if events %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Grid</th><th>Event</th><th>Previous value</th><th>New value</th><th>Operator</th><th>Reference</th><th>Notes</th></tr></thead><tbody>{% for event in events %}<tr><td>{{ event.event_time|facility_time }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=event.grid_code) }}">{{ event.grid_code }}</a></td><td>{{ event.event_type|replace('_',' ')|title }}</td><td>{{ event.old_value or '—' }}</td><td>{{ event.new_value or '—' }}</td><td>{{ event.operator_name or '—' }}</td><td>{% if event.session_code %}<a href="{{ url_for('inventory.session_detail', session_id=event.related_session_id) }}">{{ event.session_code }}</a>{% else %}{{ event.operation_reference or '—' }}{% endif %}</td><td>{{ event.notes or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-message">No inventory activity recorded yet.</p>{% endif %}
+    {% if pages > 1 %}<nav class="inventory-pagination" aria-label="Activity history pages">{% if page>1 %}<a href="{{ url_for('inventory.activity', page=page-1) }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ pages }}</span>{% if page<pages %}<a href="{{ url_for('inventory.activity', page=page+1) }}">Next</a>{% endif %}</nav>{% endif %}
+  </section>
+</section></main>
+{% endblock %}

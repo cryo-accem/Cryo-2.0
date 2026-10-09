@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Search grid inventory{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Search and manage grids</h1><p>Search by grid, sample, researcher, grid type, or current storage location.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register grids</a></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a class="active" href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
+  <form class="inventory-filter-form" method="get">
+    <label class="inventory-filter-wide">Search<input type="search" name="q" value="{{ filters.get('q','') }}" placeholder="Grid, sample, researcher, type, Falcon, box, position"></label>
+    <label>Lifecycle status<select name="status"><option value="">All statuses</option>{% for value in ['Frozen','Clipped','Stored','In Data Collection','Discarded'] %}<option value="{{ value }}" {% if filters.get('status')==value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <label>Clipping<select name="clipped"><option value="">Any</option><option value="1" {% if filters.get('clipped')=='1' %}selected{% endif %}>Clipped</option><option value="0" {% if filters.get('clipped')=='0' %}selected{% endif %}>Not clipped</option></select></label>
+    <label>Grid type<select name="grid_type_id"><option value="">All types</option>{% for type in grid_types %}<option value="{{ type.grid_type_id }}" {% if filters.get('grid_type_id')|string==type.grid_type_id|string %}selected{% endif %}>{{ type.grid_type_name }}</option>{% endfor %}</select></label>
+    <label>Sample ID<input name="sample_id" value="{{ filters.get('sample_id','') }}" placeholder="ACCEM-S-00001 or numeric ID"></label>
+    <label>Freezing from<input type="date" name="frozen_from" value="{{ filters.get('frozen_from','') }}"></label>
+    <label>Freezing to<input type="date" name="frozen_to" value="{{ filters.get('frozen_to','') }}"></label>
+    <label>Falcon container<input name="container" value="{{ filters.get('container','') }}"></label>
+    <label>Grid box<input name="box" value="{{ filters.get('box','') }}"></label>
+    <label class="inventory-filter-actions"><button class="button small" type="submit">Apply filters</button><a class="button small secondary" href="{{ url_for('inventory.grids') }}">Clear</a></label>
+  </form>
+  <section class="inventory-panel">
+    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) found. Select rows to apply one reviewed clipping update.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
+    <form id="bulk-clipping-form" method="post" action="{{ url_for('inventory.bulk_clipping') }}" onsubmit="return confirmBulkClipping(this)">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <div class="inventory-bulk-controls"><label>Set selected grids to <select name="clipped"><option value="1">Clipped</option><option value="0">Not clipped</option></select></label><label>Notes (optional)<input name="notes" maxlength="2000"></label><button class="button small" type="submit">Review and apply clipping</button></div>
+      {% if rows %}<div class="table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="Select all grids on this page"></th><th>Grid ID</th><th>Sample</th><th>Researcher</th><th>Type</th><th>Frozen</th><th>Clipping</th><th>Status</th><th>Current storage</th></tr></thead><tbody>{% for grid in rows %}<tr><td><input form="bulk-clipping-form" type="checkbox" name="selected_grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.grid_code }}"></td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.grid_type_name }}</td><td>{{ grid.frozen_at|facility_time }}</td><td>{{ 'Clipped' if grid.clipped else 'Not clipped' }}</td><td><span class="inventory-status inventory-status--{{ grid.current_status|lower|replace(' ','-') }}">{{ grid.current_status }}</span></td><td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} / {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+      {% else %}<p class="empty-message">No grids match these filters.</p>{% endif %}
+    </form>
+    {% if pages > 1 %}<nav class="inventory-pagination" aria-label="Inventory result pages">{% if page > 1 %}<a href="{{ previous_url }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a href="{{ next_url }}">Next</a>{% endif %}</nav>{% endif %}
+  </section>
+</section></main>
+<script>
+document.querySelector("[data-select-all]")?.addEventListener("change", (event) => {
+  document.querySelectorAll('input[name="selected_grid_codes"]').forEach((box) => { box.checked = event.target.checked; });
+});
+function confirmBulkClipping(form) {
+  const selected = [...form.querySelectorAll('input[name="selected_grid_codes"]:checked')].map((box) => box.value);
+  if (!selected.length) { alert("Select at least one grid."); return false; }
+  if (selected.length > 200) { alert("Select no more than 200 grids."); return false; }
+  return confirm(`Set ${selected.length} selected grid(s) to ${form.clipped.value === "1" ? "Clipped" : "Not clipped"}?\n\n${selected.join(", ")}`);
+}
+</script>
+{% endblock %}

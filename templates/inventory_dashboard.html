@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Grid Inventory{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Facility operations</div><h1>Grid Inventory</h1><p>Track frozen grids, storage positions, and data collection history.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register frozen grids</a></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages">
+    <a class="active" href="{{ url_for('inventory.dashboard') }}">Overview</a>
+    <a href="{{ url_for('inventory.grids') }}">Search grids</a>
+    <a href="{{ url_for('inventory.storage') }}">Storage</a>
+    <a href="{{ url_for('inventory.sessions') }}">Data collection</a>
+    <a href="{{ url_for('inventory.activity') }}">Activity history</a>
+  </nav>
+  <section class="inventory-metrics" aria-label="Grid totals">
+    {% for label, value in [('Total grids', counts.total or 0), ('Frozen', counts.frozen or 0), ('Clipped', counts.clipped or 0), ('Stored', counts.stored or 0), ('In data collection', counts.collecting or 0), ('Discarded', counts.discarded or 0)] %}
+    <article class="inventory-metric"><span>{{ label }}</span><strong>{{ value }}</strong></article>
+    {% endfor %}
+  </section>
+  <div class="inventory-dashboard-grid">
+    <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Inventory mix</span><h2>Grids by type</h2></div></div>
+      {% if by_type %}<div class="inventory-breakdown">{% for item in by_type %}<div><span>{{ item.grid_type_name }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grids have been registered.</p>{% endif %}
+    </section>
+    <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Lifecycle</span><h2>Grids by status</h2></div></div>
+      {% if by_status %}<div class="inventory-breakdown">{% for item in by_status %}<div><span>{{ item.current_status }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grid status data yet.</p>{% endif %}
+    </section>
+  </div>
+  <section class="inventory-panel inventory-recent"><div class="inventory-panel__heading"><div><span class="chart-kicker">Audit trail</span><h2>Recent activity</h2></div><a class="button small secondary" href="{{ url_for('inventory.activity') }}">View full history</a></div>
+    {% if recent %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Grid</th><th>Action</th><th>Operator</th><th>Notes</th></tr></thead><tbody>{% for event in recent %}<tr><td>{{ event.event_time|facility_time }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=event.grid_code) }}">{{ event.grid_code }}</a></td><td>{{ event.event_type|replace('_', ' ')|title }}</td><td>{{ event.operator_name or '—' }}</td><td>{{ event.notes or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-message">No inventory activity yet.</p>{% endif %}
+  </section>
+  <div class="inventory-quick-links"><a class="button secondary" href="{{ url_for('inventory.grids') }}">Search and manage grids</a><a class="button secondary" href="{{ url_for('inventory.storage') }}">Browse storage</a><a class="button secondary" href="{{ url_for('inventory.sessions') }}">Data collection sessions</a></div>
+</section></main>
+{% endblock %}

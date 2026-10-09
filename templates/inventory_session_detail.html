@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | {{ session.session_code }}{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <div class="inventory-breadcrumb"><a href="{{ url_for('inventory.sessions') }}">Data collection</a><span>/</span><span>{{ session.session_code }}</span></div>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Instrument session</div><h1>{{ session.session_code }}</h1><p>{{ session.start_time|facility_time }} · {{ session.instrument or 'Instrument not specified' }} · {{ session.session_status|replace('_',' ')|title }}</p></div></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a class="active" href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
+  <section class="inventory-panel"><h2>Session grids and outcomes</h2><p>Each final decision saves in its own transaction. A failed storage operation leaves that grid unchanged.</p>
+    {% if grids %}<div class="inventory-outcome-list">{% for grid in grids %}<article class="inventory-outcome-card"><div class="inventory-panel__heading"><div><h3><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></h3><p>{{ grid.sample_name }} · {{ grid.current_status }}</p></div>{% if grid.outcome!='in_progress' %}<span class="inventory-status inventory-status--completed">{{ grid.outcome|title }}</span>{% endif %}</div>
+      {% if grid.outcome=='in_progress' and session.session_status=='in_progress' %}<form class="inventory-outcome-form" method="post" action="{{ url_for('inventory.complete_grid_session', session_id=session.session_id, grid_code=grid.grid_code) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><label>Decision<select name="outcome" required><option value="">Choose outcome</option><option value="store">Store</option><option value="discard">Discard</option></select></label><div class="inventory-outcome-storage" hidden><label>Falcon container ID<input name="falcon_container_id" maxlength="100"></label><label>Grid box<input name="grid_box_name" maxlength="100"></label><label>Grid position<input name="grid_position" maxlength="40"></label></div><label>Notes or discard reason<input name="notes" maxlength="2000"></label><button class="button small" type="submit">Record grid outcome</button></form>
+      {% else %}<p class="inventory-outcome-meta">Outcome: {{ grid.outcome|replace('_',' ')|title }}{% if grid.notes %} · {{ grid.notes }}{% endif %}</p>{% endif %}
+    </article>{% endfor %}</div>{% else %}<p class="empty-message">No grids are linked to this session.</p>{% endif %}
+  </section>
+</section></main>
+<script>
+document.querySelectorAll(".inventory-outcome-form").forEach((form) => {
+  const decision = form.querySelector('[name="outcome"]');
+  const destination = form.querySelector(".inventory-outcome-storage");
+  const fields = destination.querySelectorAll("input");
+  const sync = () => {
+    const storing = decision.value === "store";
+    destination.hidden = !storing;
+    fields.forEach((field) => { field.required = storing; });
+  };
+  decision.addEventListener("change", sync);
+  form.addEventListener("submit", (event) => {
+    if (decision.value === "discard" && !confirm("Discard this grid permanently from active use? Its history will be retained and any storage position released.")) event.preventDefault();
+  });
+  sync();
+});
+</script>
+{% endblock %}

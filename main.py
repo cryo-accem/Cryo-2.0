@@ -13,6 +13,7 @@ from blueprints.freezing  import freezing_bp
 from blueprints.screening import screening_bp
 from blueprints.register  import register_bp
 from blueprints.admin     import admin_bp
+from blueprints.inventory import inventory_bp
 
 
 class _CSRFToken(str):
@@ -54,6 +55,9 @@ def create_app() -> Flask:
         return {
             "csrf_token": _CSRFToken(token),
             "current_year": datetime.date.today().year,
+            "admin_assistant_enabled": bool(
+                session.get("admin_logged_in") and not session.get("must_change_password")
+            ),
         }
 
     @app.before_request
@@ -70,7 +74,16 @@ def create_app() -> Flask:
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        microphone_policy = (
+            "microphone=(self)"
+            if request.path.startswith("/admin/")
+            and request.path != "/admin/"
+            else "microphone=()"
+        )
+        response.headers.setdefault(
+            "Permissions-Policy",
+            f"camera=(), {microphone_policy}, geolocation=()",
+        )
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; base-uri 'self'; object-src 'none'; "
@@ -99,6 +112,7 @@ def create_app() -> Flask:
     app.register_blueprint(screening_bp)
     app.register_blueprint(register_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(inventory_bp)
 
     with app.app_context():
         init_db()

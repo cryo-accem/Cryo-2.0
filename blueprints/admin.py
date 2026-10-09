@@ -27,7 +27,7 @@ from revenue import (
     calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
     parse_number_of_grids,
 )
-from blueprints.freezing import complete_freezing_booking
+from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking
 from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import PI_USERS
@@ -46,6 +46,7 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
+    "admin.assistant_query",
     "admin.download_pi_users_csv",
     "admin.download_activity_report",
     "admin.change_password",
@@ -81,6 +82,22 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.delete_publication",
     "admin.save_instrument",
     "admin.delete_instrument",
+    "inventory.dashboard",
+    "inventory.grids",
+    "inventory.new_grid",
+    "inventory.grid_types",
+    "inventory.samples_json",
+    "inventory.grid_detail",
+    "inventory.grid_clipping",
+    "inventory.grid_type",
+    "inventory.bulk_clipping",
+    "inventory.grid_storage",
+    "inventory.storage",
+    "inventory.sessions",
+    "inventory.session_detail",
+    "inventory.complete_grid_session",
+    "inventory.activity",
+    "inventory.export_csv",
     "static",
 }
 
@@ -273,6 +290,177 @@ def panel():
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
     )
+
+
+@admin_bp.route("/assistant/query", methods=["POST"])
+def assistant_query():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to use the admin assistant."}), 401
+
+    payload = request.get_json()
+    if not isinstance(payload, dict):
+        return jsonify({"error": "Send a question in JSON format."}), 400
+    question = payload.get("question")
+    if not isinstance(question, str) or not question.strip():
+        return jsonify({"error": "Enter a question to continue."}), 400
+    if len(question) > 500:
+        return jsonify({"error": "Questions must be 500 characters or fewer."}), 400
+
+    normalized_question = question.strip().casefold()
+    if re.search(r"\b(revenue|billing|billed|income|received|outstanding|csic|payment|collected)\b", normalized_question):
+        answer = _admin_assistant_revenue(normalized_question)
+    elif re.search(r"\b(freez\w*|availability|available|capacity|slots?)\b", normalized_question):
+        answer = _admin_assistant_freezing(normalized_question)
+    else:
+        answer = (
+            "I can answer questions about revenue and billing, or freezing availability. "
+            "Try “Summarize revenue this year” or “What freezing is available today?”"
+        )
+    return jsonify({"answer": answer})
+
+
+def _admin_assistant_revenue(question):
+    today = datetime.date.today()
+    if re.search(r"\ball time\b|\bever\b", question):
+        preset = "all"
+        period_label = "all available records"
+    elif "last month" in question or "previous month" in question:
+        preset = "last_month"
+        period_label = "last month"
+    elif "last year" in question or "previous year" in question:
+        preset = "last_year"
+        period_label = "last year"
+    elif re.search(r"\blast three months\b|\blast 3 months\b|\bpast three months\b|\bpast 3 months\b", question):
+        preset = "last_3_months"
+        period_label = "the last three months"
+    elif re.search(r"\bthis month\b|\bmonth to date\b", question):
+        preset = "this_month"
+        period_label = "this month to date"
+    elif re.search(r"\btoday\b", question):
+        return (
+            "The revenue records don't track every source at daily granularity: CSIC projects "
+            "are recorded by year. I can summarize this month to date or this year to date."
+        )
+    elif re.search(r"\bthis year\b|\byear to date\b", question):
+        preset = "this_year"
+        period_label = "this year to date"
+    else:
+        preset = "this_year"
+        period_label = "this year to date"
+
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        revenue = _revenue_dashboard(cur, preset_override=preset)
+    finally:
+        cur.close()
+        conn.close()
+
+    totals = revenue["totals"]
+    completed = revenue["completed_bookings"]
+    csic_count = int(totals["csic_slots"])
+    return (
+        f"Revenue summary for {period_label}: net revenue "
+        f"₹{totals['net']:,.2f}; gross billed ₹{totals['gross']:,.2f}; "
+        f"received ₹{totals['received']:,.2f}; outstanding ₹{totals['outstanding']:,.2f}. "
+        f"There are {completed} completed billable bookings and {csic_count} CSIC project "
+        f"record(s), whose net revenue is ₹{totals['csic_net']:,.2f}. "
+        "These figures are calculated from the admin revenue records."
+    )
+
+
+def _admin_assistant_freezing(question):
+    today = datetime.date.today()
+    date_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", question)
+    if date_match:
+        try:
+            selected_date = datetime.date.fromisoformat(date_match.group(1))
+        except ValueError:
+            return "That date is not valid. Use a date like 2026-10-09."
+    elif "tomorrow" in question:
+        selected_date = today + datetime.timedelta(days=1)
+    elif re.search(r"\btoday\b", question):
+        selected_date = today
+    else:
+        weekdays = {
+            "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+            "friday": 4, "saturday": 5, "sunday": 6,
+        }
+        selected_weekday = next(
+            (weekday for name, weekday in weekdays.items()
+             if re.search(rf"\b{name}\b", question)),
+            None,
+        )
+        if selected_weekday is None:
+            return (
+                "Please specify today, tomorrow, a weekday, or a date in YYYY-MM-DD format "
+                "for freezing availability."
+            )
+        days_ahead = (selected_weekday - today.weekday()) % 7
+        if days_ahead == 0 and "next" in question:
+            days_ahead = 7
+        selected_date = today + datetime.timedelta(days=days_ahead)
+
+    date_key = selected_date.isoformat()
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """SELECT user_name, pi_name, sample_name, grids
+               FROM freezing_bookings
+               WHERE freezing_date=? AND status='active'
+               ORDER BY registered_at, id""",
+            [date_key],
+        )
+        active_bookings = cur.fetchall()
+        cur.execute(
+            """SELECT user_name, sample_name, grids, actual_grids
+               FROM completed_freezing
+               WHERE freezing_date=?
+               ORDER BY completed_at, id""",
+            [date_key],
+        )
+        completed_bookings = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+
+    active_grids = sum(int(row["grids"] or 0) for row in active_bookings)
+    remaining_grids = max(0, GRID_LIMIT_PER_DAY - active_grids)
+    date_label = f"{selected_date:%A, %B} {selected_date.day}, {selected_date.year}"
+    if selected_date.weekday() >= 5:
+        availability = "Freezing is not scheduled on weekends."
+    elif remaining_grids:
+        availability = f"{remaining_grids} of {GRID_LIMIT_PER_DAY} daily grid places remain."
+    else:
+        availability = "No daily grid places remain."
+
+    lines = [
+        f"Freezing log for {date_label}: {availability}",
+        f"{len(active_bookings)} active booking(s) reserve {active_grids} grid(s).",
+    ]
+    for row in active_bookings:
+        name = (row["user_name"] or "Name not recorded").strip()
+        sample = (row["sample_name"] or "Sample not recorded").strip()
+        lines.append(f"Scheduled: {name}, {sample}, {int(row['grids'] or 0)} grid(s).")
+    if completed_bookings:
+        actual_grids = sum(
+            int(row["actual_grids"] if row["actual_grids"] is not None else row["grids"] or 0)
+            for row in completed_bookings
+        )
+        lines.append(
+            f"Completed log: {len(completed_bookings)} booking(s), {actual_grids} actual grid(s)."
+        )
+        for row in completed_bookings:
+            name = (row["user_name"] or "Name not recorded").strip()
+            sample = (row["sample_name"] or "Sample not recorded").strip()
+            actual = row["actual_grids"] if row["actual_grids"] is not None else row["grids"]
+            lines.append(
+                f"Completed: {name}, {sample}, {int(actual or 0)} actual grid(s)."
+            )
+    else:
+        lines.append("No completed freezing records are logged for this date.")
+    return " ".join(lines)
 
 
 def _dashboard_pending_payments(cur):
@@ -840,9 +1028,9 @@ def _smooth_chart_path(points):
     return path
 
 
-def _revenue_dashboard(cur):
+def _revenue_dashboard(cur, preset_override=None):
     today = datetime.date.today()
-    preset = request.args.get("range", "this_year")
+    preset = preset_override or request.args.get("range", "this_year")
     period = request.args.get("period", "monthly")
     if period not in {"weekly", "monthly", "annual"}:
         period = "monthly"
@@ -860,6 +1048,9 @@ def _revenue_dashboard(cur):
     elif preset == "this_year":
         start = today.replace(month=1, day=1)
         end = today
+    elif preset == "last_year":
+        start = datetime.date(today.year - 1, 1, 1)
+        end = datetime.date(today.year - 1, 12, 31)
     elif preset == "custom":
         start = _parse_date(request.args.get("start"))
         end = _parse_date(request.args.get("end"))

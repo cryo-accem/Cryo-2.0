@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Register frozen grids{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Register frozen grids</h1><p>Create one record per physical grid in a freezing batch.</p></div></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
+  <form class="inventory-form inventory-panel" method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <h2>Sample</h2>
+    <label class="inventory-checkbox"><input type="checkbox" name="create_sample" value="1" id="create-sample"> Register a new sample with this batch</label>
+    <div id="existing-sample-fields" class="inventory-form-grid">
+      <label class="inventory-form-wide">Find an existing sample<input type="search" id="sample-search" placeholder="Search sample ID, name, researcher, or lab"></label>
+      <p class="inventory-sample-search-status inventory-form-wide" id="sample-search-status" role="status" aria-live="polite"></p>
+      <label class="inventory-form-wide">Existing sample<select name="sample_id" id="sample-id"><option value="">Select a sample</option>{% for sample in samples %}<option value="{{ sample.sample_id }}">{{ sample.sample_code }} · {{ sample.sample_name }} — {{ sample.researcher_name }} ({{ sample.lab_name }})</option>{% endfor %}</select><small>Search above to find additional registered samples.</small></label>
+    </div>
+    <div id="new-sample-fields" class="inventory-form-grid" hidden>
+      <label>Sample name<input name="sample_name" maxlength="180"></label>
+      <label>Researcher or user<input name="researcher_name" maxlength="150"></label>
+      <label>Laboratory or department<input name="lab_name" maxlength="180"></label>
+      <label>External sample/reference ID<input name="external_reference" maxlength="120"></label>
+      <label>Link existing website account (optional)<select name="linked_user_id"><option value="">No linked account</option>{% for account in accounts %}<option value="{{ account.id }}">{{ account.username }}</option>{% endfor %}</select></label>
+      <label class="inventory-form-wide">Sample description<textarea name="description" rows="3" maxlength="4000"></textarea></label>
+    </div>
+    <h2>Freezing batch</h2>
+    <div class="inventory-form-grid">
+      <label>Freezing date and time<input type="datetime-local" name="frozen_at" required></label>
+      <label>Grid type<select name="grid_type_id" required><option value="">Choose grid type</option>{% for type in grid_types %}<option value="{{ type.grid_type_id }}">{{ type.grid_type_name }}</option>{% endfor %}</select></label>
+      <label>Number of physical grids<input type="number" name="grid_count" min="1" max="200" step="1" value="1" required></label>
+      <label class="inventory-form-wide">Grid preparation notes<textarea name="preparation_notes" rows="3" maxlength="4000"></textarea></label>
+      <label class="inventory-form-wide">Additional comments<textarea name="comments" rows="2" maxlength="2000"></textarea></label>
+    </div>
+    <section class="inventory-initial-storage">
+      <label class="inventory-checkbox"><input type="checkbox" name="store_immediately" value="1" id="store-immediately"> Store each grid immediately after registration</label>
+      <div id="initial-storage-fields" class="inventory-initial-storage-grid" hidden></div>
+    </section>
+    <div class="inventory-form-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> The operator is recorded from your authenticated admin session. Each grid receives its own permanent ID and independent clipping, storage, and session history.</div>
+    <div class="inventory-form-actions"><a class="button secondary" href="{{ url_for('inventory.grids') }}">Cancel</a><button class="button" type="submit">Register batch and grids</button></div>
+  </form>
+  <p class="inventory-manage-types"><a href="{{ url_for('inventory.grid_types') }}">Manage grid type options</a></p>
+</section></main>
+<script>
+(() => {
+  const createSample = document.getElementById("create-sample");
+  const existing = document.getElementById("existing-sample-fields");
+  const fresh = document.getElementById("new-sample-fields");
+  const select = document.getElementById("sample-id");
+  const storeNow = document.getElementById("store-immediately");
+  const storageFields = document.getElementById("initial-storage-fields");
+  const gridCount = document.querySelector('[name="grid_count"]');
+  const sync = () => {
+    existing.hidden = createSample.checked;
+    fresh.hidden = !createSample.checked;
+    select.required = !createSample.checked;
+    fresh.querySelectorAll("input:not([type=checkbox]), textarea").forEach((field) => {
+      field.required = createSample.checked && ["sample_name", "researcher_name", "lab_name"].includes(field.name);
+      field.disabled = !createSample.checked;
+    });
+    select.disabled = createSample.checked;
+  };
+  createSample.addEventListener("change", sync);
+  sync();
+  const search = document.getElementById("sample-search");
+  const searchStatus = document.getElementById("sample-search-status");
+  let timer;
+  search.addEventListener("input", () => {
+    clearTimeout(timer);
+    const query = search.value.trim();
+    if (!query) { searchStatus.textContent = ""; return; }
+    searchStatus.textContent = "Searching samples…";
+    timer = setTimeout(async () => {
+      let entries;
+      try {
+        const response = await fetch(`{{ url_for('inventory.samples_json') }}?q=${encodeURIComponent(query)}`);
+        if (!response.ok) throw new Error("Sample search failed.");
+        entries = await response.json();
+      } catch (error) {
+        searchStatus.textContent = "Unable to search samples. Please retry.";
+        return;
+      }
+      const keep = select.value;
+      select.replaceChildren(new Option("Select a sample", ""));
+      entries.forEach((sample) => {
+        select.add(new Option(`${sample.code} · ${sample.name} — ${sample.researcher} (${sample.lab})`, sample.id));
+      });
+      if (entries.some((sample) => String(sample.id) === keep)) select.value = keep;
+      searchStatus.textContent = entries.length ? `${entries.length} matching sample(s).` : "No matching samples.";
+    }, 180);
+  });
+  const renderStorageFields = () => {
+    const count = Math.max(1, Math.min(200, Number.parseInt(gridCount.value, 10) || 1));
+    storageFields.hidden = !storeNow.checked;
+    storageFields.replaceChildren();
+    if (!storeNow.checked) return;
+    for (let index = 0; index < count; index += 1) {
+      const row = document.createElement("div");
+      row.className = "inventory-initial-storage-row";
+      const title = document.createElement("strong");
+      title.textContent = `Grid ${index + 1} storage position`;
+      row.append(title);
+      [["Falcon container ID", "container", 100], ["Grid box", "box", 100], ["Grid position", "position", 40], ["Notes (optional)", "notes", 2000]].forEach(([labelText, suffix, limit]) => {
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        label.textContent = labelText;
+        input.name = `storage_${index}_${suffix}`;
+        input.maxLength = limit;
+        input.required = suffix !== "notes";
+        label.append(input);
+        row.append(label);
+      });
+      storageFields.append(row);
+    }
+  };
+  storeNow.addEventListener("change", renderStorageFields);
+  gridCount.addEventListener("input", renderStorageFields);
+})();
+</script>
+{% endblock %}

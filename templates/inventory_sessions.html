@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Data collection sessions{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Data collection</h1><p>Start a session with selected grids and record Store or Discard separately for each grid.</p></div></header>
+  <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a class="active" href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
+  <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Start new session</span><h2>Session details</h2></div></div>
+    {% if available_grids %}<form method="post" class="inventory-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <div class="inventory-form-grid">
+        <label>Session date and time<input type="datetime-local" name="start_time" required></label>
+        <label>Existing booking (optional)<select name="booking_reference"><option value="">Not linked to a booking</option>{% for booking in bookings %}<option value="{{ booking.id }}">#{{ booking.id }} · {{ booking.user_name }} — {{ booking.sample_name }} ({{ booking.status }})</option>{% endfor %}</select></label>
+        <label>Microscope or instrument<input name="instrument" maxlength="120"></label>
+        <label class="inventory-form-wide">Session notes<textarea name="notes" rows="2" maxlength="4000"></textarea></label>
+      </div>
+      <fieldset class="inventory-select-grids"><legend>Select grids <small>Up to 200 eligible grids are shown; use grid search if a grid is not listed.</small></legend><div class="inventory-grid-picker">{% for grid in available_grids %}<label><input type="checkbox" name="grid_codes" value="{{ grid.grid_code }}"><span><strong>{{ grid.grid_code }}</strong><small>{{ grid.sample_name }} · {{ grid.current_status }}</small></span></label>{% endfor %}</div></fieldset>
+      <div class="inventory-form-actions"><button class="button" type="submit">Start data collection</button></div>
+    </form>{% else %}<p class="empty-message">There are no eligible grids. Register a batch or check the inventory.</p>{% endif %}
+  </section>
+  <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Session history</span><h2>Recent sessions</h2></div></div>{% if sessions %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Session</th><th>Started</th><th>Instrument</th><th>Operator</th><th>Grids</th><th>Pending outcomes</th><th>Status</th></tr></thead><tbody>{% for item in sessions %}<tr><td><a href="{{ url_for('inventory.session_detail', session_id=item.session_id) }}">{{ item.session_code }}</a></td><td>{{ item.start_time|facility_time }}</td><td>{{ item.instrument or '—' }}</td><td>{{ item.operator_name or '—' }}</td><td>{{ item.grid_count }}</td><td>{{ item.pending_count or 0 }}</td><td>{{ item.session_status|replace('_',' ')|title }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-message">No data collection sessions have been recorded.</p>{% endif %}</section>
+</section></main>
+{% endblock %}
