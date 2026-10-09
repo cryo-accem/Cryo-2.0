@@ -262,6 +262,15 @@ a { color: inherit; }
 .page-header--portal { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .52)), url("../images/web/register-header.webp"); background-position: center 52%; }
 .page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/schedule-header.webp"); background-position: center 50%; }
 .page-header--admin { background-image: linear-gradient(90deg, rgba(3, 20, 43, .96), rgba(6, 34, 62, .65)), url("../images/web/microscopy.webp"); background-position: center 45%; }
+.site-shell > main:not(.portal-page) > .page-content { padding-top: 0; }
+.site-shell > main:not(.portal-page) > .page-content > .page-header { margin: 0 -42px 28px; }
+@media (max-width: 800px) {
+  .site-shell > main:not(.portal-page) > .page-content { padding-top: 0; }
+  .site-shell > main:not(.portal-page) > .page-content > .page-header { margin: 0 -22px 25px; }
+}
+@media (max-width: 480px) {
+  .site-shell > main:not(.portal-page) > .page-content > .page-header { margin-right: -16px; margin-left: -16px; }
+}
 .admin-login-page .page-content { padding-bottom: 58px; }
 .admin-login-page .page-header { min-height: 178px; }
 .admin-login-card {
