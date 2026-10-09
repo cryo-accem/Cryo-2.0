@@ -81,6 +81,10 @@ def create_app() -> Flask:
         )
         if request.path.startswith("/admin"):
             response.headers.setdefault("Cache-Control", "no-store")
+        if request.endpoint == "static" and request.path.lower().endswith(".webp"):
+            response.cache_control.public = True
+            response.cache_control.max_age = 86400
+            response.cache_control.no_cache = None
         if request.is_secure:
             response.headers.setdefault(
                 "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

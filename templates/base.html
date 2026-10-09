@@ -15,7 +15,7 @@
   <header class="site-header">
     <div class="header-inner">
       <a class="brand" href="{{ url_for('admin.login') }}" aria-label="Admin login">
-        <img class="brand-mark" src="{{ url_for('static', filename='images/iisc_logo.png') }}" alt="Indian Institute of Science">
+        <img class="brand-mark" src="{{ url_for('static', filename='images/iisc_logo.webp') }}" alt="Indian Institute of Science" decoding="async">
         <span><strong>ACCEM</strong><small>Advanced Centre for<br>Cryo-Electron Microscopy</small></span>
       </a>
       {% if request.path.startswith('/admin') and request.path != '/admin/' %}
