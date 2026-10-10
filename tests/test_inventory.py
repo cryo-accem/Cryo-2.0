@@ -22,7 +22,6 @@ class GridInventoryTests(unittest.TestCase):
         self.app = create_app()
         self.app.testing = True
         self.client = self.app.test_client()
-        apply_migration()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
             conn = database.get_db()
@@ -87,6 +86,10 @@ class GridInventoryTests(unittest.TestCase):
 
     def test_migration_is_repeatable_and_preserves_existing_booking_data(self):
         conn = database.get_db()
+        inventory_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='inventory_grids'"
+        ).fetchone()
+        self.assertIsNotNone(inventory_table)
         conn.execute(
             """INSERT INTO bookings (user_name, sample_name, status)
                VALUES ('Existing user', 'Existing sample', 'waiting')"""

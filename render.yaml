@@ -3,7 +3,7 @@ services:
     name: cryo-accem
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: python -c "import main; from migrations.apply_grid_inventory import apply_migration; apply_migration()" && gunicorn main:app
+    startCommand: gunicorn main:app
     healthCheckPath: /
     envVars:
       - key: DATABASE_URL

@@ -116,6 +116,9 @@ def create_app() -> Flask:
 
     with app.app_context():
         init_db()
+        from migrations.apply_grid_inventory import apply_migration
+
+        apply_migration()
 
     return app
 
