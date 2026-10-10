@@ -104,11 +104,11 @@ class GridInventoryTests(unittest.TestCase):
         row = conn.execute("SELECT sample_name FROM bookings").fetchone()
         version_count = conn.execute(
             "SELECT COUNT(*) AS count FROM inventory_schema_migrations "
-            "WHERE version='001_grid_inventory'"
+            "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link')"
         ).fetchone()["count"]
         conn.close()
         self.assertEqual(row["sample_name"], "Existing sample")
-        self.assertEqual(version_count, 1)
+        self.assertEqual(version_count, 2)
 
     def test_inventory_dashboard_renders_stored_grid_count(self):
         codes = self.create_batch(1)

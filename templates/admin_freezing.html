@@ -7,7 +7,40 @@
     <div class="table-tools" data-admin-filter><label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI or sample"></label><select data-origin-filter aria-label="Filter by origin"><option value="">All origins</option><option value="Internal">Internal / Academic</option><option value="External">External</option><option value="Industry">Industrial</option></select></div>
     <section class="data-panel"><h2>Active freezing slots <span class="status-badge status-badge--confirmed">Confirmed</span></h2>
       {% if active_slots %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>User Name</th><th>PI Name</th><th>Origin</th><th>Sample</th><th>Requested Grids</th><th>Freezing Date</th><th>Registered At</th></tr></thead><tbody>
-      {% for slot in active_slots %}<tr data-origin="{{ slot.origin }}"><td><form class="freezing-complete-form" method="post" action="{{ url_for('admin.complete_freezing', booking_id=slot.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><select name="user_category" aria-label="User category"><option value="internal" {{ 'selected' if slot.origin|lower == 'internal' else '' }}>Internal</option><option value="academic" {{ 'selected' if slot.origin|lower in ['external', 'academic'] else '' }}>External Academic</option><option value="industry" {{ 'selected' if slot.origin|lower in ['industry', 'industrial'] else '' }}>External Industry</option></select><select name="service_stage" aria-label="Service stage"><option value="Freezing / Grid Registration">Freezing / Grid Registration</option></select><input name="actual_grids" type="number" min="1" step="1" placeholder="Actual grids" aria-label="Actual grids for {{ slot.user_name }}" required><select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility">Facility Provided</option><option value="self_owned">Self Owned / User Provided</option></select><select name="grid_type" aria-label="Grid type"><option value="">Single grid type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select><span class="freezing-grid-breakdown" aria-label="Grid type quantities"><input name="normal_grids" type="number" min="0" step="1" placeholder="Normal qty" aria-label="Normal holey carbon grid quantity"><span>+</span><input name="gold_grids" type="number" min="0" step="1" placeholder="Gold qty" aria-label="Gold carbon graphene grid quantity"></span><output class="billing-preview" aria-live="polite"></output><button class="btn btn-complete" type="submit">Complete</button></form></td><td>{{ slot.user_name }}</td><td>{{ slot.pi_name }}</td><td>{{ slot.origin }}</td><td>{{ slot.sample_name }}</td><td>{{ slot.grids }}</td><td>{{ slot.freezing_date }}</td><td>{{ slot.registered_at[:10] if slot.registered_at and slot.registered_at is string else slot.registered_at.strftime('%Y-%m-%d') if slot.registered_at else '' }}</td></tr>{% endfor %}
+      {% for slot in active_slots %}<tr data-origin="{{ slot.origin }}"><td>
+        <form class="freezing-complete-form" method="post" action="{{ url_for('admin.complete_freezing', booking_id=slot.id) }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <label class="freezing-form-label">Billing details</label>
+          <select name="user_category" aria-label="User category"><option value="internal" {{ 'selected' if slot.origin|lower == 'internal' else '' }}>Internal</option><option value="academic" {{ 'selected' if slot.origin|lower in ['external', 'academic'] else '' }}>External Academic</option><option value="industry" {{ 'selected' if slot.origin|lower in ['industry', 'industrial'] else '' }}>External Industry</option></select>
+          <select name="service_stage" aria-label="Service stage"><option value="Freezing / Grid Registration">Freezing / Grid Registration</option></select>
+          <input name="actual_grids" type="number" min="1" step="1" placeholder="Actual grids" aria-label="Actual grids for {{ slot.user_name }}" required>
+          <select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility">Facility Provided</option><option value="self_owned">Self Owned / User Provided</option></select>
+          <select name="grid_type" aria-label="Grid type"><option value="">Single grid type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select>
+          <span class="freezing-grid-breakdown" aria-label="Grid type quantities"><input name="normal_grids" type="number" min="0" step="1" placeholder="Normal qty" aria-label="Normal holey carbon grid quantity"><span>+</span><input name="gold_grids" type="number" min="0" step="1" placeholder="Gold qty" aria-label="Gold carbon graphene grid quantity"></span>
+          <output class="billing-preview" aria-live="polite"></output>
+          <fieldset class="freezing-inventory-choice">
+            <legend>Grid management (optional)</legend>
+            <label><input type="checkbox" name="grid_management" value="1"> Add the frozen grids to inventory</label>
+            <div class="freezing-inventory-fields" hidden>
+              <label>Inventory sample name<input name="inventory_sample_name" maxlength="180"></label>
+              <p>Choose the grid type and storage position for each actual grid.</p>
+              <label>Blot seconds<input name="blot_seconds" type="number" min="0.01" max="999999" step="0.01"></label>
+              <label>Blot force<input name="blot_force" type="number" min="0" max="999999" step="0.01"></label>
+              <div class="freezing-grid-positions" aria-live="polite"></div>
+              <template class="freezing-position-template">
+                <fieldset class="freezing-position-row">
+                  <legend data-grid-label></legend>
+                  <label>Grid type<select name="inventory_grid_type_id"><option value="">Select grid type</option>{% for grid_type in inventory_grid_types %}<option value="{{ grid_type.grid_type_id }}">{{ grid_type.grid_type_name }}</option>{% endfor %}</select></label>
+                  <label>Falcon/container<input name="inventory_falcon" maxlength="100"></label>
+                  <label>Grid box<input name="inventory_box" maxlength="100"></label>
+                  <label>Grid position<input name="inventory_position" maxlength="40"></label>
+                </fieldset>
+              </template>
+            </div>
+          </fieldset>
+          <button class="btn btn-complete" type="submit">Complete</button>
+        </form>
+      </td><td>{{ slot.user_name }}</td><td>{{ slot.pi_name }}</td><td>{{ slot.origin }}</td><td>{{ slot.sample_name }}</td><td>{{ slot.grids }}</td><td>{{ slot.freezing_date }}</td><td>{{ slot.registered_at[:10] if slot.registered_at and slot.registered_at is string else slot.registered_at.strftime('%Y-%m-%d') if slot.registered_at else '' }}</td></tr>{% endfor %}
       </tbody></table></div>{% else %}<div class="empty-message">No active freezing slots.</div>{% endif %}
     </section>
     <section class="data-panel"><h2>Completed freezing slots <span class="status-badge status-badge--completed">Completed</span></h2>
@@ -22,6 +55,14 @@
   .freezing-grid-breakdown { display: none; gap: 6px; align-items: center; }
   .freezing-grid-breakdown.is-visible { display: inline-flex; }
   .freezing-grid-breakdown input { width: 64px; }
+  .freezing-form-label { display: block; font-weight: 700; }
+  .freezing-inventory-choice, .freezing-position-row { min-width: 220px; margin: 8px 0; padding: 8px; border: 1px solid #cbd9e1; border-radius: 8px; }
+  .freezing-inventory-fields { display: grid; gap: 8px; margin-top: 8px; }
+  .freezing-inventory-fields[hidden] { display: none; }
+  .freezing-inventory-fields > label, .freezing-position-row > label { display: grid; gap: 4px; }
+  .freezing-position-row { display: grid; gap: 8px; }
+  .freezing-position-row legend, .freezing-inventory-choice legend { font-weight: 700; }
+  .freezing-grid-positions { display: grid; gap: 6px; }
 </style>
 <script>
 document.querySelectorAll(".freezing-complete-form").forEach((form) => {
@@ -31,6 +72,35 @@ document.querySelectorAll(".freezing-complete-form").forEach((form) => {
   const normal = form.querySelector("[name=normal_grids]");
   const gold = form.querySelector("[name=gold_grids]");
   const preview = form.querySelector(".billing-preview");
+  const inventoryToggle = form.querySelector("[name=grid_management]");
+  const inventoryFields = form.querySelector(".freezing-inventory-fields");
+  const positions = form.querySelector(".freezing-grid-positions");
+  const positionTemplate = form.querySelector(".freezing-position-template");
+  const gridCount = form.querySelector("[name=actual_grids]");
+  const syncPositions = () => {
+    const count = Math.min(200, Math.max(0, Number.parseInt(gridCount.value, 10) || 0));
+    const current = Array.from(positions.children).map((row) =>
+      Array.from(row.querySelectorAll("input, select")).map((input) => input.value)
+    );
+    positions.replaceChildren();
+    for (let index = 0; index < count; index += 1) {
+      const row = positionTemplate.content.cloneNode(true);
+      row.querySelector("[data-grid-label]").textContent = `Grid ${index + 1} storage position`;
+      const fields = row.querySelectorAll("input, select");
+      fields.forEach((field, fieldIndex) => {
+        field.required = inventoryToggle.checked;
+        field.value = current[index]?.[fieldIndex] || "";
+      });
+      positions.append(row);
+    }
+  };
+  const syncInventory = () => {
+    inventoryFields.hidden = !inventoryToggle.checked;
+    inventoryFields.querySelectorAll("input:not([name^=inventory_falcon]):not([name^=inventory_box]):not([name^=inventory_position]), select").forEach((field) => {
+      field.required = inventoryToggle.checked;
+    });
+    positions.querySelectorAll("input").forEach((field) => { field.required = inventoryToggle.checked; });
+  };
   const update = async () => {
     const mixed = source.value === "facility";
     type.disabled = mixed && Boolean(normal.value || gold.value);
@@ -42,6 +112,8 @@ document.querySelectorAll(".freezing-complete-form").forEach((form) => {
     const data = await response.json();
     preview.textContent = response.ok ? `Grid Charge: ₹${Number(data.grid_charge).toFixed(2)} | Handling Charge: ₹${Number(data.handling_charge).toFixed(2)} | Grand Total: ₹${Number(data.grand_total).toFixed(2)}` : data.error;
   };
+  inventoryToggle.addEventListener("change", () => { syncInventory(); syncPositions(); });
+  gridCount.addEventListener("input", syncPositions);
   form.querySelectorAll("input, select").forEach((field) => { field.addEventListener("input", update); field.addEventListener("change", update); }); update();
 });
 </script>

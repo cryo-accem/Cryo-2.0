@@ -3,6 +3,7 @@
 import datetime as dt
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from database import get_db, _is_sqlite_url
@@ -239,6 +240,130 @@ def register_freezing(fields, actor_id):
     finally:
         cursor.close()
         connection.close()
+
+
+def register_completed_freezing(cursor, booking_id, booking, grid_count, fields, actor_id):
+    """Create linked inventory records inside the caller's freezing-completion transaction."""
+    count = _positive_int(grid_count, "Grid count", MAX_GRIDS_PER_BATCH)
+    sample_name = _text(fields.get("inventory_sample_name"), "Sample name", 180, True)
+    grid_type_ids = [
+        _positive_int(value, "grid type")
+        for value in fields.getlist("inventory_grid_type_id")
+    ]
+    try:
+        blot_seconds = Decimal((fields.get("blot_seconds") or "").strip())
+        blot_force = Decimal((fields.get("blot_force") or "").strip())
+    except (InvalidOperation, AttributeError) as exc:
+        raise InventoryError("Enter valid blot seconds and blot force.") from exc
+    if (
+        not blot_seconds.is_finite() or not blot_force.is_finite()
+        or blot_seconds <= 0 or blot_force < 0
+        or blot_seconds > 999999 or blot_force > 999999
+    ):
+        raise InventoryError("Blot seconds must be positive and blot force cannot be negative.")
+    if (
+        blot_seconds != blot_seconds.quantize(Decimal("0.01"))
+        or blot_force != blot_force.quantize(Decimal("0.01"))
+    ):
+        raise InventoryError("Blot seconds and blot force can have at most two decimal places.")
+    containers = fields.getlist("inventory_falcon")
+    boxes = fields.getlist("inventory_box")
+    positions = fields.getlist("inventory_position")
+    if not (
+        len(grid_type_ids) == len(containers) == len(boxes) == len(positions) == count
+    ):
+        raise InventoryError(
+            "Enter a grid type, Falcon/container, grid box, and position for every grid."
+        )
+
+    cursor.execute(
+        "SELECT booking_id FROM freezing_booking_inventory WHERE booking_id=?",
+        [booking_id],
+    )
+    if cursor.fetchone():
+        raise InventoryError("Inventory has already been registered for this freezing booking.")
+    for grid_type_id in grid_type_ids:
+        cursor.execute(
+            "SELECT grid_type_id FROM grid_types WHERE grid_type_id=? AND active=1",
+            [grid_type_id],
+        )
+        if not cursor.fetchone():
+            raise InventoryError("Choose an active inventory grid type for every grid.")
+
+    created_at = now_utc()
+    frozen_at = parse_datetime(str(booking["freezing_date"]), "freezing date")
+    batch_grid_type_id = grid_type_ids[0]
+    sample_id = _create_sample(
+        cursor,
+        {
+            "sample_name": sample_name,
+            "researcher_name": booking["user_name"] or "Freezing booking",
+            "lab_name": booking["origin"] or "ACCEM",
+            "external_reference": f"FREEZING-{booking_id}",
+        },
+        actor_id,
+        created_at,
+    )
+    batch_code = _next_code(cursor, "batch", "ACCEM-B-", 5)
+    cursor.execute(
+        """INSERT INTO freezing_batches
+           (batch_code, sample_id, frozen_at, grid_type_id, notes, comments,
+            created_at, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            batch_code, sample_id, frozen_at, batch_grid_type_id,
+            f"Blot seconds: {blot_seconds}; blot force: {blot_force}",
+            f"Linked to freezing booking {booking_id}.", created_at, actor_id,
+        ),
+    )
+    batch_id = cursor.lastrowid
+    cursor.execute(
+        """INSERT INTO freezing_booking_inventory
+           (booking_id, batch_id, blot_seconds, blot_force)
+           VALUES (?, ?, ?, ?)""",
+        (booking_id, batch_id, str(blot_seconds), str(blot_force)),
+    )
+
+    grid_codes = []
+    for index in range(count):
+        grid_type_id = grid_type_ids[index]
+        destination = {
+            "falcon_container_id": containers[index],
+            "grid_box_name": boxes[index],
+            "grid_position": positions[index],
+        }
+        container = _text(destination["falcon_container_id"], "Falcon/container", 100, True)
+        box = _text(destination["grid_box_name"], "Grid box", 100, True)
+        position = _text(destination["grid_position"], "Grid position", 40, True)
+        grid_code = _next_code(cursor, "grid", "ACCEM-G-", 4)
+        cursor.execute(
+            """INSERT INTO inventory_grids
+               (grid_code, batch_id, sample_id, grid_type_id, current_status,
+                created_at, created_by)
+               VALUES (?, ?, ?, ?, 'Frozen', ?, ?)""",
+            (grid_code, batch_id, sample_id, grid_type_id, created_at, actor_id),
+        )
+        grid_id = cursor.lastrowid
+        grid_codes.append(grid_code)
+        _event(cursor, grid_id, "grid_registered", actor_id,
+               new_value=grid_code, notes=f"Freezing batch {batch_code}.",
+               event_time=created_at)
+        _event(cursor, grid_id, "freezing", actor_id,
+               new_value=frozen_at, event_time=created_at)
+        _store_grid(
+            cursor,
+            {"grid_id": grid_id, "grid_code": grid_code, "current_status": "Frozen"},
+            {
+                "falcon_container_id": container,
+                "grid_box_name": box,
+                "grid_position": position,
+            },
+            actor_id,
+            "Stored during freezing booking completion.",
+            created_at,
+            operation_reference=batch_code,
+        )
+    return {"batch_code": batch_code, "sample_id": sample_id, "grid_codes": grid_codes}
 
 
 def update_clipping(grid_code, clipped, notes, actor_id):
@@ -870,11 +995,13 @@ def grid_details(grid_code):
                       s.description AS sample_description, s.external_reference,
                       linked_user.username AS linked_account_name,
                       fb.batch_code, fb.frozen_at, fb.notes AS preparation_notes,
-                      fb.comments AS batch_comments, gt.grid_type_name,
+                      fb.comments AS batch_comments, fbi.blot_seconds, fbi.blot_force,
+                      gt.grid_type_name,
                       creator.username AS created_by_name, clipper.username AS clipped_by_name
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+               LEFT JOIN freezing_booking_inventory fbi ON fbi.batch_id=fb.batch_id
                JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
                LEFT JOIN users creator ON creator.id=g.created_by
                LEFT JOIN users clipper ON clipper.id=g.clipped_by

@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 import uuid
 import zipfile
+import pymysql
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
@@ -36,6 +37,7 @@ from historical_revenue import (
     HISTORICAL_REVENUE,
     HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
 )
+from inventory_service import InventoryError, list_grid_types, register_completed_freezing
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -1766,7 +1768,10 @@ def freezing_admin():
     conn.close()
 
     return render_template(
-        "admin_freezing.html", active_slots=active, completed_slots=completed
+        "admin_freezing.html",
+        active_slots=active,
+        completed_slots=completed,
+        inventory_grid_types=list_grid_types(),
     )
 
 
@@ -1776,6 +1781,10 @@ def complete_freezing(booking_id):
         return redirect(url_for("admin.login"))
 
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_management = request.form.get("grid_management", "")
+    if grid_management not in {"", "1"}:
+        flash("Choose whether to add this booking to grid management.")
+        return redirect(url_for("admin.freezing_admin"))
     grid_source = request.form.get("grid_source", "").strip()
     grid_type = request.form.get("grid_type", "").strip()
     normal_grids = request.form.get("normal_grids", "").strip() or None
@@ -1805,16 +1814,39 @@ def complete_freezing(booking_id):
     conn = get_db()
     cur = conn.cursor()
     try:
+        if _is_sqlite_url():
+            cur.execute("BEGIN IMMEDIATE")
+        else:
+            conn.begin()
         booking = complete_freezing_booking(
             cur, booking_id, actual_grids_value, grid_source, grid_type, user_category,
             normal_grids, gold_grids,
         )
-    except ValueError as exc:
+        if booking and grid_management == "1":
+            register_completed_freezing(
+                cur,
+                booking_id,
+                booking,
+                int(actual_grids_value),
+                request.form,
+                session.get("admin_user_id"),
+            )
+    except (ValueError, sqlite3.IntegrityError, pymysql.err.IntegrityError) as exc:
+        conn.rollback()
+        if isinstance(exc, (sqlite3.IntegrityError, pymysql.err.IntegrityError)):
+            current_app.logger.warning(
+                "Freezing completion inventory registration rejected by a database constraint: %s",
+                exc,
+            )
+            flash("Inventory could not be saved, possibly because a grid position is occupied. "
+                  "No billing or inventory changes were saved.")
+        else:
+            flash(str(exc))
         cur.close()
         conn.close()
-        flash(str(exc))
         return redirect(url_for("admin.freezing_admin"))
     if not booking:
+        conn.rollback()
         cur.close()
         conn.close()
         flash("That freezing booking is no longer active.")
