@@ -107,6 +107,19 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(row["sample_name"], "Existing sample")
         self.assertEqual(version_count, 1)
 
+    def test_inventory_dashboard_renders_stored_grid_count(self):
+        codes = self.create_batch(1)
+        response = self.post_storage(codes[0], "FALCON-1", "Box-A", "A1")
+        self.assertEqual(response.status_code, 302)
+
+        dashboard = self.client.get("/admin/inventory/")
+
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertRegex(
+            dashboard.data.decode(),
+            r"<span>Stored</span>\s*<strong>1</strong>",
+        )
+
     def test_batch_registration_assigns_unique_grid_ids_and_search_filters_work(self):
         codes = self.create_batch(3)
         self.assertEqual(len(set(codes)), 3)

@@ -829,12 +829,13 @@ def dashboard_data():
             """SELECT COUNT(*) AS total,
                  SUM(CASE WHEN current_status IN ('Frozen','Clipped') THEN 1 ELSE 0 END) AS frozen,
                  SUM(CASE WHEN clipped=1 THEN 1 ELSE 0 END) AS clipped,
-                 SUM(CASE WHEN current_status='Stored' THEN 1 ELSE 0 END) AS stored,
+                 SUM(CASE WHEN current_status='Stored' THEN 1 ELSE 0 END) AS stored_count,
                  SUM(CASE WHEN current_status='In Data Collection' THEN 1 ELSE 0 END) AS collecting,
                  SUM(CASE WHEN current_status='Discarded' THEN 1 ELSE 0 END) AS discarded
                FROM inventory_grids"""
         )
-        counts = cursor.fetchone()
+        counts = dict(cursor.fetchone())
+        counts["stored"] = counts.pop("stored_count")
         cursor.execute(
             """SELECT gt.grid_type_name, COUNT(*) AS count
                FROM inventory_grids g JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
