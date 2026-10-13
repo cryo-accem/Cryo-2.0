@@ -119,6 +119,27 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn("revenue and billing", response.get_json()["answer"])
         self.assertIn("freezing availability", response.get_json()["answer"])
 
+    def test_schedule_requests_navigate_to_the_matching_schedule(self):
+        cases = {
+            "Show me freezing schedule": "/admin/freezing",
+            "Open the screening schedule": "/admin/screening",
+            "Take me to the data collection schedule": "/admin/datacollecting",
+            "Show data collecting schedule": "/admin/datacollecting",
+        }
+        for question, expected_url in cases.items():
+            with self.subTest(question=question):
+                response = self.ask(question)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["navigation"], expected_url)
+                self.assertIn("active, waiting, and completed slots", response.get_json()["answer"])
+
+    def test_schedule_request_for_multiple_services_asks_which_schedule(self):
+        response = self.ask("Show the freezing and screening schedule")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("navigate_url", response.get_json())
+        self.assertIn("Which schedule", response.get_json()["answer"])
+
     def test_invalid_and_oversized_questions_are_rejected(self):
         empty = self.ask("  ")
         oversized = self.ask("x" * 501)

@@ -470,7 +470,37 @@ def assistant_query():
         return jsonify({"error": "Questions must be 500 characters or fewer."}), 400
 
     normalized_question = question.strip().casefold()
-    if re.search(r"\b(revenue|billing|billed|income|received|outstanding|csic|payment|collected)\b", normalized_question):
+    schedule_request = (
+        re.search(r"\b(schedule|timetable)\b", normalized_question)
+        or re.search(
+            r"\b(show|open|go to|take me to)\b.*\b(freezing|screening|data collection|data collecting|imaging)\b",
+            normalized_question,
+        )
+    )
+    schedule_services = [
+        endpoint for pattern, endpoint in (
+            (r"\bfreez\w*\b", "admin.freezing_admin"),
+            (r"\bscreen\w*\b", "admin.screening_admin"),
+            (r"\bdata collect(?:ion|ing)\b|\bimaging\b", "admin.datacollecting"),
+        )
+        if re.search(pattern, normalized_question)
+    ]
+    if schedule_request and len(schedule_services) == 1:
+        schedule_name = {
+            "admin.freezing_admin": "freezing",
+            "admin.screening_admin": "screening",
+            "admin.datacollecting": "data collection",
+        }[schedule_services[0]]
+        return jsonify({
+            "answer": (
+                f"Opening the {schedule_name} schedule, where you can review active, "
+                "waiting, and completed slots."
+            ),
+            "navigation": url_for(schedule_services[0]),
+        })
+    if schedule_request:
+        answer = "Which schedule would you like to open: freezing, screening, or data collection?"
+    elif re.search(r"\b(revenue|billing|billed|income|received|outstanding|csic|payment|collected)\b", normalized_question):
         answer = _admin_assistant_revenue(normalized_question)
     elif re.search(r"\b(freez\w*|availability|available|capacity|slots?)\b", normalized_question):
         answer = _admin_assistant_freezing(normalized_question)

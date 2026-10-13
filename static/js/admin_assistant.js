@@ -327,10 +327,16 @@
     if (open) requestAnimationFrame(() => input.focus());
   };
 
+  const pendingNavigationAnswer = sessionStorage.getItem("mira-navigation-answer");
+  if (pendingNavigationAnswer) sessionStorage.removeItem("mira-navigation-answer");
   addMessage(
     "assistant",
     "I’m Mira. Ask me about revenue, billing, or freezing availability. I’ll listen for a pause and send your question automatically."
   );
+  if (pendingNavigationAnswer) {
+    addMessage("assistant", pendingNavigationAnswer);
+    setOpen(true);
+  }
   toggle.addEventListener("click", () => {
     const open = panel.hidden;
     if (!open) {
@@ -378,6 +384,12 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The assistant request failed.");
+      if (typeof result.navigation === "string" && result.navigation.startsWith("/admin/")) {
+        sessionStorage.setItem("mira-navigation-answer", result.answer);
+        status.textContent = "Opening the schedule…";
+        window.location.assign(result.navigation);
+        return;
+      }
       addMessage("assistant", result.answer);
       answerToSpeak = result.answer;
     } catch (error) {
