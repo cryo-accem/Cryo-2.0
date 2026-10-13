@@ -604,11 +604,8 @@ def assistant_speak():
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Please sign in to use spoken answers."}), 401
 
+    deepgram_key = os.environ.get("DEEPGRAM_API_KEY", "").strip()
     api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
-    if not api_key:
-        return jsonify({
-            "error": "Spoken answers are not configured. Add an ElevenLabs API key in Render environment settings."
-        }), 503
 
     payload = request.get_json()
     if not isinstance(payload, dict):
@@ -618,6 +615,62 @@ def assistant_speak():
         return jsonify({"error": "There is no answer text to speak."}), 400
     if len(text) > 5000:
         return jsonify({"error": "Spoken answers must be 5,000 characters or fewer."}), 400
+
+    if deepgram_key:
+        api_url = "https://api.deepgram.com/v1/speak?" + urllib.parse.urlencode({
+            "model": "aura-2-helena-en",
+        })
+        provider_request = urllib.request.Request(
+            api_url,
+            data=json.dumps({"text": text.strip()}).encode("utf-8"),
+            headers={
+                "Authorization": f"Token {deepgram_key}",
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(provider_request, timeout=30) as provider_response:
+                audio_data = provider_response.read(10 * 1024 * 1024 + 1)
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429:
+                message = "Spoken answers are temporarily unavailable because the Deepgram quota is exhausted."
+                status_code = 503
+            elif exc.code in {401, 403}:
+                message = "Spoken answers are not configured correctly. An administrator must check the Deepgram API key."
+                status_code = 503
+            elif exc.code == 402:
+                message = "Spoken answers are unavailable because the Deepgram account requires available credits or billing."
+                status_code = 503
+            else:
+                message = "The speech service could not generate audio. The answer is still shown above."
+                status_code = 502
+            current_app.logger.warning("Deepgram speech request failed with HTTP %s.", exc.code)
+            exc.close()
+            return jsonify({"error": message}), status_code
+        except (urllib.error.URLError, TimeoutError) as exc:
+            current_app.logger.warning("Deepgram speech service is unreachable: %s", exc)
+            return jsonify({
+                "error": "The speech service could not be reached. The answer is still shown above."
+            }), 502
+
+        if len(audio_data) > 10 * 1024 * 1024:
+            return jsonify({"error": "The speech service returned an audio file that was too large."}), 502
+        if len(audio_data) < 4 or not (
+            audio_data.startswith(b"ID3")
+            or (audio_data[0] == 0xFF and audio_data[1] & 0xE0 == 0xE0)
+        ):
+            current_app.logger.warning("Deepgram returned an invalid MP3 audio response.")
+            return jsonify({
+                "error": "The speech service returned an audio file the browser cannot play."
+            }), 502
+        return Response(audio_data, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
+
+    if not api_key:
+        return jsonify({
+            "error": "Spoken answers are not configured. Add a Deepgram or ElevenLabs API key in Render environment settings."
+        }), 503
 
     api_url = (
         "https://api.elevenlabs.io/v1/text-to-speech/"
