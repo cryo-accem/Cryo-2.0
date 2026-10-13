@@ -109,14 +109,17 @@ def freezing_availability():
     return jsonify({"limit": GRID_LIMIT_PER_DAY, "dates": availability})
 
 
-def register_freezing(user_name, pi_name, email, origin, sample_name, grids, freezing_date):
+def register_freezing(
+    user_name, pi_name, email, origin, sample_name, grids, freezing_date,
+    allow_over_capacity=False,
+):
     """
     Insert a new freezing booking after checking the daily grid cap.
     Returns (success: bool, message: str).
     """
     if not freezing_date:
         return False, "Please choose a freezing date."
-    if grids < 1 or grids > GRID_LIMIT_PER_DAY:
+    if grids < 1 or (grids > GRID_LIMIT_PER_DAY and not allow_over_capacity):
         return False, f"Choose between 1 and {GRID_LIMIT_PER_DAY} grids."
     try:
         selected_date = datetime.date.fromisoformat(str(freezing_date))
@@ -137,7 +140,7 @@ def register_freezing(user_name, pi_name, email, origin, sample_name, grids, fre
     )
     total = cur.fetchone()["total"]
 
-    if total + grids > GRID_LIMIT_PER_DAY:
+    if total + grids > GRID_LIMIT_PER_DAY and not allow_over_capacity:
         remaining = GRID_LIMIT_PER_DAY - total
         cur.close()
         conn.close()

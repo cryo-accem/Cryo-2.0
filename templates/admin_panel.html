@@ -119,6 +119,71 @@
     </div>
     {% else %}<p class="empty-message">No CSIC projects in this reporting period.</p>{% endif %}
   </section>
+  <details class="admin-slot-panel" id="create-slot"
+    data-known-user-url="{{ url_for('admin.known_slot_user') }}"
+    data-slot-type="{{ slot_form_state.get('slot_type', '') }}"
+    data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}"
+    {% if slot_form_state.get('slot_type') %}open{% endif %}>
+    <summary><span class="chart-kicker">Quick actions</span><strong>Create a slot</strong></summary>
+    <div class="admin-slot-panel__content">
+      <p>Add a data collecting, screening, or freezing booking without leaving the dashboard.</p>
+      <div class="admin-slot-type-controls" role="group" aria-label="Choose slot type">
+        <button class="button secondary" type="button" aria-controls="admin-slot-form-datacollecting" data-slot-type="datacollecting">Data collecting</button>
+        <button class="button secondary" type="button" aria-controls="admin-slot-form-screening" data-slot-type="screening">Screening</button>
+        <button class="button secondary" type="button" aria-controls="admin-slot-form-freezing" data-slot-type="freezing">Freezing</button>
+      </div>
+      <p class="admin-slot-selection-status" role="status" aria-live="polite"></p>
+      {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}
+      <p class="admin-slot-save-error" role="status">The slot was not saved. Your entries are preserved below so you can review and try again.</p>
+      {% endif %}
+      <div class="admin-slot-save-feedback" role="status" aria-live="polite" {% if not slot_form_state.get('saved') %}hidden{% endif %}>
+        <span>Slot saved successfully.</span>
+        <button class="button small secondary" type="button" data-add-another>Add another</button>
+      </div>
+      <div class="admin-slot-grid">
+        {% for slot_type, title, slot_endpoint in [
+          ('datacollecting', 'Data collecting', 'admin.add_slot'),
+          ('screening', 'Screening', 'admin.add_slot'),
+          ('freezing', 'Freezing', 'admin.add_slot')
+        ] %}
+        <form class="admin-slot-form" id="admin-slot-form-{{ slot_type }}" method="post"
+          action="{{ url_for(slot_endpoint, slot_type=slot_type) }}" hidden>
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <h3>{{ title }}</h3>
+          {% set values = slot_form_state.get('values', {}) if slot_form_state.get('slot_type') == slot_type else {} %}
+          <label>User name<input name="user_name" maxlength="100" value="{{ values.get('user_name', '') }}" required></label>
+          <label>PI name<input name="pi_name" maxlength="100" value="{{ values.get('pi_name', '') }}" required></label>
+          <label>Email<input name="email" type="email" maxlength="150" value="{{ values.get('email', '') }}" required></label>
+          <div class="admin-slot-known-user" data-known-user-status hidden>
+            <span data-known-user-message></span>
+            <button type="button" class="button small secondary" data-known-user-apply>Use saved details</button>
+            <button type="button" class="button small secondary" data-known-user-dismiss>Dismiss</button>
+          </div>
+          <label>Origin
+            <select name="origin" required>
+              <option value="">Select origin</option>
+              <option value="Internal" {% if values.get('origin') == 'Internal' %}selected{% endif %}>IISc Users</option>
+              <option value="External" {% if values.get('origin') == 'External' %}selected{% endif %}>External Academic Users</option>
+              <option value="Industry" {% if values.get('origin') == 'Industry' %}selected{% endif %}>Industry User</option>
+            </select>
+          </label>
+          {% if slot_type != 'freezing' %}
+          <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ values.get('esm', '') }}"></label>
+          {% endif %}
+          <label>Sample name<input name="sample_name" maxlength="150" value="{{ values.get('sample_name', '') }}" required></label>
+          {% if slot_type == 'freezing' %}
+          <label>Freezing date<input name="freezing_date" type="date" min="{{ today }}" value="{{ values.get('freezing_date', '') }}" required></label>
+          {% endif %}
+          <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ values.get('grids', '') }}" required></label>
+          {% if slot_type == 'datacollecting' %}
+          <label>Days<input name="days" type="number" min="1" step="1" value="{{ values.get('days', '') }}" required></label>
+          {% endif %}
+          <button class="button" type="submit">Add {{ title|lower }} slot</button>
+        </form>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
     <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -146,6 +211,103 @@
   </section>
 </section></main>
 <script>
+(() => {
+  const panel = document.querySelector("#create-slot");
+  const controls = panel?.querySelector(".admin-slot-type-controls");
+  const status = panel?.querySelector(".admin-slot-selection-status");
+  const buttons = controls?.querySelectorAll("[data-slot-type]");
+  const forms = panel?.querySelectorAll(".admin-slot-form");
+  if (!panel || !controls || !status || !buttons?.length || !forms?.length) return;
+
+  const chooseSlotType = (type, focus = false) => {
+    const button = [...buttons].find((option) => option.dataset.slotType === type);
+    if (!button) return;
+    const selectedForm = panel.querySelector(`#${button.getAttribute("aria-controls")}`);
+    if (!(selectedForm instanceof HTMLFormElement)) return;
+    panel.open = true;
+    buttons.forEach((option) => option.setAttribute("aria-pressed", String(option === button)));
+    forms.forEach((form) => { form.hidden = form !== selectedForm; });
+    status.textContent = `Showing the ${button.textContent.trim()} slot form.`;
+    if (focus) selectedForm.querySelector("input:not([type=hidden]), select")?.focus({ preventScroll: true });
+  };
+
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => chooseSlotType(button.dataset.slotType, true));
+  });
+  if (panel.dataset.slotType) chooseSlotType(panel.dataset.slotType);
+  if (panel.dataset.slotSaved === "true") {
+    panel.querySelector("[data-add-another]")?.addEventListener("click", () => {
+      panel.querySelector(".admin-slot-save-feedback").hidden = true;
+      chooseSlotType(panel.dataset.slotType, true);
+    });
+  }
+
+  forms.forEach((form) => {
+    const email = form.elements.namedItem("email");
+    const lookup = form.querySelector("[data-known-user-status]");
+    const message = lookup?.querySelector("[data-known-user-message]");
+    const applyButton = lookup?.querySelector("[data-known-user-apply]");
+    const dismissButton = lookup?.querySelector("[data-known-user-dismiss]");
+    if (!(email instanceof HTMLInputElement) || !lookup || !message || !applyButton || !dismissButton) return;
+
+    let timer = 0;
+    let requestNumber = 0;
+    let savedDetails = null;
+    const hideLookup = () => { lookup.hidden = true; savedDetails = null; };
+    const lookupEmail = async () => {
+      const emailValue = email.value.trim();
+      const currentRequest = ++requestNumber;
+      hideLookup();
+      if (!emailValue || !email.validity.valid) return;
+      message.textContent = "Checking for saved user details…";
+      lookup.hidden = false;
+      applyButton.hidden = true;
+      try {
+        const response = await fetch(panel.dataset.knownUserUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CSRF-Token": form.elements.namedItem("_csrf_token").value,
+          },
+          body: JSON.stringify({ email: emailValue }),
+        });
+        const result = await response.json();
+        if (currentRequest !== requestNumber || email.value.trim() !== emailValue) return;
+        if (!response.ok) throw new Error(result.error || "Could not look up this email.");
+        if (!result.known) {
+          message.textContent = "No saved user details found for this email.";
+          return;
+        }
+        savedDetails = result;
+        message.textContent = `Saved details found: ${result.user_name} · PI: ${result.pi_name}. Review and edit before saving.`;
+        applyButton.hidden = false;
+      } catch (error) {
+        if (currentRequest !== requestNumber) return;
+        message.textContent = error instanceof Error
+          ? `${error.message} Enter the details manually if needed.`
+          : "Could not look up saved details. Enter the details manually if needed.";
+      }
+    };
+
+    email.addEventListener("input", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(lookupEmail, 350);
+    });
+    email.addEventListener("change", lookupEmail);
+    dismissButton.addEventListener("click", hideLookup);
+    applyButton.addEventListener("click", () => {
+      if (!savedDetails) return;
+      for (const field of ["user_name", "pi_name", "esm"]) {
+        const input = form.elements.namedItem(field);
+        if (input instanceof HTMLInputElement) input.value = savedDetails[field] || "";
+      }
+      const origin = form.elements.namedItem("origin");
+      if (origin instanceof HTMLSelectElement) origin.value = savedDetails.origin || "";
+      message.textContent = "Saved details filled in. Review or edit them before saving.";
+      applyButton.hidden = true;
+    });
+  });
+})();
 (() => {
   const form = document.querySelector(".revenue-filter");
   const range = form?.querySelector("[name=range]");

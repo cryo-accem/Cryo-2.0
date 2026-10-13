@@ -78,7 +78,7 @@
     instruction.textContent = messageText;
     const download = document.createElement("a");
     download.href = currentAudioUrl;
-    download.download = "mira-spoken-answer.wav";
+    download.download = "mira-spoken-answer.mp3";
     download.textContent = "Download Mira’s spoken answer";
     message.append(instruction, download);
     messages.append(message);
@@ -242,7 +242,7 @@
           instruction.textContent = "Tap to hear Mira’s feminine spoken answer.";
           const download = document.createElement("a");
           download.href = currentAudioUrl;
-          download.download = "mira-spoken-answer.wav";
+          download.download = "mira-spoken-answer.mp3";
           download.textContent = "Download Mira’s spoken answer";
           message.append(instruction, currentAudio);
           message.append(download);

@@ -530,6 +530,23 @@ a { color: inherit; }
 .revenue-detail-breakdowns .revenue-row strong { font-size: 10px; }
 .revenue-detail-monthly-usage .empty-message { padding: 10px 0; background: transparent; font-size: 10px; }
 .csic-project-box { margin-top: 18px; padding: 22px; border: 1px solid #dce8ed; border-radius: 14px; background: rgba(255,255,255,.82); }
+.admin-slot-panel { margin-top: 18px; padding: 18px 22px; border: 1px solid #dce8ed; border-radius: 14px; background: rgba(255,255,255,.9); }
+.admin-slot-panel > summary { display: flex; flex-direction: column; gap: 4px; color: var(--navy); cursor: pointer; }
+.admin-slot-panel > summary strong { font-size: 18px; }
+.admin-slot-panel__content { padding-top: 12px; }
+.admin-slot-panel__content > p { color: var(--muted); font-size: 12px; }
+.admin-slot-type-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-slot-type-controls [aria-pressed="true"] { color: #fff; background: #167da5; }
+.admin-slot-selection-status { min-height: 1em; }
+.admin-slot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.admin-slot-form { display: grid; align-content: start; gap: 10px; padding: 16px; border: 1px solid #dfeaf0; border-radius: 12px; background: #fff; }
+.admin-slot-form[hidden] { display: none; }
+.admin-slot-form h3 { margin: 0; color: var(--navy); }
+.admin-slot-form > label { display: grid; gap: 4px; color: #526b7d; font-size: 11px; font-weight: 700; }
+.admin-slot-form input, .admin-slot-form select { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #c9dbe3; border-radius: 8px; color: #293d52; background: #fff; font: inherit; }
+.admin-slot-known-user, .admin-slot-save-feedback { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 8px; background: #edf7fa; color: #38576a; font-size: 12px; }
+.admin-slot-known-user[hidden], .admin-slot-save-feedback[hidden] { display: none; }
+.admin-slot-save-error { padding: 10px; border-radius: 8px; background: #fff3e8; color: #8d4b14; }
 .csic-project-box__heading h3 { margin: 4px 0 5px; color: var(--navy); font-size: 17px; }
 .csic-project-box__heading p { max-width: 720px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .csic-project-form { display: grid; grid-template-columns: minmax(180px, 2fr) minmax(100px, .8fr) minmax(150px, 1.2fr) auto; align-items: end; gap: 12px; margin-top: 18px; }

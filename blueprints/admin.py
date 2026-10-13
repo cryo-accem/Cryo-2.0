@@ -29,7 +29,11 @@ from revenue import (
     calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
     parse_number_of_grids,
 )
-from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking
+from blueprints.freezing import (
+    GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing,
+)
+from blueprints.imaging import register_imaging
+from blueprints.screening import register_screening
 from charge_sheet import generate_charge_sheet
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import PI_USERS
@@ -49,6 +53,8 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 
 _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.panel",
+    "admin.add_slot",
+    "admin.known_slot_user",
     "admin.assistant_query",
     "admin.assistant_transcribe",
     "admin.assistant_speak",
@@ -61,6 +67,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.complete_dc",
     "admin.delete_dc",
     "admin.freezing_admin",
+    "admin.delete_freezing",
     "admin.complete_freezing",
     "admin.screening_admin",
     "admin.load_sc",
@@ -250,6 +257,7 @@ def billing_preview():
 def panel():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
+    slot_form_state = session.pop("_admin_slot_form_state", {})
     conn = get_db()
     cur = conn.cursor()
     pi_counts = _pi_overview_counts(cur)
@@ -294,6 +302,156 @@ def panel():
         pending_payments=pending_payments,
         revenue=revenue,
         updated_at=datetime.datetime.now().strftime("%d %b %Y, %H:%M"),
+        today=datetime.date.today().isoformat(),
+        freezing_grid_limit=GRID_LIMIT_PER_DAY,
+        slot_form_state=slot_form_state,
+    )
+
+
+@admin_bp.route("/panel/known-user", methods=["POST"])
+def known_slot_user():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to look up saved user details."}), 401
+
+    payload = request.get_json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("email"), str):
+        return jsonify({"error": "Send an email address to look up."}), 400
+    email = payload["email"].strip()
+    if not email or len(email) > 150 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return jsonify({"error": "Enter a valid email address."}), 400
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT user_name, pi_name, origin, esm, registered_at FROM bookings
+           WHERE LOWER(email)=LOWER(?)
+           UNION ALL
+           SELECT user_name, pi_name, origin, esm, registered_at FROM screening_bookings
+           WHERE LOWER(email)=LOWER(?)
+           UNION ALL
+           SELECT user_name, pi_name, origin, '' AS esm, registered_at FROM freezing_bookings
+           WHERE LOWER(email)=LOWER(?)
+           UNION ALL
+           SELECT user_name, pi_name, origin, '' AS esm, completed_at AS registered_at
+           FROM completed_freezing WHERE LOWER(email)=LOWER(?)
+           ORDER BY registered_at DESC LIMIT 1""",
+        [email, email, email, email],
+    )
+    user = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not user:
+        return jsonify({"known": False})
+    origin = (user["origin"] or "").strip()
+    origin_aliases = {
+        "internal": "Internal",
+        "iisc": "Internal",
+        "iisc users": "Internal",
+        "external": "External",
+        "academic": "External",
+        "external academic": "External",
+        "external academic users": "External",
+        "industry": "Industry",
+        "industrial": "Industry",
+        "external industry": "Industry",
+    }
+    return jsonify({
+        "known": True,
+        "user_name": user["user_name"] or "",
+        "pi_name": user["pi_name"] or "",
+        "origin": origin_aliases.get(origin.casefold(), origin),
+        "esm": user["esm"] or "",
+    })
+
+
+def _slot_form_redirect(slot_type, message, category="registration", saved=False):
+    field_names = (
+        "user_name", "pi_name", "email", "origin", "esm", "sample_name",
+        "grids", "days", "freezing_date",
+    )
+    session["_admin_slot_form_state"] = {
+        "slot_type": slot_type,
+        "saved": saved,
+        "values": {
+            field: request.form.get(field, "")
+            for field in field_names
+        } if not saved else {},
+    }
+    flash(message, category)
+    return redirect(url_for("admin.panel", _anchor="create-slot"))
+
+
+@admin_bp.route("/panel/slots/<any(datacollecting,screening,freezing):slot_type>", methods=["POST"])
+def add_slot(slot_type):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    user_name = request.form.get("user_name", "").strip()
+    pi_name = request.form.get("pi_name", "").strip()
+    email = request.form.get("email", "").strip()
+    origin = request.form.get("origin", "").strip()
+    esm = request.form.get("esm", "").strip()
+    sample_name = request.form.get("sample_name", "").strip()
+    origin_labels = {"Internal", "External", "Industry"}
+    field_limits = {
+        "user_name": 100, "pi_name": 100, "email": 150,
+        "origin": 100, "esm": 150, "sample_name": 150,
+    }
+    fields = {
+        "user_name": user_name, "pi_name": pi_name, "email": email,
+        "origin": origin, "esm": esm, "sample_name": sample_name,
+    }
+    for field_name, value in fields.items():
+        if field_name != "esm" and not value:
+            return _slot_form_redirect(slot_type, "Complete all required slot details.")
+        if len(value) > field_limits[field_name]:
+            return _slot_form_redirect(
+                slot_type, f"{field_name.replace('_', ' ').title()} is too long."
+            )
+    if origin not in origin_labels:
+        return _slot_form_redirect(slot_type, "Choose a valid user origin.")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        return _slot_form_redirect(slot_type, "Enter a valid email address.")
+
+    try:
+        if slot_type == "freezing":
+            try:
+                grids = int(request.form.get("grids", ""))
+            except ValueError as exc:
+                raise ValueError("Enter a whole number of grids.") from exc
+            if grids < 1:
+                raise ValueError("Choose at least 1 grid.")
+            success, message = register_freezing(
+                user_name, pi_name, email, origin, sample_name, grids,
+                request.form.get("freezing_date", "").strip(),
+                allow_over_capacity=True,
+            )
+        elif slot_type == "screening":
+            try:
+                grids = int(request.form.get("grids", ""))
+            except ValueError as exc:
+                raise ValueError("Enter a whole number of grids.") from exc
+            if grids < 1:
+                raise ValueError("Choose at least 1 grid.")
+            success, message = register_screening(
+                user_name, pi_name, email, origin, esm, sample_name, grids, 1,
+            )
+        else:
+            try:
+                grids = int(request.form.get("grids", ""))
+                days = int(request.form.get("days", ""))
+            except ValueError as exc:
+                raise ValueError("Enter whole numbers for grids and days.") from exc
+            if grids < 1 or days < 1:
+                raise ValueError("Choose at least 1 grid and 1 day.")
+            success, message = register_imaging(
+                user_name, pi_name, email, origin, esm, sample_name, grids, days,
+            )
+    except ValueError as exc:
+        return _slot_form_redirect(slot_type, str(exc))
+
+    return _slot_form_redirect(
+        slot_type, message, "success" if success else "registration", saved=success,
     )
 
 
@@ -413,10 +571,10 @@ def assistant_speak():
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Please sign in to use spoken answers."}), 401
 
-    api_key = os.environ.get("DEEPGRAM_API_KEY", "").strip()
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
     if not api_key:
         return jsonify({
-            "error": "Spoken answers are not configured. Add a Deepgram API key in Render environment settings."
+            "error": "Spoken answers are not configured. Add an ElevenLabs API key in Render environment settings."
         }), 503
 
     payload = request.get_json()
@@ -428,18 +586,21 @@ def assistant_speak():
     if len(text) > 5000:
         return jsonify({"error": "Spoken answers must be 5,000 characters or fewer."}), 400
 
-    api_url = "https://api.deepgram.com/v1/speak?" + urllib.parse.urlencode({
-        "model": "aura-2-thalia-en",
-        "encoding": "linear16",
-        "container": "wav",
-        "mip_opt_out": "true",
-    })
+    api_url = (
+        "https://api.elevenlabs.io/v1/text-to-speech/"
+        "R3JVexA7kMHoZnzl7r3Z?"
+        + urllib.parse.urlencode({"output_format": "mp3_44100_128"})
+    )
     provider_request = urllib.request.Request(
         api_url,
-        data=json.dumps({"text": text.strip()}).encode("utf-8"),
+        data=json.dumps({
+            "text": text.strip(),
+            "model_id": "eleven_multilingual_v2",
+        }).encode("utf-8"),
         headers={
-            "Authorization": f"Token {api_key}",
+            "xi-api-key": api_key,
             "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
         },
         method="POST",
     )
@@ -448,31 +609,34 @@ def assistant_speak():
             audio_data = provider_response.read(10 * 1024 * 1024 + 1)
     except urllib.error.HTTPError as exc:
         if exc.code == 429:
-            message = "Spoken answers are temporarily unavailable because the free quota is exhausted."
+            message = "Spoken answers are temporarily unavailable because the ElevenLabs quota is exhausted."
             status_code = 503
         elif exc.code in {401, 403}:
-            message = "Spoken answers are not configured correctly. An administrator must check the Deepgram API key."
+            message = "Spoken answers are not configured correctly. An administrator must check the ElevenLabs API key and voice access."
             status_code = 503
         else:
             message = "The speech service could not generate audio. The answer is still shown above."
             status_code = 502
-        current_app.logger.warning("Deepgram speech request failed with HTTP %s.", exc.code)
+        current_app.logger.warning("ElevenLabs speech request failed with HTTP %s.", exc.code)
         exc.close()
         return jsonify({"error": message}), status_code
     except (urllib.error.URLError, TimeoutError) as exc:
-        current_app.logger.warning("Deepgram speech service is unreachable: %s", exc)
+        current_app.logger.warning("ElevenLabs speech service is unreachable: %s", exc)
         return jsonify({
             "error": "The speech service could not be reached. The answer is still shown above."
         }), 502
 
     if len(audio_data) > 10 * 1024 * 1024:
         return jsonify({"error": "The speech service returned an audio file that was too large."}), 502
-    if len(audio_data) < 12 or audio_data[:4] != b"RIFF" or audio_data[8:12] != b"WAVE":
-        current_app.logger.warning("Deepgram returned an invalid WAV audio response.")
+    if len(audio_data) < 4 or not (
+        audio_data.startswith(b"ID3")
+        or (audio_data[0] == 0xFF and audio_data[1] & 0xE0 == 0xE0)
+    ):
+        current_app.logger.warning("ElevenLabs returned an invalid MP3 audio response.")
         return jsonify({
             "error": "The speech service returned an audio file the browser cannot play."
         }), 502
-    return Response(audio_data, mimetype="audio/wav", headers={"Cache-Control": "no-store"})
+    return Response(audio_data, mimetype="audio/mpeg", headers={"Cache-Control": "no-store"})
 
 
 def _admin_assistant_revenue(question):
@@ -1773,6 +1937,28 @@ def freezing_admin():
         completed_slots=completed,
         inventory_grid_types=list_grid_types(),
     )
+
+
+@admin_bp.route("/freezing/delete/<int:booking_id>", methods=["POST"])
+def delete_freezing(booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM freezing_bookings WHERE id=? AND status='active'",
+        [booking_id],
+    )
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    if deleted:
+        flash("Active freezing slot deleted.", "success")
+    else:
+        flash("That active freezing slot could not be found.", "registration")
+    return redirect(url_for("admin.freezing_admin"))
 
 
 @admin_bp.route("/freezing/complete/<int:booking_id>", methods=["POST"])
