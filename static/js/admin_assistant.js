@@ -17,12 +17,20 @@
   let recordingStream = null;
   let recordedChunks = [];
   let recordingTimer = null;
+  let silenceDetectionTimer = null;
+  let audioContext = null;
   let isRecording = false;
   let discardRecording = false;
+  let hasDetectedSpeech = false;
+  let lastVoiceAt = 0;
+  let hasWelcomed = false;
   let assistantBusy = false;
   let isSpeaking = false;
   let currentAudio = null;
   let currentAudioUrl = null;
+  const welcomeText = "Hello, I’m Mira. Ask me about revenue, billing, or freezing availability.";
+  const silenceAfterSpeechMs = 1400;
+  const voiceActivityThreshold = 0.025;
 
   const addMessage = (kind, text) => {
     const message = document.createElement("article");
@@ -44,6 +52,18 @@
   const stopRecordingTracks = () => {
     recordingStream?.getTracks().forEach((track) => track.stop());
     recordingStream = null;
+  };
+
+  const stopSilenceDetection = () => {
+    if (silenceDetectionTimer !== null) {
+      window.clearInterval(silenceDetectionTimer);
+      silenceDetectionTimer = null;
+    }
+    if (audioContext) {
+      const context = audioContext;
+      audioContext = null;
+      void context.close();
+    }
   };
 
   const releaseSpokenAudio = () => {
@@ -123,6 +143,7 @@
 
   const stopRecording = () => {
     clearTimeout(recordingTimer);
+    stopSilenceDetection();
     if (!mediaRecorder || mediaRecorder.state !== "recording") return;
     status.textContent = "Sending your recording for transcription…";
     mediaRecorder.stop();
@@ -130,6 +151,7 @@
 
   const cancelRecording = () => {
     clearTimeout(recordingTimer);
+    stopSilenceDetection();
     if (mediaRecorder?.state === "recording") {
       discardRecording = true;
       mediaRecorder.stop();
@@ -159,6 +181,8 @@
         ? new MediaRecorder(recordingStream, { mimeType })
         : new MediaRecorder(recordingStream);
       recordedChunks = [];
+      hasDetectedSpeech = false;
+      lastVoiceAt = 0;
       mediaRecorder.addEventListener("dataavailable", (event) => {
         if (event.data.size) recordedChunks.push(event.data);
       });
@@ -181,8 +205,41 @@
       isRecording = true;
       updateMicButton();
       mic.disabled = false;
-      status.textContent = "Recording… Ask your question, then tap “Stop & transcribe”.";
+      status.textContent = "Listening… I’ll send your question after a pause, or tap “Stop & transcribe”.";
       recordingTimer = window.setTimeout(stopRecording, 30000);
+      if (window.AudioContext) {
+        try {
+          audioContext = new AudioContext();
+          const analyser = audioContext.createAnalyser();
+          analyser.fftSize = 512;
+          audioContext.createMediaStreamSource(recordingStream).connect(analyser);
+          const samples = new Uint8Array(analyser.fftSize);
+          silenceDetectionTimer = window.setInterval(() => {
+            analyser.getByteTimeDomainData(samples);
+            let sumSquares = 0;
+            for (const sample of samples) {
+              const normalized = (sample - 128) / 128;
+              sumSquares += normalized * normalized;
+            }
+            const volume = Math.sqrt(sumSquares / samples.length);
+            if (volume >= voiceActivityThreshold) {
+              hasDetectedSpeech = true;
+              lastVoiceAt = Date.now();
+            } else if (
+              hasDetectedSpeech
+              && Date.now() - lastVoiceAt >= silenceAfterSpeechMs
+            ) {
+              stopRecording();
+            }
+          }, 100);
+        } catch (error) {
+          console.warn("Mira pause detection is unavailable; manual stop remains enabled.", error);
+          stopSilenceDetection();
+          status.textContent = "Listening… tap “Stop & transcribe” when you finish.";
+        }
+      } else {
+        status.textContent = "Listening… tap “Stop & transcribe” when you finish.";
+      }
     } catch (error) {
       console.error("Could not start Mira voice recording:", error);
       stopRecordingTracks();
@@ -220,18 +277,18 @@
         currentAudioUrl = URL.createObjectURL(audioBlob);
         currentAudio = new Audio(currentAudioUrl);
         currentAudio.addEventListener("ended", () => {
-          finishSpokenAudio("Answer read aloud in Mira’s feminine voice. You can ask another question.");
+          finishSpokenAudio("Answer read aloud in Mira’s voice. You can ask another question.");
         }, { once: true });
         currentAudio.addEventListener("play", () => {
           isSpeaking = true;
           assistantBusy = true;
           mic.disabled = true;
-          status.textContent = "Speaking the answer in Mira’s feminine voice…";
+          status.textContent = "Speaking the answer in Mira’s voice…";
         });
         currentAudio.addEventListener("error", () => {
           showAudioFallback("This browser couldn’t play the audio. Download Mira’s spoken answer.");
         }, { once: true });
-        status.textContent = "Speaking the answer in Mira’s feminine voice…";
+        status.textContent = "Speaking the answer in Mira’s voice…";
         return currentAudio.play().catch((error) => {
           if (error.name !== "NotAllowedError") throw error;
           currentAudio.controls = true;
@@ -272,7 +329,7 @@
 
   addMessage(
     "assistant",
-    "I’m Mira. Tap the microphone, ask a question about revenue, billing, or freezing availability, then tap again to transcribe and send it."
+    "I’m Mira. Ask me about revenue, billing, or freezing availability. I’ll listen for a pause and send your question automatically."
   );
   toggle.addEventListener("click", () => {
     const open = panel.hidden;
@@ -281,6 +338,10 @@
       releaseSpokenAudio();
     }
     setOpen(open);
+    if (open && !hasWelcomed) {
+      hasWelcomed = true;
+      speakReply(welcomeText);
+    }
   });
   close.addEventListener("click", () => {
     cancelRecording();
