@@ -60,7 +60,7 @@
   {% endwith %}
   {% block content %}{% endblock %}
   {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant" data-speech-url="{{ url_for('admin.assistant_speak') }}">
+  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant" data-speech-url="{{ url_for('admin.assistant_speak') }}" data-auto-open="{{ 'true' if show_mira_welcome|default(false) else 'false' }}">
     <button class="admin-assistant__toggle" type="button" data-assistant-toggle aria-expanded="false" aria-controls="admin-assistant-panel">
       <i class="fa-solid fa-comment-dots" aria-hidden="true"></i><span>Ask Mira</span>
     </button>
@@ -301,7 +301,7 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 </script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-schedule-routing') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-login-speech-diagnostics') }}" defer></script>
 {% endif %}
 </body>
 </html>

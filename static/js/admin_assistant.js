@@ -291,24 +291,12 @@
         status.textContent = "Speaking the answer in Mira’s voice…";
         return currentAudio.play().catch((error) => {
           if (error.name !== "NotAllowedError") throw error;
-          currentAudio.controls = true;
-          currentAudio.setAttribute("aria-label", "Play Mira’s feminine spoken answer");
-          const message = document.createElement("article");
-          message.className = "admin-assistant__message admin-assistant__message--assistant";
-          const instruction = document.createElement("p");
-          instruction.textContent = "Tap to hear Mira’s feminine spoken answer.";
-          const download = document.createElement("a");
-          download.href = currentAudioUrl;
-          download.download = "mira-spoken-answer.mp3";
-          download.textContent = "Download Mira’s spoken answer";
-          message.append(instruction, currentAudio);
-          message.append(download);
-          messages.append(message);
-          messages.scrollTop = messages.scrollHeight;
+          currentAudio.pause();
           isSpeaking = false;
           assistantBusy = false;
           mic.disabled = false;
-          status.textContent = "Tap the audio player to hear Mira’s feminine voice.";
+          if (text === welcomeText) hasWelcomed = false;
+          status.textContent = "Your browser blocked automatic playback. Close and reopen Ask Mira to retry.";
         });
       })
       .catch((error) => {
@@ -336,6 +324,10 @@
   if (pendingNavigationAnswer) {
     addMessage("assistant", pendingNavigationAnswer);
     setOpen(true);
+  } else if (assistant.dataset.autoOpen === "true") {
+    hasWelcomed = true;
+    setOpen(true);
+    speakReply(welcomeText);
   }
   toggle.addEventListener("click", () => {
     const open = panel.hidden;

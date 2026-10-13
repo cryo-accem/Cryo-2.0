@@ -164,6 +164,7 @@ def login():
             session.permanent = True
             session["admin_logged_in"] = True
             session["admin_user_id"] = user["id"]
+            session["mira_welcome"] = True
             if user["must_change_password"]:
                 session["must_change_password"] = True
                 return redirect(url_for("admin.change_password"))
@@ -257,6 +258,7 @@ def billing_preview():
 def panel():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
+    show_mira_welcome = session.pop("mira_welcome", False)
     slot_form_state = session.pop("_admin_slot_form_state", {})
     conn = get_db()
     cur = conn.cursor()
@@ -295,6 +297,7 @@ def panel():
         waiting_start = waiting_end
     return render_template(
         "admin_panel.html",
+        show_mira_welcome=show_mira_welcome,
         pi_chart=pi_chart,
         pi_total=pi_total,
         waiting_chart=waiting_chart,
@@ -638,6 +641,24 @@ def assistant_speak():
         with urllib.request.urlopen(provider_request, timeout=30) as provider_response:
             audio_data = provider_response.read(10 * 1024 * 1024 + 1)
     except urllib.error.HTTPError as exc:
+        provider_status = "unknown"
+        provider_message = ""
+        try:
+            error_payload = json.loads(exc.read(4096).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            error_payload = {}
+        detail = error_payload.get("detail", {}) if isinstance(error_payload, dict) else {}
+        if isinstance(detail, dict):
+            provider_status = str(detail.get("status") or provider_status)
+            provider_message = str(detail.get("message") or "")
+        elif isinstance(detail, str):
+            provider_message = detail
+        provider_status = re.sub(r"[^A-Za-z0-9_.-]", "_", provider_status)[:80]
+        provider_message = re.sub(r"[\x00-\x1f\x7f]+", " ", provider_message).strip()
+        provider_message = provider_message.replace(api_key, "[redacted]")
+        provider_message = provider_message.replace(text.strip(), "[request text]")
+        provider_message = provider_message[:300]
+
         if exc.code == 429:
             message = "Spoken answers are temporarily unavailable because the ElevenLabs quota is exhausted."
             status_code = 503
@@ -645,9 +666,17 @@ def assistant_speak():
             message = "Spoken answers are not configured correctly. An administrator must check the ElevenLabs API key and voice access."
             status_code = 503
         else:
-            message = "The speech service could not generate audio. The answer is still shown above."
+            message = f"ElevenLabs rejected the speech request (HTTP {exc.code}, {provider_status})."
+            if provider_message:
+                message += f" {provider_message}"
+            else:
+                message += " Check the API key's text-to-speech access, voice access, model, and output format."
             status_code = 502
-        current_app.logger.warning("ElevenLabs speech request failed with HTTP %s.", exc.code)
+        current_app.logger.warning(
+            "ElevenLabs speech request failed with HTTP %s (provider status: %s).",
+            exc.code,
+            provider_status,
+        )
         exc.close()
         return jsonify({"error": message}), status_code
     except (urllib.error.URLError, TimeoutError) as exc:

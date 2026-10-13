@@ -263,6 +263,45 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("ElevenLabs quota is exhausted", response.get_json()["error"])
 
+    def test_spoken_answer_reports_provider_reason_without_echoing_key_or_text(self):
+        provider_error = urllib.error.HTTPError(
+            "https://api.elevenlabs.io/v1/text-to-speech/R3JVexA7kMHoZnzl7r3Z",
+            422,
+            "invalid request",
+            {},
+            io.BytesIO(json.dumps({
+                "detail": {
+                    "status": "voice_not_available",
+                    "message": "Voice cannot speak: private test phrase",
+                },
+            }).encode("utf-8")),
+        )
+        with (
+            patch.dict(os.environ, {"ELEVENLABS_API_KEY": "private-test-key"}),
+            patch(
+                "blueprints.admin.urllib.request.urlopen",
+                side_effect=provider_error,
+            ),
+        ):
+            response = self.speak("private test phrase")
+
+        error = response.get_json()["error"]
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("HTTP 422", error)
+        self.assertIn("voice_not_available", error)
+        self.assertNotIn("private test phrase", error)
+        self.assertNotIn("private-test-key", error)
+
+    def test_login_welcome_flag_opens_mira_once_on_dashboard(self):
+        with self.client.session_transaction() as session:
+            session["mira_welcome"] = True
+
+        first_response = self.client.get("/admin/panel")
+        second_response = self.client.get("/admin/panel")
+
+        self.assertIn(b'data-auto-open="true"', first_response.data)
+        self.assertIn(b'data-auto-open="false"', second_response.data)
+
     def test_spoken_answer_uses_miras_elevenlabs_voice(self):
         audio_data = b"ID3\x04\x00\x00\x00\x00\x00\x00test-mp3"
         provider_response = io.BytesIO(audio_data)
