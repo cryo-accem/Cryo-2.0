@@ -28,6 +28,7 @@
   let isSpeaking = false;
   let currentAudio = null;
   let currentAudioUrl = null;
+  let currentUtterance = null;
   const welcomeText = "Hello, I’m Mira. Ask me about revenue, billing, or freezing availability.";
   const silenceAfterSpeechMs = 1400;
   const voiceActivityThreshold = 0.025;
@@ -67,7 +68,16 @@
   };
 
   const releaseSpokenAudio = () => {
+    if (currentUtterance) {
+      currentUtterance.onend = null;
+      currentUtterance.onerror = null;
+      currentUtterance = null;
+      window.speechSynthesis?.cancel();
+    }
     if (currentAudio) {
+      currentAudio.onended = null;
+      currentAudio.onplay = null;
+      currentAudio.onerror = null;
       currentAudio.pause();
       currentAudio.removeAttribute("src");
       currentAudio.load();
@@ -88,22 +98,47 @@
     status.textContent = message;
   };
 
-  const showAudioFallback = (messageText) => {
-    isSpeaking = false;
-    assistantBusy = false;
-    mic.disabled = false;
-    const message = document.createElement("article");
-    message.className = "admin-assistant__message admin-assistant__message--assistant";
-    const instruction = document.createElement("p");
-    instruction.textContent = messageText;
-    const download = document.createElement("a");
-    download.href = currentAudioUrl;
-    download.download = "mira-spoken-answer.mp3";
-    download.textContent = "Download Mira’s spoken answer";
-    message.append(instruction, download);
-    messages.append(message);
-    messages.scrollTop = messages.scrollHeight;
-    status.textContent = messageText;
+  const speakWithBrowserVoice = (text, reason) => {
+    releaseSpokenAudio();
+    if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
+      finishSpokenAudio(`${reason} Your browser does not provide a speech voice; the answer remains available as text.`);
+      return;
+    }
+
+    const utterance = new window.SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const americanVoice = voices.find((voice) =>
+      /^en-US\b/i.test(voice.lang) && /\b(samantha|ava|allison|jenny|aria|zira|karen|susan|female)\b/i.test(voice.name)
+    ) || voices.find((voice) => /^en-US\b/i.test(voice.lang));
+    if (americanVoice) utterance.voice = americanVoice;
+    utterance.rate = 0.96;
+    utterance.pitch = 1.04;
+    currentUtterance = utterance;
+    utterance.onend = () => {
+      if (currentUtterance !== utterance) return;
+      currentUtterance = null;
+      finishSpokenAudio("Answer read aloud using your device’s voice. You can ask another question.");
+    };
+    utterance.onerror = () => {
+      if (currentUtterance !== utterance) return;
+      currentUtterance = null;
+      finishSpokenAudio(`${reason} Your device voice could not read the answer; the text is still shown above.`);
+    };
+    isSpeaking = true;
+    assistantBusy = true;
+    mic.disabled = true;
+    status.textContent = "Deepgram audio is unavailable. Reading the answer with your device’s voice…";
+    try {
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      currentUtterance = null;
+      finishSpokenAudio(`${reason} Your device voice could not start; the answer is still shown above.`);
+      console.error("Mira's browser speech fallback failed:", error);
+    }
+  };
+
+  const showAudioFallback = (messageText, text) => {
+    speakWithBrowserVoice(text, messageText);
   };
 
   const transcribeRecording = async (recording) => {
@@ -261,50 +296,61 @@
     fetch(assistant.dataset.speechUrl, {
       method: "POST",
       headers: {
+        "Accept": "audio/wav, application/json",
         "Content-Type": "application/json",
         "X-CSRF-Token": csrfToken,
       },
       body: JSON.stringify({ text }),
     })
       .then(async (response) => {
-        if (!response.ok) {
-          const result = await response.json();
-          throw new Error(result.error || "Spoken answer generation failed.");
+        const contentType = response.headers.get("content-type") || "";
+        if (!response.ok || !contentType.toLowerCase().startsWith("audio/")) {
+          let result = {};
+          if (contentType.toLowerCase().includes("application/json")) {
+            result = await response.json();
+          }
+          if (response.status === 401 || response.redirected) {
+            throw new Error("Your admin session has expired. Sign in again, then ask Mira to speak.");
+          }
+          throw new Error(result.error || "The speech service did not return playable audio. The answer is still shown above.");
         }
-        return response.blob();
+        const audioBlob = await response.blob();
+        if (!audioBlob.size) {
+          throw new Error("The speech service returned an empty audio file. The answer is still shown above.");
+        }
+        return audioBlob;
       })
       .then((audioBlob) => {
         currentAudioUrl = URL.createObjectURL(audioBlob);
-        currentAudio = new Audio(currentAudioUrl);
-        currentAudio.addEventListener("ended", () => {
+        const audio = new Audio(currentAudioUrl);
+        currentAudio = audio;
+        audio.onended = () => {
           finishSpokenAudio("Answer read aloud in Mira’s voice. You can ask another question.");
-        }, { once: true });
-        currentAudio.addEventListener("play", () => {
+        };
+        audio.onplay = () => {
           isSpeaking = true;
           assistantBusy = true;
           mic.disabled = true;
           status.textContent = "Speaking the answer in Mira’s voice…";
-        });
-        currentAudio.addEventListener("error", () => {
-          showAudioFallback("This browser couldn’t play the audio. Download Mira’s spoken answer.");
-        }, { once: true });
+        };
+        audio.onerror = () => {
+          if (currentAudio !== audio) return;
+          showAudioFallback("Mira’s audio was generated, but this browser could not decode it.", text);
+        };
         status.textContent = "Speaking the answer in Mira’s voice…";
-        return currentAudio.play().catch((error) => {
-          if (error.name !== "NotAllowedError") throw error;
-          currentAudio.pause();
-          isSpeaking = false;
-          assistantBusy = false;
-          mic.disabled = false;
-          if (text === welcomeText) hasWelcomed = false;
-          status.textContent = "Your browser blocked automatic playback. Close and reopen Ask Mira to retry.";
+        return audio.play().catch((error) => {
+          if (error.name === "NotAllowedError") {
+            speakWithBrowserVoice(text, "Your browser blocked Deepgram audio playback.");
+            return;
+          }
+          showAudioFallback("Mira’s audio was generated, but this browser could not play it.", text);
         });
       })
       .catch((error) => {
         console.error("Admin assistant spoken answer failed:", error);
-        finishSpokenAudio(
-          error instanceof Error
-            ? error.message
-            : "Spoken answer generation failed. The answer is still shown above."
+        speakWithBrowserVoice(
+          text,
+          error instanceof Error ? error.message : "Deepgram could not generate speech."
         );
       });
   };

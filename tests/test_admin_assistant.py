@@ -232,14 +232,18 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertEqual(missing_csrf.status_code, 400)
 
     def test_spoken_answer_requires_configured_provider_key(self):
-        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": ""}):
+        with (
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": ""}),
+            patch("blueprints.admin.urllib.request.urlopen") as urlopen,
+        ):
             response = self.speak()
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("Deepgram or ElevenLabs API key", response.get_json()["error"])
+        self.assertIn("Deepgram API key", response.get_json()["error"])
+        urlopen.assert_not_called()
 
     def test_spoken_answer_rejects_empty_and_oversized_text(self):
-        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "test-key"}):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": ""}):
             empty = self.speak(" ")
             oversized = self.speak("x" * 5001)
 
@@ -248,24 +252,24 @@ class AdminAssistantTests(unittest.TestCase):
 
     def test_spoken_answer_reports_provider_quota_exhaustion(self):
         provider_error = urllib.error.HTTPError(
-            "https://api.elevenlabs.io/v1/text-to-speech/R3JVexA7kMHoZnzl7r3Z",
+            "https://api.deepgram.com/v1/speak",
             429,
             "quota exceeded",
             {},
             io.BytesIO(b""),
         )
         with (
-            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "test-key"}),
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
             patch("blueprints.admin.urllib.request.urlopen", side_effect=provider_error),
         ):
             response = self.speak()
 
         self.assertEqual(response.status_code, 503)
-        self.assertIn("ElevenLabs quota is exhausted", response.get_json()["error"])
+        self.assertIn("Deepgram quota is exhausted", response.get_json()["error"])
 
-    def test_spoken_answer_reports_provider_reason_without_echoing_key_or_text(self):
+    def test_spoken_answer_reports_provider_error_without_echoing_key_or_text(self):
         provider_error = urllib.error.HTTPError(
-            "https://api.elevenlabs.io/v1/text-to-speech/R3JVexA7kMHoZnzl7r3Z",
+            "https://api.deepgram.com/v1/speak",
             422,
             "invalid request",
             {},
@@ -277,18 +281,17 @@ class AdminAssistantTests(unittest.TestCase):
             }).encode("utf-8")),
         )
         with (
-            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "private-test-key"}),
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "private-test-key"}),
             patch(
                 "blueprints.admin.urllib.request.urlopen",
                 side_effect=provider_error,
             ),
         ):
             response = self.speak("private test phrase")
-
         error = response.get_json()["error"]
         self.assertEqual(response.status_code, 502)
-        self.assertIn("HTTP 422", error)
-        self.assertIn("voice_not_available", error)
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("could not generate audio", error)
         self.assertNotIn("private test phrase", error)
         self.assertNotIn("private-test-key", error)
 
@@ -302,43 +305,10 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn(b'data-auto-open="true"', first_response.data)
         self.assertIn(b'data-auto-open="false"', second_response.data)
 
-    def test_spoken_answer_uses_miras_elevenlabs_voice(self):
-        audio_data = b"ID3\x04\x00\x00\x00\x00\x00\x00test-mp3"
-        provider_response = io.BytesIO(audio_data)
+    def test_spoken_answer_uses_deepgram_helena_wav_when_configured(self):
+        audio_data = b"RIFF\x04\x00\x00\x00WAVE"
         with (
-            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "test-key"}),
-            patch(
-                "blueprints.admin.urllib.request.urlopen",
-                return_value=provider_response,
-            ) as urlopen,
-        ):
-            response = self.speak("  Freezing availability is eight grids today.  ")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.mimetype, "audio/mpeg")
-        self.assertEqual(response.data, audio_data)
-        self.assertEqual(response.headers["Cache-Control"], "no-store")
-        provider_request = urlopen.call_args.args[0]
-        query = urllib.parse.parse_qs(urllib.parse.urlsplit(provider_request.full_url).query)
-        self.assertEqual(query["output_format"], ["mp3_44100_128"])
-        self.assertEqual(provider_request.get_header("Xi-api-key"), "test-key")
-        self.assertEqual(provider_request.get_header("Accept"), "audio/mpeg")
-        self.assertEqual(
-            json.loads(provider_request.data),
-            {
-                "text": "Freezing availability is eight grids today.",
-                "model_id": "eleven_multilingual_v2",
-            },
-        )
-        self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
-
-    def test_spoken_answer_uses_deepgram_helena_when_configured(self):
-        audio_data = b"ID3\x04\x00\x00\x00\x00\x00\x00test-mp3"
-        with (
-            patch.dict(os.environ, {
-                "DEEPGRAM_API_KEY": "deepgram-test-key",
-                "ELEVENLABS_API_KEY": "eleven-test-key",
-            }),
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "deepgram-test-key"}),
             patch(
                 "blueprints.admin.urllib.request.urlopen",
                 return_value=io.BytesIO(audio_data),
@@ -347,8 +317,9 @@ class AdminAssistantTests(unittest.TestCase):
             response = self.speak("  Freezing availability is eight grids today.  ")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.mimetype, "audio/mpeg")
+        self.assertEqual(response.mimetype, "audio/wav")
         self.assertEqual(response.data, audio_data)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
         provider_request = urlopen.call_args.args[0]
         self.assertEqual(
             urllib.parse.urlsplit(provider_request.full_url).path,
@@ -356,18 +327,21 @@ class AdminAssistantTests(unittest.TestCase):
         )
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(provider_request.full_url).query)
         self.assertEqual(query["model"], ["aura-2-helena-en"])
+        self.assertEqual(query["encoding"], ["linear16"])
+        self.assertEqual(query["container"], ["wav"])
         self.assertEqual(
             provider_request.get_header("Authorization"),
             "Token deepgram-test-key",
         )
+        self.assertEqual(provider_request.get_header("Accept"), "audio/wav")
         self.assertEqual(json.loads(provider_request.data), {
             "text": "Freezing availability is eight grids today.",
         })
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
 
-    def test_spoken_answer_rejects_non_mp3_provider_response(self):
+    def test_spoken_answer_rejects_non_wav_provider_response(self):
         with (
-            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "test-key"}),
+            patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}),
             patch(
                 "blueprints.admin.urllib.request.urlopen",
                 return_value=io.BytesIO(b"provider error text"),
@@ -379,7 +353,7 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn("browser cannot play", response.get_json()["error"])
 
     def test_spoken_answer_requires_admin_session_and_csrf_token(self):
-        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "", "ELEVENLABS_API_KEY": "test-key"}):
+        with patch.dict(os.environ, {"DEEPGRAM_API_KEY": "test-key"}):
             with self.client.session_transaction() as session:
                 session.pop("admin_logged_in")
             unauthorized = self.speak()
