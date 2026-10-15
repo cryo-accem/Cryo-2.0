@@ -2,7 +2,7 @@
 {% block title %}ACCEM | Admin dashboard{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back, Drose</h1><p>Manage registrations and monitor facility activity.</p></div></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back, Drose</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
   <div class="dashboard-charts">
     <section class="chart-card">
       <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><a class="button small secondary" href="{{ url_for('admin.download_pi_users_csv') }}">Download CSV</a></div>
@@ -29,7 +29,7 @@
       </div>
     </section>
   </div>
-  <section class="revenue-dashboard">
+  <section class="revenue-dashboard" id="revenue-dashboard" tabindex="-1">
     <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Completed billing values with CSIC project revenue included. CSIC GST is calculated at 18% of the entered net amount.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
     <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
     <div class="revenue-summary">
@@ -119,68 +119,62 @@
     </div>
     {% else %}<p class="empty-message">No CSIC projects in this reporting period.</p>{% endif %}
   </section>
-  <details class="admin-slot-panel" id="create-slot"
-    data-known-user-url="{{ url_for('admin.known_slot_user') }}"
-    data-slot-type="{{ slot_form_state.get('slot_type', '') }}"
-    data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}"
-    {% if slot_form_state.get('slot_type') %}open{% endif %}>
-    <summary><span class="chart-kicker">Quick actions</span><strong>Create a slot</strong></summary>
+  <details class="admin-slot-panel" id="create-slot" data-known-user-url="{{ url_for('admin.known_slot_user') }}" data-slot-type="{{ slot_form_state.get('slot_type', '') }}" data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}" {% if slot_form_state.get('slot_type') %}open{% endif %}>
+    <summary class="admin-slot-panel__toggle"><span><span class="chart-kicker">Quick actions</span><span class="admin-slot-panel__title">Create a slot</span></span></summary>
     <div class="admin-slot-panel__content">
-      <p>Add a data collecting, screening, or freezing booking without leaving the dashboard.</p>
-      <div class="admin-slot-type-controls" role="group" aria-label="Choose slot type">
-        <button class="button secondary" type="button" aria-controls="admin-slot-form-datacollecting" data-slot-type="datacollecting">Data collecting</button>
-        <button class="button secondary" type="button" aria-controls="admin-slot-form-screening" data-slot-type="screening">Screening</button>
-        <button class="button secondary" type="button" aria-controls="admin-slot-form-freezing" data-slot-type="freezing">Freezing</button>
+      <p>Add a data collecting, screening, or freezing booking without leaving the dashboard. Choose a slot type to get started.</p>
+      <div class="admin-slot-type-controls" role="group" aria-label="Choose slot type" hidden>
+        <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-datacollecting" aria-pressed="false" data-slot-type="datacollecting">Data collecting</button>
+        <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-screening" aria-pressed="false" data-slot-type="screening">Screening</button>
+        <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-freezing" aria-pressed="false" data-slot-type="freezing">Freezing</button>
       </div>
       <p class="admin-slot-selection-status" role="status" aria-live="polite"></p>
-      {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}
-      <p class="admin-slot-save-error" role="status">The slot was not saved. Your entries are preserved below so you can review and try again.</p>
-      {% endif %}
+      {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}<p class="admin-slot-save-error" role="status">The slot was not saved. Your entries are preserved below so you can review and try again.</p>{% endif %}
       <div class="admin-slot-save-feedback" role="status" aria-live="polite" {% if not slot_form_state.get('saved') %}hidden{% endif %}>
         <span>Slot saved successfully.</span>
         <button class="button small secondary" type="button" data-add-another>Add another</button>
       </div>
       <div class="admin-slot-grid">
-        {% for slot_type, title, slot_endpoint in [
-          ('datacollecting', 'Data collecting', 'admin.add_slot'),
-          ('screening', 'Screening', 'admin.add_slot'),
-          ('freezing', 'Freezing', 'admin.add_slot')
-        ] %}
-        <form class="admin-slot-form" id="admin-slot-form-{{ slot_type }}" method="post"
-          action="{{ url_for(slot_endpoint, slot_type=slot_type) }}" hidden>
+        <form class="admin-slot-form" id="admin-slot-form-datacollecting" method="post" action="{{ url_for('admin.add_slot', slot_type='datacollecting') }}">
           <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-          <h3>{{ title }}</h3>
-          {% set values = slot_form_state.get('values', {}) if slot_form_state.get('slot_type') == slot_type else {} %}
-          <label>User name<input name="user_name" maxlength="100" value="{{ values.get('user_name', '') }}" required></label>
-          <label>PI name<input name="pi_name" maxlength="100" value="{{ values.get('pi_name', '') }}" required></label>
-          <label>Email<input name="email" type="email" maxlength="150" value="{{ values.get('email', '') }}" required></label>
-          <div class="admin-slot-known-user" data-known-user-status hidden>
-            <span data-known-user-message></span>
-            <button type="button" class="button small secondary" data-known-user-apply>Use saved details</button>
-            <button type="button" class="button small secondary" data-known-user-dismiss>Dismiss</button>
-          </div>
-          <label>Origin
-            <select name="origin" required>
-              <option value="">Select origin</option>
-              <option value="Internal" {% if values.get('origin') == 'Internal' %}selected{% endif %}>IISc Users</option>
-              <option value="External" {% if values.get('origin') == 'External' %}selected{% endif %}>External Academic Users</option>
-              <option value="Industry" {% if values.get('origin') == 'Industry' %}selected{% endif %}>Industry User</option>
-            </select>
-          </label>
-          {% if slot_type != 'freezing' %}
-          <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ values.get('esm', '') }}"></label>
-          {% endif %}
-          <label>Sample name<input name="sample_name" maxlength="150" value="{{ values.get('sample_name', '') }}" required></label>
-          {% if slot_type == 'freezing' %}
-          <label>Freezing date<input name="freezing_date" type="date" min="{{ today }}" value="{{ values.get('freezing_date', '') }}" required></label>
-          {% endif %}
-          <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ values.get('grids', '') }}" required></label>
-          {% if slot_type == 'datacollecting' %}
-          <label>Days<input name="days" type="number" min="1" step="1" value="{{ values.get('days', '') }}" required></label>
-          {% endif %}
-          <button class="button" type="submit">Add {{ title|lower }} slot</button>
+          <h3>Data collecting</h3>
+          <label>User name<input name="user_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('user_name', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <label>PI name<input name="pi_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('pi_name', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <label>Email<input name="email" type="email" maxlength="150" value="{{ slot_form_state.get('values', {}).get('email', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <div class="admin-slot-known-user" data-known-user-status hidden><span data-known-user-message></span><button type="button" class="button small secondary" data-known-user-apply>Use saved details</button><button type="button" class="admin-slot-known-user__dismiss" data-known-user-dismiss>Dismiss</button></div>
+          <label>Origin<select name="origin" required><option value="">Select origin</option><option value="Internal" {{ 'selected' if slot_form_state.get('slot_type') == 'datacollecting' and slot_form_state.get('values', {}).get('origin') == 'Internal' else '' }}>IISc Users</option><option value="External" {{ 'selected' if slot_form_state.get('slot_type') == 'datacollecting' and slot_form_state.get('values', {}).get('origin') == 'External' else '' }}>External Academic Users</option><option value="Industry" {{ 'selected' if slot_form_state.get('slot_type') == 'datacollecting' and slot_form_state.get('values', {}).get('origin') == 'Industry' else '' }}>Industry User</option></select></label>
+          <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ slot_form_state.get('values', {}).get('esm', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}"></label>
+          <label>Sample name<input name="sample_name" maxlength="150" value="{{ slot_form_state.get('values', {}).get('sample_name', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <label>Days<input name="days" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('days', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <button class="button" type="submit">Add data collecting slot</button>
         </form>
-        {% endfor %}
+        <form class="admin-slot-form" id="admin-slot-form-screening" method="post" action="{{ url_for('admin.add_slot', slot_type='screening') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <h3>Screening</h3>
+          <label>User name<input name="user_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('user_name', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <label>PI name<input name="pi_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('pi_name', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <label>Email<input name="email" type="email" maxlength="150" value="{{ slot_form_state.get('values', {}).get('email', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <div class="admin-slot-known-user" data-known-user-status hidden><span data-known-user-message></span><button type="button" class="button small secondary" data-known-user-apply>Use saved details</button><button type="button" class="admin-slot-known-user__dismiss" data-known-user-dismiss>Dismiss</button></div>
+          <label>Origin<select name="origin" required><option value="">Select origin</option><option value="Internal" {{ 'selected' if slot_form_state.get('slot_type') == 'screening' and slot_form_state.get('values', {}).get('origin') == 'Internal' else '' }}>IISc Users</option><option value="External" {{ 'selected' if slot_form_state.get('slot_type') == 'screening' and slot_form_state.get('values', {}).get('origin') == 'External' else '' }}>External Academic Users</option><option value="Industry" {{ 'selected' if slot_form_state.get('slot_type') == 'screening' and slot_form_state.get('values', {}).get('origin') == 'Industry' else '' }}>Industry User</option></select></label>
+          <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ slot_form_state.get('values', {}).get('esm', '') if slot_form_state.get('slot_type') == 'screening' else '' }}"></label>
+          <label>Sample name<input name="sample_name" maxlength="150" value="{{ slot_form_state.get('values', {}).get('sample_name', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <button class="button" type="submit">Add screening slot</button>
+        </form>
+        <form class="admin-slot-form" id="admin-slot-form-freezing" method="post" action="{{ url_for('admin.add_slot', slot_type='freezing') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <h3>Freezing</h3>
+          <label>User name<input name="user_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('user_name', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <label>PI name<input name="pi_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('pi_name', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <label>Email<input name="email" type="email" maxlength="150" value="{{ slot_form_state.get('values', {}).get('email', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <div class="admin-slot-known-user" data-known-user-status hidden><span data-known-user-message></span><button type="button" class="button small secondary" data-known-user-apply>Use saved details</button><button type="button" class="admin-slot-known-user__dismiss" data-known-user-dismiss>Dismiss</button></div>
+          <label>Origin<select name="origin" required><option value="">Select origin</option><option value="Internal" {{ 'selected' if slot_form_state.get('slot_type') == 'freezing' and slot_form_state.get('values', {}).get('origin') == 'Internal' else '' }}>IISc Users</option><option value="External" {{ 'selected' if slot_form_state.get('slot_type') == 'freezing' and slot_form_state.get('values', {}).get('origin') == 'External' else '' }}>External Academic Users</option><option value="Industry" {{ 'selected' if slot_form_state.get('slot_type') == 'freezing' and slot_form_state.get('values', {}).get('origin') == 'Industry' else '' }}>Industry User</option></select></label>
+          <label>Sample name<input name="sample_name" maxlength="150" value="{{ slot_form_state.get('values', {}).get('sample_name', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <label>Freezing date<input name="freezing_date" type="date" min="{{ today }}" value="{{ slot_form_state.get('values', {}).get('freezing_date', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
+          <button class="button" type="submit">Add freezing slot</button>
+        </form>
       </div>
     </div>
   </details>
@@ -231,9 +225,16 @@
     if (focus) selectedForm.querySelector("input:not([type=hidden]), select")?.focus({ preventScroll: true });
   };
 
+  document.querySelector('.page-header--admin a[href="#create-slot"]')?.addEventListener("click", () => {
+    panel.open = true;
+  });
+  forms.forEach((form) => { form.hidden = true; });
+  controls.hidden = false;
+
   buttons.forEach((button) => {
     button.addEventListener("click", () => chooseSlotType(button.dataset.slotType, true));
   });
+
   if (panel.dataset.slotType) chooseSlotType(panel.dataset.slotType);
   if (panel.dataset.slotSaved === "true") {
     panel.querySelector("[data-add-another]")?.addEventListener("click", () => {
@@ -253,7 +254,10 @@
     let timer = 0;
     let requestNumber = 0;
     let savedDetails = null;
-    const hideLookup = () => { lookup.hidden = true; savedDetails = null; };
+    const hideLookup = () => {
+      lookup.hidden = true;
+      savedDetails = null;
+    };
     const lookupEmail = async () => {
       const emailValue = email.value.trim();
       const currentRequest = ++requestNumber;
@@ -266,11 +270,18 @@
         const response = await fetch(panel.dataset.knownUserUrl, {
           method: "POST",
           headers: {
+            "Accept": "application/json",
             "Content-Type": "application/json",
             "X-CSRF-Token": form.elements.namedItem("_csrf_token").value,
           },
           body: JSON.stringify({ email: emailValue }),
         });
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(response.status === 401 || response.redirected
+            ? "Your admin session has expired. Sign in again, then retry the lookup."
+            : "The server returned an unexpected response. Try again or enter the details manually.");
+        }
         const result = await response.json();
         if (currentRequest !== requestNumber || email.value.trim() !== emailValue) return;
         if (!response.ok) throw new Error(result.error || "Could not look up this email.");
@@ -279,7 +290,7 @@
           return;
         }
         savedDetails = result;
-        message.textContent = `Saved details found: ${result.user_name} · PI: ${result.pi_name}. Review and edit before saving.`;
+        message.textContent = `Saved details found: ${result.user_name} · PI: ${result.pi_name}. You can review and edit the fields before saving.`;
         applyButton.hidden = false;
       } catch (error) {
         if (currentRequest !== requestNumber) return;

@@ -10,12 +10,15 @@ from flask import (
 )
 
 from inventory_service import (
-    InventoryError, activity_page, all_grid_types, available_session_grids,
+    InventoryError, activity_page, all_grid_types, available_grid_bookings,
+    available_session_grids, booking_grid_links_for_bookings,
     complete_session_grid, create_data_session, create_grid_type, dashboard_data,
-    facility_time, grid_details, iter_export_events, iter_export_grid_rows, list_accounts,
-    list_grid_types, list_samples, list_sessions, recent_bookings, register_freezing,
-    search_grids, search_storage, session_details, set_grid_type_active, store_grid,
-    update_clipping, update_grid_type,
+    dashboard_storage, facility_time, grid_booking_links, grid_details,
+    iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
+    list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
+    register_freezing, search_grids, search_storage, session_details,
+    set_grid_type_active, store_grid, unlink_grid_from_booking,
+    discard_grids, update_clipping, update_grid_type,
 )
 
 
@@ -88,12 +91,15 @@ def _csv_response(filename, headings, rows):
 @inventory_bp.route("/")
 def dashboard():
     counts, by_type, by_status, recent = dashboard_data()
+    stored_grids, not_stored_grids = dashboard_storage()
     return render_template(
         "inventory_dashboard.html",
         counts=counts,
         by_type=by_type,
         by_status=by_status,
         recent=recent,
+        stored_grids=stored_grids,
+        not_stored_grids=not_stored_grids,
     )
 
 
@@ -209,6 +215,26 @@ def samples_json():
     ])
 
 
+@inventory_bp.route("/api/matching-samples")
+def matching_samples_json():
+    researcher_name = (request.args.get("researcher") or "").strip()
+    sample_name = (request.args.get("sample") or "").strip()
+    if not researcher_name or not sample_name:
+        return jsonify([])
+    if len(researcher_name) > 150 or len(sample_name) > 180:
+        return jsonify({"error": "Researcher or sample name is too long."}), 400
+    return jsonify([
+        {
+            "id": sample["sample_id"],
+            "code": sample["sample_code"],
+            "name": sample["sample_name"],
+            "researcher": sample["researcher_name"],
+            "lab": sample["lab_name"],
+        }
+        for sample in matching_inventory_samples(researcher_name, sample_name)
+    ])
+
+
 @inventory_bp.route("/grids/<grid_code>")
 def grid_detail(grid_code):
     if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
@@ -226,7 +252,52 @@ def grid_detail(grid_code):
         active_location=active_location,
         sessions=sessions,
         events=events,
+        booking_links=grid_booking_links(grid_code),
+        available_bookings=available_grid_bookings(),
     )
+
+
+@inventory_bp.route("/grids/<grid_code>/booking-link", methods=["POST"])
+def grid_booking_link(grid_code):
+    if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
+        abort(404)
+    try:
+        link_grid_to_booking(
+            {
+                "service_type": request.form.get("service_type"),
+                "booking_id": request.form.get("booking_id"),
+                "grid_code": grid_code,
+            },
+            _actor_id(),
+        )
+    except InventoryError as exc:
+        flash(str(exc), "error")
+    except (sqlite3.IntegrityError, pymysql.err.IntegrityError) as exc:
+        current_app.logger.warning("Grid-to-booking link rejected by a database constraint: %s", exc)
+        flash("This grid or booking could not be linked. No changes were saved.", "error")
+    else:
+        flash(f"{grid_code} linked to the selected booking.", "success")
+    return redirect(url_for("inventory.grid_detail", grid_code=grid_code))
+
+
+@inventory_bp.route("/grids/<grid_code>/booking-link/remove", methods=["POST"])
+def grid_booking_link_remove(grid_code):
+    if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
+        abort(404)
+    try:
+        unlink_grid_from_booking(
+            {
+                "service_type": request.form.get("service_type"),
+                "booking_id": request.form.get("booking_id"),
+                "grid_code": grid_code,
+            },
+            _actor_id(),
+        )
+    except InventoryError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"{grid_code} was unlinked from the booking.", "success")
+    return redirect(url_for("inventory.grid_detail", grid_code=grid_code))
 
 
 @inventory_bp.route("/grids/<grid_code>/type", methods=["POST"])
@@ -284,6 +355,18 @@ def bulk_clipping():
         )
     if failed:
         flash("Not updated: " + "; ".join(failed), "error")
+    return redirect(url_for("inventory.grids"))
+
+
+@inventory_bp.route("/grids/bulk-discard", methods=["POST"])
+def bulk_discard():
+    codes = request.form.getlist("selected_grid_codes")
+    try:
+        discarded = discard_grids(codes, request.form.get("notes"), _actor_id())
+    except InventoryError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"Discarded {len(discarded)} grid(s): {', '.join(discarded)}.", "success")
     return redirect(url_for("inventory.grids"))
 
 

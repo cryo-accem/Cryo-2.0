@@ -3,8 +3,31 @@
 {% block content %}
 <main class="portal-page"><section class="page-content">
   <header class="page-header page-header--admin">
-    <div><div class="eyebrow">Website content</div><h1>Maintenance</h1><p>Update publications and instrumentation without editing templates or code.</p></div>
+    <div><div class="eyebrow">Website content</div><h1>Maintenance</h1><p>Update facility notifications, publications and instrumentation without editing templates or code.</p></div>
   </header>
+
+  <section class="data-panel maintenance-notices" id="facility-notifications">
+    <div class="maintenance-notices__intro">
+      <span class="maintenance-notices__icon"><i class="fa-solid fa-bell" aria-hidden="true"></i></span>
+      <div><h2>Facility notifications</h2><p>Create a short announcement for workshops, events and facility updates. Active notices appear in the branded notification strip across public pages.</p></div>
+    </div>
+    <form method="post" action="{{ url_for('admin.save_facility_notice') }}" class="maintenance-form maintenance-notice-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      {% if edit_notice %}<input type="hidden" name="id" value="{{ edit_notice.id }}">{% endif %}
+      <label class="form-field"><span>Notification title</span><input name="title" maxlength="160" required value="{{ edit_notice.title if edit_notice else '' }}" placeholder="e.g. Cryo-EM sample preparation workshop"></label>
+      <label class="form-field"><span>Event date (optional)</span><input name="event_date" type="date" value="{{ edit_notice.event_date.strftime('%Y-%m-%d') if edit_notice and edit_notice.event_date and edit_notice.event_date.strftime is defined else (edit_notice.event_date if edit_notice and edit_notice.event_date else '') }}"></label>
+      <label class="form-field full"><span>Announcement details</span><textarea name="message" rows="3" maxlength="1000" required placeholder="Add a brief message about the workshop, event or update.">{{ edit_notice.message if edit_notice else '' }}</textarea></label>
+      <label class="form-field full"><span>More information link (optional)</span><input name="link_url" type="url" maxlength="500" value="{{ edit_notice.link_url if edit_notice else '' }}" placeholder="https://..."></label>
+      <label class="maintenance-notice-active"><input type="checkbox" name="is_active" value="1" {% if not edit_notice or edit_notice.is_active %}checked{% endif %}> Show this announcement on the website</label>
+      <div class="form-actions"><button class="button" type="submit">{% if edit_notice %}Save notification{% else %}Publish notification{% endif %}</button>{% if edit_notice %}<a class="button button--secondary" href="{{ url_for('admin.maintenance') }}#facility-notifications">Cancel</a>{% endif %}</div>
+    </form>
+    <div class="maintenance-notices__list">
+      <h3>Saved announcements <span>{{ facility_notices|length }}</span></h3>
+      {% if facility_notices %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Announcement</th><th>Event date</th><th>Website status</th><th>Actions</th></tr></thead><tbody>
+        {% for notice in facility_notices %}<tr><td><strong>{{ notice.title }}</strong><small>{{ notice.message }}</small></td><td>{{ notice.event_date.strftime('%b %d, %Y') if notice.event_date and notice.event_date.strftime is defined else (notice.event_date or '—') }}</td><td><span class="inventory-status {{ 'inventory-status--stored' if notice.is_active else 'inventory-status--discarded' }}">{{ 'Visible' if notice.is_active else 'Hidden' }}</span></td><td class="action-buttons"><a class="btn btn-load" href="{{ url_for('admin.maintenance', edit_notice=notice.id) }}#facility-notifications">Edit</a><form method="post" action="{{ url_for('admin.delete_facility_notice', notice_id=notice.id) }}" style="display:inline" onsubmit="return confirm('Remove this announcement from the website?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="btn btn-delete" type="submit">Delete</button></form></td></tr>{% endfor %}
+      </tbody></table></div>{% else %}<p class="empty-message">No facility announcements have been added yet.</p>{% endif %}
+    </div>
+  </section>
 
   <div class="maintenance-grid">
     <section class="data-panel maintenance-editor">

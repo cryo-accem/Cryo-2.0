@@ -114,12 +114,14 @@ def register_freezing(
     allow_over_capacity=False,
 ):
     """
-    Insert a new freezing booking after checking the daily grid cap.
+    Insert a freezing booking, optionally bypassing the normal grid cap for admins.
     Returns (success: bool, message: str).
     """
     if not freezing_date:
         return False, "Please choose a freezing date."
-    if grids < 1 or (grids > GRID_LIMIT_PER_DAY and not allow_over_capacity):
+    if grids < 1:
+        return False, "Choose at least 1 grid."
+    if not allow_over_capacity and grids > GRID_LIMIT_PER_DAY:
         return False, f"Choose between 1 and {GRID_LIMIT_PER_DAY} grids."
     try:
         selected_date = datetime.date.fromisoformat(str(freezing_date))
@@ -140,7 +142,7 @@ def register_freezing(
     )
     total = cur.fetchone()["total"]
 
-    if total + grids > GRID_LIMIT_PER_DAY and not allow_over_capacity:
+    if not allow_over_capacity and total + grids > GRID_LIMIT_PER_DAY:
         remaining = GRID_LIMIT_PER_DAY - total
         cur.close()
         conn.close()

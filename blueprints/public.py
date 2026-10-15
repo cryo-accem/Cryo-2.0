@@ -6,9 +6,10 @@ import time
 import datetime
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify
+from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify, request
 from database import get_db
 from normalization import clean_display_name
+from inventory_service import public_inventory_grids
 
 public_bp = Blueprint("public", __name__)
 _publication_cache = {"timestamp": 0.0, "count": 36, "source": "curated fallback"}
@@ -52,6 +53,53 @@ def get_combined_ongoing_slots(cur):
            ORDER BY registration_date, id"""
     )
     return cur.fetchall()
+
+
+@public_bp.route("/inventory")
+def grid_inventory():
+    researcher_name = request.args.get("researcher_name", "").strip()
+    sample_name = request.args.get("sample_name", "").strip()
+    grids = []
+    search_error = ""
+    searched = bool(researcher_name and sample_name)
+    if len(researcher_name) > 150 or len(sample_name) > 180:
+        search_error = "Enter a shorter researcher or sample name."
+    elif searched:
+        grids = public_inventory_grids(researcher_name, sample_name)
+    return render_template(
+        "public_inventory.html",
+        grids=grids,
+        researcher_name=researcher_name,
+        sample_name=sample_name,
+        searched=searched,
+        search_error=search_error,
+    )
+
+
+@public_bp.route("/inventory/search")
+def search_public_inventory():
+    researcher_name = request.args.get("user_name", "").strip()
+    sample_name = request.args.get("sample_name", "").strip()
+    if not researcher_name or not sample_name:
+        return jsonify({"grids": []})
+    if len(researcher_name) > 150 or len(sample_name) > 180:
+        return jsonify({"error": "Enter a shorter researcher or sample name."}), 400
+    grids = public_inventory_grids(researcher_name, sample_name, available_only=True)
+    return jsonify({
+        "grids": [
+            {
+                "grid_code": grid["grid_code"],
+                "sample_code": grid["sample_code"],
+                "sample_name": grid["sample_name"],
+                "status_code": grid["status_code"],
+                "falcon_container_id": grid["falcon_container_id"],
+                "grid_box_name": grid["grid_box_name"],
+                "grid_position": grid["grid_position"],
+            }
+            for grid in grids
+        ]
+    })
+
 
 ACADEMIC_USERS = [
     ("NCCS, Pune", 2), ("IIT-Bombay", 3), ("InStem", 1), ("Bose Institute", 4),
@@ -215,6 +263,26 @@ def get_managed_page(page_key):
     cur.close()
     conn.close()
     return page
+
+
+def get_active_facility_notices():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, title, message, event_date, link_url
+           FROM facility_notices WHERE is_active=1
+           ORDER BY COALESCE(event_date, '1900-01-01') DESC, updated_at DESC, id DESC
+           LIMIT 5"""
+    )
+    rows = []
+    for row in cur.fetchall():
+        notice = dict(row)
+        if isinstance(notice["event_date"], str) and notice["event_date"]:
+            notice["event_date"] = datetime.date.fromisoformat(notice["event_date"])
+        rows.append(notice)
+    cur.close()
+    conn.close()
+    return rows
 
 
 def get_publication_count():

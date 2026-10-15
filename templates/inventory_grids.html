@@ -2,10 +2,10 @@
 {% block title %}ACCEM | Search grid inventory{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content inventory-page">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Search and manage grids</h1><p>Search by grid, sample, researcher, grid type, or current storage location.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register grids</a></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Search and manage grids</h1><p>Search by batch, grid, sample, researcher, grid type, or current storage location.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register grids</a></header>
   <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a class="active" href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
   <form class="inventory-filter-form" method="get">
-    <label class="inventory-filter-wide">Search<input type="search" name="q" value="{{ filters.get('q','') }}" placeholder="Grid, sample, researcher, type, Falcon, box, position"></label>
+    <label class="inventory-filter-wide">Search<input type="search" name="q" value="{{ filters.get('q','') }}" placeholder="Batch, grid, sample, researcher, type, Falcon, box, position"></label>
     <label>Lifecycle status<select name="status"><option value="">All statuses</option>{% for value in ['Frozen','Clipped','Stored','In Data Collection','Discarded'] %}<option value="{{ value }}" {% if filters.get('status')==value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
     <label>Clipping<select name="clipped"><option value="">Any</option><option value="1" {% if filters.get('clipped')=='1' %}selected{% endif %}>Clipped</option><option value="0" {% if filters.get('clipped')=='0' %}selected{% endif %}>Not clipped</option></select></label>
     <label>Grid type<select name="grid_type_id"><option value="">All types</option>{% for type in grid_types %}<option value="{{ type.grid_type_id }}" {% if filters.get('grid_type_id')|string==type.grid_type_id|string %}selected{% endif %}>{{ type.grid_type_name }}</option>{% endfor %}</select></label>
@@ -17,24 +17,49 @@
     <label class="inventory-filter-actions"><button class="button small" type="submit">Apply filters</button><a class="button small secondary" href="{{ url_for('inventory.grids') }}">Clear</a></label>
   </form>
   <section class="inventory-panel">
-    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) found. Select rows to apply one reviewed clipping update.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
-    <form id="bulk-clipping-form" method="post" action="{{ url_for('inventory.bulk_clipping') }}" onsubmit="return confirmBulkClipping(this)">
+    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) found. Select grids to update clipping or permanently discard them.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
+    <form id="bulk-clipping-form" method="post" action="{{ url_for('inventory.bulk_clipping') }}" onsubmit="return confirmBulkAction(this, event)">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-      <div class="inventory-bulk-controls"><label>Set selected grids to <select name="clipped"><option value="1">Clipped</option><option value="0">Not clipped</option></select></label><label>Notes (optional)<input name="notes" maxlength="2000"></label><button class="button small" type="submit">Review and apply clipping</button></div>
-      {% if rows %}<div class="table-wrap"><table class="data-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="Select all grids on this page"></th><th>Grid ID</th><th>Sample</th><th>Researcher</th><th>Type</th><th>Frozen</th><th>Clipping</th><th>Status</th><th>Current storage</th></tr></thead><tbody>{% for grid in rows %}<tr><td><input form="bulk-clipping-form" type="checkbox" name="selected_grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.grid_code }}"></td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.grid_type_name }}</td><td>{{ grid.frozen_at|facility_time }}</td><td>{{ 'Clipped' if grid.clipped else 'Not clipped' }}</td><td><span class="inventory-status inventory-status--{{ grid.current_status|lower|replace(' ','-') }}">{{ grid.current_status }}</span></td><td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} / {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+      {% if rows %}<div class="inventory-bulk-controls">
+        <div class="inventory-bulk-controls__selection"><span class="inventory-bulk-controls__eyebrow">Bulk actions</span><strong><span data-selection-count aria-live="polite">0</span> grids selected</strong></div>
+        <label>Clipping status<select name="clipped"><option value="1">Mark as clipped</option><option value="0">Mark as not clipped</option></select></label>
+        <label class="inventory-bulk-controls__notes">Notes (optional)<input name="notes" maxlength="2000" placeholder="Add a reason or context"></label>
+        <div class="inventory-bulk-controls__actions"><button class="button small" type="submit" data-bulk-action="clipping" disabled>Apply clipping</button><button class="button small danger" type="submit" formaction="{{ url_for('inventory.bulk_discard') }}" data-bulk-action="discard" disabled>Discard selected</button></div>
+      </div>
+      <div class="table-wrap inventory-grid-table-wrap"><table class="data-table inventory-grid-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="Select all grids on this page"></th><th>Grid ID</th><th>Sample</th><th>Researcher</th><th>Grid type</th><th>Frozen</th><th>Clipping</th><th>Status</th><th>Current storage</th></tr></thead><tbody>{% for grid in rows %}{% if loop.first or loop.previtem.batch_code != grid.batch_code %}<tr class="inventory-batch-heading"><th colspan="9" scope="rowgroup">Freezing batch {{ grid.batch_code }} <span>· {{ grid.batch_grid_count }} grids · {{ grid.frozen_at|facility_time }}</span></th></tr>{% endif %}<tr><td><input form="bulk-clipping-form" type="checkbox" name="selected_grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.grid_code }}"></td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.grid_type_name }}</td><td>{{ grid.frozen_at|facility_time }}</td><td>{{ 'Clipped' if grid.clipped else 'Not clipped' }}</td><td><span class="inventory-status inventory-status--{{ grid.current_status|lower|replace(' ','-') }}">{{ grid.current_status }}</span></td><td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} / {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
       {% else %}<p class="empty-message">No grids match these filters.</p>{% endif %}
     </form>
     {% if pages > 1 %}<nav class="inventory-pagination" aria-label="Inventory result pages">{% if page > 1 %}<a href="{{ previous_url }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a href="{{ next_url }}">Next</a>{% endif %}</nav>{% endif %}
   </section>
 </section></main>
 <script>
+const bulkForm = document.getElementById("bulk-clipping-form");
+const gridCheckboxes = [...document.querySelectorAll('input[name="selected_grid_codes"]')];
+const bulkButtons = bulkForm?.querySelectorAll("[data-bulk-action]") ?? [];
+function updateBulkSelection() {
+  const selectedCount = gridCheckboxes.filter((box) => box.checked).length;
+  const countLabel = document.querySelector("[data-selection-count]");
+  if (countLabel) countLabel.textContent = String(selectedCount);
+  bulkButtons.forEach((button) => { button.disabled = selectedCount === 0; });
+  const selectAll = document.querySelector("[data-select-all]");
+  if (selectAll) {
+    selectAll.checked = selectedCount > 0 && selectedCount === gridCheckboxes.length;
+    selectAll.indeterminate = selectedCount > 0 && selectedCount < gridCheckboxes.length;
+  }
+}
 document.querySelector("[data-select-all]")?.addEventListener("change", (event) => {
-  document.querySelectorAll('input[name="selected_grid_codes"]').forEach((box) => { box.checked = event.target.checked; });
+  gridCheckboxes.forEach((box) => { box.checked = event.target.checked; });
+  updateBulkSelection();
 });
-function confirmBulkClipping(form) {
+gridCheckboxes.forEach((box) => box.addEventListener("change", updateBulkSelection));
+updateBulkSelection();
+function confirmBulkAction(form, event) {
   const selected = [...form.querySelectorAll('input[name="selected_grid_codes"]:checked')].map((box) => box.value);
   if (!selected.length) { alert("Select at least one grid."); return false; }
   if (selected.length > 200) { alert("Select no more than 200 grids."); return false; }
+  if (event.submitter?.dataset.bulkAction === "discard") {
+    return confirm(`Permanently mark ${selected.length} selected grid(s) as discarded? Discarded grids cannot be booked or stored again.\n\n${selected.join(", ")}`);
+  }
   return confirm(`Set ${selected.length} selected grid(s) to ${form.clipped.value === "1" ? "Clipped" : "Not clipped"}?\n\n${selected.join(", ")}`);
 }
 </script>

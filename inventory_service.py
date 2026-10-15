@@ -245,27 +245,64 @@ def register_freezing(fields, actor_id):
 def register_completed_freezing(cursor, booking_id, booking, grid_count, fields, actor_id):
     """Create linked inventory records inside the caller's freezing-completion transaction."""
     count = _positive_int(grid_count, "Grid count", MAX_GRIDS_PER_BATCH)
-    sample_name = _text(fields.get("inventory_sample_name"), "Sample name", 180, True)
+    sample_names = fields.getlist("inventory_grid_sample_name")
+    if not sample_names:
+        legacy_sample_name = fields.get("inventory_sample_name")
+        sample_names = [legacy_sample_name] * count
+    if len(sample_names) != count:
+        raise InventoryError("Enter a sample name for every grid.")
+    sample_names = [
+        _text(name, f"Grid {index + 1} sample name", 180, True)
+        for index, name in enumerate(sample_names)
+    ]
+    sample_id_values = fields.getlist("inventory_sample_id")
+    if not sample_id_values:
+        sample_id_values = [""] * count
+    if len(sample_id_values) != count:
+        raise InventoryError("Choose an inventory sample or create one for every grid.")
     grid_type_ids = [
         _positive_int(value, "grid type")
         for value in fields.getlist("inventory_grid_type_id")
     ]
-    try:
-        blot_seconds = Decimal((fields.get("blot_seconds") or "").strip())
-        blot_force = Decimal((fields.get("blot_force") or "").strip())
-    except (InvalidOperation, AttributeError) as exc:
-        raise InventoryError("Enter valid blot seconds and blot force.") from exc
-    if (
-        not blot_seconds.is_finite() or not blot_force.is_finite()
-        or blot_seconds <= 0 or blot_force < 0
-        or blot_seconds > 999999 or blot_force > 999999
+    blot_seconds_values = fields.getlist("blot_seconds")
+    blot_force_values = fields.getlist("blot_force")
+    if not blot_seconds_values:
+        blot_seconds_values = [fields.get("blot_seconds", "")] * count
+    elif len(blot_seconds_values) == 1 and count > 1:
+        blot_seconds_values *= count
+    if not blot_force_values:
+        blot_force_values = [fields.get("blot_force", "")] * count
+    elif len(blot_force_values) == 1 and count > 1:
+        blot_force_values *= count
+    if len(blot_seconds_values) != count or len(blot_force_values) != count:
+        raise InventoryError("Enter blot seconds and force for every grid.")
+    blot_conditions = []
+    for index, (seconds_value, force_value) in enumerate(
+        zip(blot_seconds_values, blot_force_values)
     ):
-        raise InventoryError("Blot seconds must be positive and blot force cannot be negative.")
-    if (
-        blot_seconds != blot_seconds.quantize(Decimal("0.01"))
-        or blot_force != blot_force.quantize(Decimal("0.01"))
-    ):
-        raise InventoryError("Blot seconds and blot force can have at most two decimal places.")
+        try:
+            seconds = Decimal((seconds_value or "").strip())
+            force = Decimal((force_value or "").strip())
+        except (InvalidOperation, AttributeError) as exc:
+            raise InventoryError(
+                f"Enter valid blot seconds and force for grid {index + 1}."
+            ) from exc
+        if (
+            not seconds.is_finite() or not force.is_finite()
+            or seconds <= 0 or force < 0
+            or seconds > 999999 or force > 999999
+        ):
+            raise InventoryError(
+                f"Grid {index + 1}: blot seconds must be positive and force cannot be negative."
+            )
+        if (
+            seconds != seconds.quantize(Decimal("0.01"))
+            or force != force.quantize(Decimal("0.01"))
+        ):
+            raise InventoryError(
+                f"Grid {index + 1}: blot seconds and force can have at most two decimal places."
+            )
+        blot_conditions.append((seconds, force))
     containers = fields.getlist("inventory_falcon")
     boxes = fields.getlist("inventory_box")
     positions = fields.getlist("inventory_position")
@@ -293,16 +330,44 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
     created_at = now_utc()
     frozen_at = parse_datetime(str(booking["freezing_date"]), "freezing date")
     batch_grid_type_id = grid_type_ids[0]
-    sample_id = _create_sample(
-        cursor,
-        {
-            "sample_name": sample_name,
-            "researcher_name": booking["user_name"] or "Freezing booking",
-            "lab_name": booking["origin"] or "ACCEM",
-            "external_reference": f"FREEZING-{booking_id}",
-        },
-        actor_id,
-        created_at,
+    sample_ids = {}
+    for index, sample_name in enumerate(sample_names):
+        sample_key = sample_name.casefold()
+        selected_sample_id = sample_id_values[index].strip()
+        if selected_sample_id:
+            selected_id = _positive_int(selected_sample_id, "sample")
+            cursor.execute(
+                """SELECT s.sample_id FROM inventory_samples s
+                   LEFT JOIN users u ON u.id=s.linked_user_id
+                   WHERE s.sample_id=?
+                     AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
+                     AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                          OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))""",
+                [selected_id, sample_name, booking["user_name"], booking["user_name"]],
+            )
+            selected_sample = cursor.fetchone()
+            if not selected_sample:
+                raise InventoryError(
+                    f"Grid {index + 1}: the selected inventory sample does not match "
+                    "this freezing user and sample name."
+                )
+            sample_ids[f"{sample_key}:{index}"] = int(selected_sample["sample_id"])
+            continue
+        if sample_key not in sample_ids:
+            sample_ids[sample_key] = _create_sample(
+                cursor,
+                {
+                    "sample_name": sample_name,
+                    "researcher_name": booking["user_name"] or "Freezing booking",
+                    "lab_name": booking["origin"] or "ACCEM",
+                    "external_reference": f"FREEZING-{booking_id}",
+                },
+                actor_id,
+                created_at,
+            )
+    first_sample_key = sample_names[0].casefold()
+    batch_sample_id = sample_ids.get(
+        f"{first_sample_key}:0", sample_ids.get(first_sample_key)
     )
     batch_code = _next_code(cursor, "batch", "ACCEM-B-", 5)
     cursor.execute(
@@ -311,8 +376,8 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
             created_at, created_by)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            batch_code, sample_id, frozen_at, batch_grid_type_id,
-            f"Blot seconds: {blot_seconds}; blot force: {blot_force}",
+            batch_code, batch_sample_id, frozen_at, batch_grid_type_id,
+            "Per-grid blot seconds and force are recorded on each inventory grid.",
             f"Linked to freezing booking {booking_id}.", created_at, actor_id,
         ),
     )
@@ -321,12 +386,20 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
         """INSERT INTO freezing_booking_inventory
            (booking_id, batch_id, blot_seconds, blot_force)
            VALUES (?, ?, ?, ?)""",
-        (booking_id, batch_id, str(blot_seconds), str(blot_force)),
+        (
+            booking_id, batch_id,
+            str(blot_conditions[0][0]), str(blot_conditions[0][1]),
+        ),
     )
 
     grid_codes = []
     for index in range(count):
         grid_type_id = grid_type_ids[index]
+        sample_key = sample_names[index].casefold()
+        sample_id = sample_ids.get(
+            f"{sample_key}:{index}", sample_ids.get(sample_key)
+        )
+        blot_seconds, blot_force = blot_conditions[index]
         destination = {
             "falcon_container_id": containers[index],
             "grid_box_name": boxes[index],
@@ -338,10 +411,13 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
         grid_code = _next_code(cursor, "grid", "ACCEM-G-", 4)
         cursor.execute(
             """INSERT INTO inventory_grids
-               (grid_code, batch_id, sample_id, grid_type_id, current_status,
-                created_at, created_by)
-               VALUES (?, ?, ?, ?, 'Frozen', ?, ?)""",
-            (grid_code, batch_id, sample_id, grid_type_id, created_at, actor_id),
+               (grid_code, batch_id, sample_id, grid_type_id, blot_seconds, blot_force,
+                current_status, created_at, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, 'Frozen', ?, ?)""",
+            (
+                grid_code, batch_id, sample_id, grid_type_id,
+                str(blot_seconds), str(blot_force), created_at, actor_id,
+            ),
         )
         grid_id = cursor.lastrowid
         grid_codes.append(grid_code)
@@ -349,7 +425,9 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
                new_value=grid_code, notes=f"Freezing batch {batch_code}.",
                event_time=created_at)
         _event(cursor, grid_id, "freezing", actor_id,
-               new_value=frozen_at, event_time=created_at)
+               new_value=frozen_at,
+               notes=f"Blot seconds: {blot_seconds}; blot force: {blot_force}.",
+               event_time=created_at)
         _store_grid(
             cursor,
             {"grid_id": grid_id, "grid_code": grid_code, "current_status": "Frozen"},
@@ -405,6 +483,58 @@ def update_clipping(grid_code, clipped, notes, actor_id):
             notes=clipping_notes, event_time=occurred_at or now_utc(),
         )
         connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def discard_grids(grid_codes, notes, actor_id):
+    codes = list(dict.fromkeys(str(code).strip() for code in grid_codes if str(code).strip()))
+    if not codes or len(codes) > 200:
+        raise InventoryError("Select between 1 and 200 grids to discard.")
+    if any(not re.fullmatch(r"ACCEM-G-\d{4,}", code) for code in codes):
+        raise InventoryError("One or more selected grid IDs are invalid.")
+    discard_notes = _text(notes, "Discard notes", 2000)
+    event_time = now_utc()
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        for code in codes:
+            cursor.execute(
+                "SELECT grid_id, grid_code, current_status FROM inventory_grids "
+                "WHERE grid_code=?" + _lock_clause(),
+                [code],
+            )
+            grid = cursor.fetchone()
+            if not grid:
+                raise InventoryError(f"Grid {code} was not found.")
+            cursor.execute(
+                """SELECT 1 FROM screening_booking_grids l
+                   JOIN screening_bookings b ON b.id=l.screening_booking_id
+                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+                   UNION ALL
+                   SELECT 1 FROM data_collection_booking_grids l
+                   JOIN bookings b ON b.id=l.booking_id
+                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+                   LIMIT 1""",
+                [grid["grid_id"], grid["grid_id"]],
+            )
+            if cursor.fetchone():
+                raise InventoryError(f"{code} is reserved by an active booking.")
+            _discard_grid(
+                cursor,
+                grid,
+                actor_id,
+                discard_notes,
+                event_time,
+                operation_reference="INVENTORY-BULK-DISCARD",
+            )
+        connection.commit()
+        return codes
     except Exception:
         connection.rollback()
         raise
@@ -484,6 +614,19 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
     box = _text(destination.get("grid_box_name"), "Grid box", 100, True)
     position = _text(destination.get("grid_position"), "Grid position", 40, True)
     notes = _text(notes, "Storage notes", 2000)
+    cursor.execute(
+        """SELECT g.grid_code FROM storage_locations sl
+           JOIN inventory_grids g ON g.grid_id=sl.grid_id
+           WHERE sl.falcon_container_id=? AND sl.grid_box_name=?
+             AND sl.grid_position=? AND sl.removed_at IS NULL
+             AND sl.grid_id<>? LIMIT 1""",
+        [container, box, position, grid["grid_id"]],
+    )
+    occupied = cursor.fetchone()
+    if occupied:
+        raise InventoryError(
+            f"That position is already occupied by {occupied['grid_code']}."
+        )
     old_location = _current_location(cursor, grid["grid_id"], lock=True)
     old_label = _location_label(old_location)
     if old_location:
@@ -520,6 +663,420 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
            old_value=old_label, new_value=new_location, notes=notes,
            session_id=session_id, operation_reference=operation_reference,
            event_time=event_time)
+
+
+def _discard_grid(cursor, grid, actor_id, notes, event_time, operation_reference=None):
+    if grid["current_status"] == "Discarded":
+        raise InventoryError(f"{grid['grid_code']} is already discarded.")
+    if grid["current_status"] == "In Data Collection":
+        raise InventoryError(
+            f"Complete the active data-collection session before discarding {grid['grid_code']}."
+        )
+    cursor.execute(
+        """SELECT 1 FROM grid_session_links
+           WHERE grid_id=? AND outcome='in_progress' LIMIT 1""",
+        [grid["grid_id"]],
+    )
+    if cursor.fetchone():
+        raise InventoryError(
+            f"Complete the active data-collection session before discarding {grid['grid_code']}."
+        )
+    old_location = _current_location(cursor, grid["grid_id"], lock=True)
+    old_label = _location_label(old_location)
+    if old_location:
+        cursor.execute(
+            "UPDATE storage_locations SET removed_at=?, removed_by=? "
+            "WHERE storage_location_id=? AND removed_at IS NULL",
+            (event_time, actor_id, old_location["storage_location_id"]),
+        )
+        _event(
+            cursor, grid["grid_id"], "storage_removal", actor_id,
+            old_value=old_label, notes="Removed from storage when grid was discarded.",
+            operation_reference=operation_reference, event_time=event_time,
+        )
+    cursor.execute(
+        "UPDATE inventory_grids SET current_status='Discarded' WHERE grid_id=?",
+        [grid["grid_id"]],
+    )
+    _event(
+        cursor, grid["grid_id"], "grid_discarded", actor_id,
+        old_value=grid["current_status"], new_value="Discarded",
+        notes=notes or "Grid marked discarded.",
+        operation_reference=operation_reference, event_time=event_time,
+    )
+
+
+def link_grid_to_booking(fields, actor_id):
+    service_type = (fields.get("service_type") or "").strip()
+    link_targets = {
+        "screening": ("screening_booking_grids", "screening_booking_id", "screening_bookings", "Screening"),
+        "data_collection": ("data_collection_booking_grids", "booking_id", "bookings", "Data collection"),
+    }
+    if service_type not in link_targets:
+        raise InventoryError("Choose a valid booking type.")
+    link_table, booking_column, booking_table, service_label = link_targets[service_type]
+    booking_id = _positive_int(fields.get("booking_id"), "booking")
+    grid_code = _text(fields.get("grid_code"), "Grid ID", 24, True)
+    if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
+        raise InventoryError("Choose a valid inventory grid.")
+
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        cursor.execute(
+            f"SELECT id FROM {booking_table} WHERE id=? AND status IN ('waiting','ongoing')"
+            + _lock_clause(),
+            [booking_id],
+        )
+        if not cursor.fetchone():
+            raise InventoryError("Choose a waiting or ongoing booking.")
+        cursor.execute(
+            "SELECT grid_id, grid_code, current_status FROM inventory_grids "
+            "WHERE grid_code=?" + _lock_clause(),
+            [grid_code],
+        )
+        grid = cursor.fetchone()
+        if not grid:
+            raise InventoryError("Grid not found.")
+        if grid["current_status"] not in {"Frozen", "Clipped", "Stored"}:
+            raise InventoryError(
+                f"{grid_code} is not available to link; its status is {grid['current_status']}."
+            )
+        cursor.execute(
+            """SELECT 1 FROM grid_session_links
+               WHERE grid_id=? AND outcome='in_progress' LIMIT 1""",
+            [grid["grid_id"]],
+        )
+        if cursor.fetchone():
+            raise InventoryError(f"{grid_code} is already in data collection.")
+        cursor.execute(
+            """SELECT 1 FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               WHERE l.grid_id=? AND b.status IN ('waiting','ongoing')
+               UNION ALL
+               SELECT 1 FROM data_collection_booking_grids l
+               JOIN bookings b ON b.id=l.booking_id
+               WHERE l.grid_id=? AND b.status IN ('waiting','ongoing')
+               LIMIT 1""",
+            [grid["grid_id"], grid["grid_id"]],
+        )
+        if cursor.fetchone():
+            raise InventoryError(f"{grid_code} is already linked to another active booking.")
+
+        linked_at = now_utc()
+        cursor.execute(
+            f"INSERT INTO {link_table} ({booking_column}, grid_id, linked_at, linked_by) "
+            "VALUES (?, ?, ?, ?)",
+            [booking_id, grid["grid_id"], linked_at, actor_id],
+        )
+        _event(
+            cursor,
+            grid["grid_id"],
+            f"{service_type}_booking_linked",
+            actor_id,
+            new_value=f"{service_label} booking #{booking_id}",
+            notes="Linked from the grid inventory record.",
+            operation_reference=f"{service_type.upper()}-{booking_id}",
+            event_time=linked_at,
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def available_grid_bookings():
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """SELECT 'data_collection' AS service_type, id AS booking_id,
+                      user_name, sample_name, grids, status
+               FROM bookings WHERE status IN ('waiting','ongoing')
+               UNION ALL
+               SELECT 'screening' AS service_type, id AS booking_id,
+                      user_name, sample_name, grids, status
+               FROM screening_bookings WHERE status IN ('waiting','ongoing')
+               ORDER BY service_type, booking_id DESC"""
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def unlink_grid_from_booking(fields, actor_id):
+    service_type = (fields.get("service_type") or "").strip()
+    link_targets = {
+        "screening": ("screening_booking_grids", "screening_booking_id", "screening_bookings", "Screening"),
+        "data_collection": ("data_collection_booking_grids", "booking_id", "bookings", "Data collection"),
+    }
+    if service_type not in link_targets:
+        raise InventoryError("Choose a valid booking type.")
+    link_table, booking_column, booking_table, service_label = link_targets[service_type]
+    booking_id = _positive_int(fields.get("booking_id"), "booking")
+    grid_code = _text(fields.get("grid_code"), "Grid ID", 24, True)
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        cursor.execute(
+            f"SELECT id FROM {booking_table} WHERE id=? AND status IN ('waiting','ongoing')"
+            + _lock_clause(),
+            [booking_id],
+        )
+        if not cursor.fetchone():
+            raise InventoryError("Only a waiting or ongoing booking can be changed.")
+        cursor.execute(
+            "SELECT grid_id FROM inventory_grids WHERE grid_code=?" + _lock_clause(),
+            [grid_code],
+        )
+        grid = cursor.fetchone()
+        if not grid:
+            raise InventoryError("Grid not found.")
+        cursor.execute(
+            f"DELETE FROM {link_table} WHERE {booking_column}=? AND grid_id=?",
+            [booking_id, grid["grid_id"]],
+        )
+        if cursor.rowcount != 1:
+            raise InventoryError("This grid is not linked to that booking.")
+        _event(
+            cursor,
+            grid["grid_id"],
+            f"{service_type}_booking_unlinked",
+            actor_id,
+            old_value=f"{service_label} booking #{booking_id}",
+            notes="Booking link removed from the grid inventory record.",
+            operation_reference=f"{service_type.upper()}-{booking_id}",
+            event_time=now_utc(),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def link_selected_grids_to_booking(
+    cursor, service_type, booking_id, grid_codes, researcher_name, sample_name
+):
+    link_targets = {
+        "screening": ("screening_booking_grids", "screening_booking_id", "SCREENING"),
+        "data_collection": ("data_collection_booking_grids", "booking_id", "DATA-COLLECTION"),
+    }
+    if service_type not in link_targets:
+        raise InventoryError("Choose a valid booking type.")
+    link_table, booking_column, operation_prefix = link_targets[service_type]
+    codes = [str(code).strip() for code in grid_codes if str(code).strip()]
+    if len(codes) > 4:
+        raise InventoryError("Select no more than four inventory grids.")
+    if len(codes) != len(set(codes)):
+        raise InventoryError("A grid can only be selected once.")
+    for code in codes:
+        if not re.fullmatch(r"ACCEM-G-\d{4,}", code):
+            raise InventoryError("Choose a valid inventory grid.")
+        cursor.execute(
+            """SELECT g.grid_id, g.grid_code, g.current_status
+               FROM inventory_grids g
+               JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users u ON u.id=s.linked_user_id
+               WHERE g.grid_code=?
+                 AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
+                 AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))"""
+            + _lock_clause(),
+            [code, sample_name, researcher_name, researcher_name],
+        )
+        grid = cursor.fetchone()
+        if not grid:
+            raise InventoryError(
+                f"{code} does not match the entered researcher and sample."
+            )
+        if grid["current_status"] not in {"Frozen", "Clipped", "Stored"}:
+            raise InventoryError(
+                f"{code} is not available to book; its status is {grid['current_status']}."
+            )
+        cursor.execute(
+            """SELECT 1 FROM grid_session_links
+               WHERE grid_id=? AND outcome='in_progress' LIMIT 1""",
+            [grid["grid_id"]],
+        )
+        if cursor.fetchone():
+            raise InventoryError(f"{code} is already in data collection.")
+        cursor.execute(
+            """SELECT 1 FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               WHERE l.grid_id=? AND b.status IN ('waiting','ongoing')
+               UNION ALL
+               SELECT 1 FROM data_collection_booking_grids l
+               JOIN bookings b ON b.id=l.booking_id
+               WHERE l.grid_id=? AND b.status IN ('waiting','ongoing')
+               LIMIT 1""",
+            [grid["grid_id"], grid["grid_id"]],
+        )
+        if cursor.fetchone():
+            raise InventoryError(f"{code} is already linked to another active booking.")
+        linked_at = now_utc()
+        cursor.execute(
+            f"INSERT INTO {link_table} ({booking_column}, grid_id, linked_at, linked_by) "
+            "VALUES (?, ?, ?, NULL)",
+            [booking_id, grid["grid_id"], linked_at],
+        )
+        _event(
+            cursor,
+            grid["grid_id"],
+            f"{service_type}_booking_linked",
+            None,
+            new_value=f"{service_type.replace('_', ' ').title()} booking #{booking_id}",
+            notes="Grid selected from the public booking form.",
+            operation_reference=f"{operation_prefix}-{booking_id}",
+            event_time=linked_at,
+        )
+    return len(codes)
+
+
+def booking_grid_links_for_bookings(service_type, booking_ids):
+    link_targets = {
+        "screening": ("screening_booking_grids", "screening_booking_id"),
+        "data_collection": ("data_collection_booking_grids", "booking_id"),
+    }
+    if service_type not in link_targets:
+        raise ValueError("Unsupported booking type.")
+    ids = list(dict.fromkeys(int(booking_id) for booking_id in booking_ids))
+    if not ids:
+        return {}
+    link_table, booking_column = link_targets[service_type]
+    placeholders = ", ".join("?" for _ in ids)
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            f"""SELECT l.{booking_column} AS booking_id, g.grid_code, g.current_status,
+                       s.sample_name, sl.falcon_container_id, sl.grid_box_name,
+                       sl.grid_position
+                FROM {link_table} l
+                JOIN inventory_grids g ON g.grid_id=l.grid_id
+                JOIN inventory_samples s ON s.sample_id=g.sample_id
+                LEFT JOIN storage_locations sl
+                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
+                WHERE l.{booking_column} IN ({placeholders})
+                ORDER BY l.{booking_column}, g.grid_id""",
+            ids,
+        )
+        linked = {}
+        for row in cursor.fetchall():
+            linked.setdefault(row["booking_id"], []).append(dict(row))
+        return linked
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def grid_booking_links(grid_code):
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """SELECT 'Screening' AS service_name, 'screening' AS service_type,
+                      b.id AS booking_id, b.sample_name,
+                      b.status, l.linked_at
+               FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE g.grid_code=?
+               UNION ALL
+               SELECT 'Data collection' AS service_name, 'data_collection' AS service_type,
+                      b.id AS booking_id, b.sample_name,
+                      b.status, l.linked_at
+               FROM data_collection_booking_grids l
+               JOIN bookings b ON b.id=l.booking_id
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE g.grid_code=?
+               ORDER BY linked_at DESC""",
+            [grid_code, grid_code],
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_id):
+    link_targets = {
+        "screening": ("screening_booking_grids", "screening_booking_id", "SCREENING"),
+        "data_collection": ("data_collection_booking_grids", "booking_id", "DATA-COLLECTION"),
+    }
+    if service_type not in link_targets:
+        raise ValueError("Unsupported booking type.")
+    link_table, booking_column, operation_prefix = link_targets[service_type]
+    cursor.execute(
+        f"""SELECT g.grid_id, g.grid_code, g.current_status
+            FROM {link_table} l
+            JOIN inventory_grids g ON g.grid_id=l.grid_id
+            WHERE l.{booking_column}=? ORDER BY g.grid_id""" + _lock_clause(),
+        [booking_id],
+    )
+    grids = cursor.fetchall()
+    if not grids:
+        return 0
+
+    grid_codes = fields.getlist("inventory_grid_code")
+    containers = fields.getlist("inventory_falcon")
+    boxes = fields.getlist("inventory_box")
+    positions = fields.getlist("inventory_position")
+    outcomes = fields.getlist("inventory_outcome")
+    discard_notes = fields.getlist("inventory_discard_notes")
+    count = len(grids)
+    expected_codes = [grid["grid_code"] for grid in grids]
+    if (
+        grid_codes != expected_codes
+        or len(outcomes) != count
+        or len(discard_notes) != count
+        or len(containers) != count
+        or len(boxes) != count
+        or len(positions) != count
+    ):
+        raise InventoryError(
+            "The mapped grids changed. Reload the booking and choose Store or Discard for each linked grid."
+        )
+    event_time = now_utc()
+    for index, grid in enumerate(grids):
+        if outcomes[index] == "discard":
+            _discard_grid(
+                cursor,
+                grid,
+                actor_id,
+                discard_notes[index],
+                event_time,
+                operation_reference=f"{operation_prefix}-{booking_id}",
+            )
+            continue
+        if outcomes[index] != "store":
+            raise InventoryError(f"Choose Store or Discard for {grid['grid_code']}.")
+        if grid["current_status"] in {"Discarded", "In Data Collection"}:
+            raise InventoryError(
+                f"{grid['grid_code']} is currently {grid['current_status']} and cannot be returned through this booking."
+            )
+        _store_grid(
+            cursor,
+            grid,
+            {
+                "falcon_container_id": containers[index],
+                "grid_box_name": boxes[index],
+                "grid_position": positions[index],
+            },
+            actor_id,
+            "Storage confirmed when the linked booking was completed.",
+            event_time,
+            operation_reference=f"{operation_prefix}-{booking_id}",
+        )
+    return count
 
 
 def store_grid(grid_code, destination, actor_id, notes=None):
@@ -576,6 +1133,20 @@ def create_data_session(fields, actor_id):
             cursor.execute("SELECT id FROM bookings WHERE id=?", [booking_id])
             if not cursor.fetchone():
                 raise InventoryError("The selected booking does not exist.")
+            cursor.execute(
+                """SELECT g.grid_code
+                   FROM data_collection_booking_grids l
+                   JOIN bookings b ON b.id=l.booking_id
+                   JOIN inventory_grids g ON g.grid_id=l.grid_id
+                   WHERE l.booking_id=? AND b.status IN ('waiting', 'ongoing')
+                   ORDER BY g.grid_code""",
+                [booking_id],
+            )
+            booked_grid_codes = [row["grid_code"] for row in cursor.fetchall()]
+            if booked_grid_codes and set(grid_codes) != set(booked_grid_codes):
+                raise InventoryError(
+                    "This booking has selected inventory grids. Add exactly those grids to its data-collection session."
+                )
         session_code = _next_code(cursor, "session", "ACCEM-DC-", 5)
         cursor.execute(
             """INSERT INTO data_sessions
@@ -598,6 +1169,22 @@ def create_data_session(fields, actor_id):
                 raise InventoryError(f"Discarded grid {grid_code} cannot enter data collection.")
             if grid["current_status"] == "In Data Collection":
                 raise InventoryError(f"Grid {grid_code} is already in a data collection session.")
+            cursor.execute(
+                """SELECT 1
+                   FROM screening_booking_grids l
+                   JOIN screening_bookings b ON b.id=l.screening_booking_id
+                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+                   UNION ALL
+                   SELECT 1
+                   FROM data_collection_booking_grids l
+                   JOIN bookings b ON b.id=l.booking_id
+                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+                     AND (? IS NULL OR l.booking_id<>?)
+                   LIMIT 1""",
+                [grid["grid_id"], grid["grid_id"], booking_id, booking_id],
+            )
+            if cursor.fetchone():
+                raise InventoryError(f"{grid_code} is reserved by another active booking.")
 
             previous = _current_location(cursor, grid["grid_id"], lock=True)
             previous_label = _location_label(previous)
@@ -829,6 +1416,29 @@ def list_samples(query="", limit=100):
         connection.close()
 
 
+def matching_inventory_samples(researcher_name, sample_name, limit=30):
+    researcher_name = _text(researcher_name, "Researcher name", 150, True)
+    sample_name = _text(sample_name, "Sample name", 180, True)
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """SELECT s.sample_id, s.sample_code, s.sample_name,
+                      s.researcher_name, s.lab_name
+               FROM inventory_samples s
+               LEFT JOIN users u ON u.id=s.linked_user_id
+               WHERE LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
+                 AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))
+               ORDER BY s.created_at DESC, s.sample_id DESC LIMIT ?""",
+            [sample_name, researcher_name, researcher_name, limit],
+        )
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def _grid_filters(args):
     where = []
     values = []
@@ -841,9 +1451,9 @@ def _grid_filters(args):
             "(g.grid_code LIKE ? OR s.sample_code LIKE ? OR s.sample_name LIKE ? "
             "OR s.researcher_name LIKE ? OR gt.grid_type_name LIKE ? "
             "OR sl.falcon_container_id LIKE ? OR sl.grid_box_name LIKE ? "
-            "OR sl.grid_position LIKE ?)"
+            "OR sl.grid_position LIKE ? OR fb.batch_code LIKE ?)"
         )
-        values.extend([pattern] * 8)
+        values.extend([pattern] * 9)
     for key, expression in (
         ("status", "g.current_status=?"),
         ("clipped", "g.clipped=?"),
@@ -934,7 +1544,10 @@ def search_grids(args, page=1, page_size=25):
         cursor.execute(
             """SELECT g.grid_id, g.grid_code, g.current_status, g.clipped,
                       g.clipped_at, s.sample_code, s.sample_name, s.researcher_name,
-                      gt.grid_type_name, fb.frozen_at, sl.falcon_container_id,
+                      gt.grid_type_name, fb.batch_code, fb.frozen_at,
+                      (SELECT COUNT(*) FROM inventory_grids batch_grid
+                       WHERE batch_grid.batch_id=g.batch_id) AS batch_grid_count,
+                      sl.falcon_container_id,
                       sl.grid_box_name, sl.grid_position
                """ + joins + where_sql +
             " ORDER BY g.grid_id DESC LIMIT ? OFFSET ?",
@@ -986,6 +1599,126 @@ def dashboard_data():
         connection.close()
 
 
+def dashboard_storage():
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """SELECT g.grid_code, g.current_status, g.clipped,
+                      s.sample_code, s.sample_name, fb.batch_code, fb.frozen_at,
+                      sl.falcon_container_id, sl.grid_box_name, sl.grid_position
+               FROM inventory_grids g
+               JOIN inventory_samples s ON s.sample_id=g.sample_id
+               JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+               LEFT JOIN storage_locations sl
+                 ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
+               ORDER BY sl.falcon_container_id, sl.grid_box_name,
+                        sl.grid_position, g.grid_code"""
+        )
+        stored = []
+        not_stored = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            if item["current_status"] == "Discarded":
+                item["status_code"] = "D"
+                item["status_label"] = "Discarded"
+            elif item["clipped"] or item["current_status"] == "Clipped":
+                item["status_code"] = "C"
+                item["status_label"] = "Clipped"
+            elif item["current_status"] == "Stored":
+                item["status_code"] = "S"
+                item["status_label"] = "Stored"
+            elif item["current_status"] == "In Data Collection":
+                item["status_code"] = "U"
+                item["status_label"] = "In data collection"
+            else:
+                item["status_code"] = "NTI"
+                item["status_label"] = "Frozen · not lifted"
+
+            if item["falcon_container_id"] is None:
+                not_stored.append(item)
+            else:
+                stored.append(item)
+        return stored, not_stored
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def public_inventory_grids(researcher_name, sample_name, available_only=False):
+    researcher_name = _text(researcher_name, "Researcher name", 150, True)
+    sample_name = _text(sample_name, "Sample name", 180, True)
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        query = """SELECT g.grid_code, g.current_status, g.clipped, s.sample_code,
+                      s.sample_name, sl.falcon_container_id, sl.grid_box_name,
+                      sl.grid_position,
+                      CASE WHEN g.current_status IN ('Frozen', 'Clipped', 'Stored')
+                        AND NOT EXISTS (
+                          SELECT 1 FROM screening_booking_grids l
+                          JOIN screening_bookings b ON b.id=l.screening_booking_id
+                          WHERE l.grid_id=g.grid_id AND b.status IN ('waiting', 'ongoing')
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1 FROM data_collection_booking_grids l
+                          JOIN bookings b ON b.id=l.booking_id
+                          WHERE l.grid_id=g.grid_id AND b.status IN ('waiting', 'ongoing')
+                        )
+                        AND NOT EXISTS (
+                          SELECT 1 FROM grid_session_links l
+                          WHERE l.grid_id=g.grid_id AND l.outcome='in_progress'
+                        )
+                        THEN 1 ELSE 0 END AS available
+               FROM inventory_grids g
+               JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users u ON u.id=s.linked_user_id
+               LEFT JOIN storage_locations sl
+                 ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
+               WHERE (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))
+                 AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
+               """
+        if available_only:
+            query += """AND g.current_status IN ('Frozen', 'Clipped', 'Stored')
+                         AND NOT EXISTS (
+                           SELECT 1 FROM screening_booking_grids l
+                           JOIN screening_bookings b ON b.id=l.screening_booking_id
+                           WHERE l.grid_id=g.grid_id AND b.status IN ('waiting', 'ongoing')
+                         )
+                         AND NOT EXISTS (
+                           SELECT 1 FROM data_collection_booking_grids l
+                           JOIN bookings b ON b.id=l.booking_id
+                           WHERE l.grid_id=g.grid_id AND b.status IN ('waiting', 'ongoing')
+                         )
+                         AND NOT EXISTS (
+                           SELECT 1 FROM grid_session_links l
+                           WHERE l.grid_id=g.grid_id AND l.outcome='in_progress'
+                         )
+                      """
+        query += " ORDER BY s.sample_name, g.grid_code"
+        cursor.execute(query, [researcher_name, researcher_name, sample_name])
+        rows = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            if item["current_status"] == "Discarded":
+                item["status_code"] = "D"
+            elif item["clipped"] or item["current_status"] == "Clipped":
+                item["status_code"] = "C"
+            elif item["current_status"] == "Stored":
+                item["status_code"] = "S"
+            elif item["current_status"] == "In Data Collection":
+                item["status_code"] = "U"
+            else:
+                item["status_code"] = "NTI"
+            if not available_only or item["available"]:
+                rows.append(item)
+        return rows
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def grid_details(grid_code):
     connection = get_db()
     cursor = connection.cursor()
@@ -995,7 +1728,9 @@ def grid_details(grid_code):
                       s.description AS sample_description, s.external_reference,
                       linked_user.username AS linked_account_name,
                       fb.batch_code, fb.frozen_at, fb.notes AS preparation_notes,
-                      fb.comments AS batch_comments, fbi.blot_seconds, fbi.blot_force,
+                      fb.comments AS batch_comments,
+                      COALESCE(g.blot_seconds, fbi.blot_seconds) AS recorded_blot_seconds,
+                      COALESCE(g.blot_force, fbi.blot_force) AS recorded_blot_force,
                       gt.grid_type_name,
                       creator.username AS created_by_name, clipper.username AS clipped_by_name
                FROM inventory_grids g

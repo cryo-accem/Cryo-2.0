@@ -9,7 +9,12 @@ from database import get_db, _is_sqlite_url
 
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent
-MIGRATIONS = ("001_grid_inventory", "002_freezing_inventory_link")
+MIGRATIONS = (
+    "001_grid_inventory",
+    "002_freezing_inventory_link",
+    "003_per_grid_blot_conditions",
+    "004_booking_grid_links",
+)
 
 
 def apply_migration():
@@ -20,6 +25,13 @@ def apply_migration():
         if dialect == "sqlite":
             cursor.execute("PRAGMA foreign_keys=ON")
         for version in MIGRATIONS:
+            if version != MIGRATIONS[0]:
+                cursor.execute(
+                    "SELECT version FROM inventory_schema_migrations WHERE version=?",
+                    [version],
+                )
+                if cursor.fetchone():
+                    continue
             migration_path = MIGRATIONS_DIR / f"{version}.{dialect}.sql"
             statements = [
                 statement.strip()

@@ -1,4 +1,5 @@
 import datetime
+import hashlib
 import csv
 import io
 import base64
@@ -14,6 +15,7 @@ import urllib.request
 import uuid
 import zipfile
 import pymysql
+from hmac import compare_digest
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
@@ -29,9 +31,7 @@ from revenue import (
     calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
     parse_number_of_grids,
 )
-from blueprints.freezing import (
-    GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing,
-)
+from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing
 from blueprints.imaging import register_imaging
 from blueprints.screening import register_screening
 from charge_sheet import generate_charge_sheet
@@ -41,7 +41,10 @@ from historical_revenue import (
     HISTORICAL_REVENUE,
     HISTORICAL_CATEGORY_TOTALS, HISTORICAL_CATEGORY_BY_MONTH,
 )
-from inventory_service import InventoryError, list_grid_types, register_completed_freezing
+from inventory_service import (
+    InventoryError, booking_grid_links_for_bookings, complete_booking_grid_moves,
+    list_grid_types, register_completed_freezing, _begin, _lock_clause,
+)
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -56,6 +59,8 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.add_slot",
     "admin.known_slot_user",
     "admin.assistant_query",
+    "admin.assistant_slot_confirm",
+    "admin.assistant_slot_cancel",
     "admin.assistant_transcribe",
     "admin.assistant_speak",
     "admin.download_pi_users_csv",
@@ -67,8 +72,8 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.complete_dc",
     "admin.delete_dc",
     "admin.freezing_admin",
-    "admin.delete_freezing",
     "admin.complete_freezing",
+    "admin.delete_freezing",
     "admin.screening_admin",
     "admin.load_sc",
     "admin.complete_sc",
@@ -94,15 +99,19 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.delete_publication",
     "admin.save_instrument",
     "admin.delete_instrument",
+    "admin.save_facility_notice",
+    "admin.delete_facility_notice",
     "inventory.dashboard",
     "inventory.grids",
     "inventory.new_grid",
     "inventory.grid_types",
     "inventory.samples_json",
+    "inventory.matching_samples_json",
     "inventory.grid_detail",
     "inventory.grid_clipping",
     "inventory.grid_type",
     "inventory.bulk_clipping",
+    "inventory.bulk_discard",
     "inventory.grid_storage",
     "inventory.storage",
     "inventory.sessions",
@@ -119,6 +128,10 @@ _ALLOWED_ADMIN_ENDPOINTS = {
 @admin_bp.before_app_request
 def check_admin_session():
     if "admin_logged_in" in session and request.endpoint:
+        expects_json = (
+            request.is_json
+            or request.accept_mimetypes.best == "application/json"
+        )
         if session.get("admin_user_id") is not None:
             conn = get_db()
             cur = conn.cursor()
@@ -131,6 +144,8 @@ def check_admin_session():
             conn.close()
             if not user:
                 session.clear()
+                if expects_json:
+                    return jsonify({"error": "Your admin session has expired. Please sign in again."}), 401
                 return redirect(url_for("admin.login"))
             if user["must_change_password"]:
                 session["must_change_password"] = True
@@ -139,6 +154,8 @@ def check_admin_session():
             "admin.logout",
             "static",
         }:
+            if expects_json:
+                return jsonify({"error": "Change your admin password before continuing."}), 403
             return redirect(url_for("admin.change_password"))
         if request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS:
             session.pop("admin_logged_in", None)
@@ -258,7 +275,6 @@ def billing_preview():
 def panel():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
-    show_mira_welcome = session.pop("mira_welcome", False)
     slot_form_state = session.pop("_admin_slot_form_state", {})
     conn = get_db()
     cur = conn.cursor()
@@ -297,7 +313,7 @@ def panel():
         waiting_start = waiting_end
     return render_template(
         "admin_panel.html",
-        show_mira_welcome=show_mira_welcome,
+        show_mira_welcome=session.pop("mira_welcome", False),
         pi_chart=pi_chart,
         pi_total=pi_total,
         waiting_chart=waiting_chart,
@@ -397,12 +413,20 @@ def add_slot(slot_type):
     sample_name = request.form.get("sample_name", "").strip()
     origin_labels = {"Internal", "External", "Industry"}
     field_limits = {
-        "user_name": 100, "pi_name": 100, "email": 150,
-        "origin": 100, "esm": 150, "sample_name": 150,
+        "user_name": 100,
+        "pi_name": 100,
+        "email": 150,
+        "origin": 100,
+        "esm": 150,
+        "sample_name": 150,
     }
     fields = {
-        "user_name": user_name, "pi_name": pi_name, "email": email,
-        "origin": origin, "esm": esm, "sample_name": sample_name,
+        "user_name": user_name,
+        "pi_name": pi_name,
+        "email": email,
+        "origin": origin,
+        "esm": esm,
+        "sample_name": sample_name,
     }
     for field_name, value in fields.items():
         if field_name != "esm" and not value:
@@ -426,8 +450,7 @@ def add_slot(slot_type):
                 raise ValueError("Choose at least 1 grid.")
             success, message = register_freezing(
                 user_name, pi_name, email, origin, sample_name, grids,
-                request.form.get("freezing_date", "").strip(),
-                allow_over_capacity=True,
+                request.form.get("freezing_date", "").strip(), allow_over_capacity=True,
             )
         elif slot_type == "screening":
             try:
@@ -454,8 +477,421 @@ def add_slot(slot_type):
         return _slot_form_redirect(slot_type, str(exc))
 
     return _slot_form_redirect(
-        slot_type, message, "success" if success else "registration", saved=success,
+        slot_type,
+        message,
+        "success" if success else "registration",
+        saved=success,
     )
+
+
+_MIRA_SLOT_TABLES = {
+    "datacollecting": ("datacollecting", "bookings", "admin.datacollecting"),
+    "data collection": ("datacollecting", "bookings", "admin.datacollecting"),
+    "data collecting": ("datacollecting", "bookings", "admin.datacollecting"),
+    "imaging": ("datacollecting", "bookings", "admin.datacollecting"),
+    "screening": ("screening", "screening_bookings", "admin.screening_admin"),
+    "freezing": ("freezing", "freezing_bookings", "admin.freezing_admin"),
+}
+_MIRA_SLOT_FIELDS = {
+    "name": "user_name",
+    "user": "user_name",
+    "user name": "user_name",
+    "applicant": "user_name",
+    "pi": "pi_name",
+    "pi name": "pi_name",
+    "principal investigator": "pi_name",
+    "email": "email",
+    "origin": "origin",
+    "category": "origin",
+    "institute": "esm",
+    "sample": "sample_name",
+    "sample name": "sample_name",
+    "grids": "grids",
+    "days": "days",
+    "date": "freezing_date",
+    "freezing date": "freezing_date",
+}
+_MIRA_MUTABLE_COLUMNS = {
+    "bookings": {
+        "user_name", "pi_name", "email", "origin", "esm", "sample_name", "grids", "days",
+    },
+    "screening_bookings": {
+        "user_name", "pi_name", "email", "origin", "esm", "sample_name", "grids",
+    },
+    "freezing_bookings": {
+        "user_name", "pi_name", "email", "origin", "sample_name", "grids", "freezing_date",
+    },
+}
+
+
+def _mira_slot_type(value):
+    normalized = re.sub(r"\s+", " ", value.casefold().replace("-", " ")).strip()
+    for name in sorted(_MIRA_SLOT_TABLES, key=len, reverse=True):
+        if normalized == name:
+            return _MIRA_SLOT_TABLES[name]
+    return None
+
+
+def _mira_command_fields(text):
+    labels = (
+        "principal investigator", "requested by", "freezing date", "sample name",
+        "user name", "applicant", "institute", "email", "origin", "category",
+        "grids", "days", "date", "sample", "user", "name", "pi", "for", "on",
+    )
+    label_pattern = "|".join(re.escape(label) for label in labels)
+    result = {}
+    for label in ("grids", "days"):
+        number = re.search(
+            rf"\b(one|two|three|four|five|six|seven|eight|\d+)\s+{label}\b",
+            text,
+            re.IGNORECASE,
+        )
+        if number:
+            result[label] = number.group(1)
+    for label in labels:
+        match = re.search(
+            rf"\b{re.escape(label)}\b\s*(?:is\s+|:\s*|=\s*)?"
+            rf"(.+?)(?=\s*[,;]\s*(?:\b(?:{label_pattern})\b)"
+            rf"\s*(?:is\s+|:\s*|=\s*)?|(?:\band\b\s+)?\b(?:{label_pattern})\b"
+            rf"\s*(?:is\s+|:\s*|=\s*)?(?!\s*(?:[,;]|$))|[,;]|$)",
+            text,
+            re.IGNORECASE,
+        )
+        if match:
+            key = {
+                "principal investigator": "pi_name",
+                "requested by": "user_name",
+                "pi": "pi_name",
+                "user": "user_name",
+                "user name": "user_name",
+                "applicant": "user_name",
+                "name": "user_name",
+                "for": "user_name",
+                "category": "origin",
+                "institute": "esm",
+                "sample": "sample_name",
+                "sample name": "sample_name",
+                "freezing date": "freezing_date",
+                "date": "freezing_date",
+                "on": "freezing_date",
+            }.get(label, label.replace(" ", "_"))
+            result.setdefault(key, match.group(1).strip(" .,:;"))
+    return result
+
+
+def _mira_number(value):
+    words = {
+        "one": 1, "a": 1, "an": 1, "two": 2, "three": 3, "four": 4,
+        "five": 5, "six": 6, "seven": 7, "eight": 8,
+    }
+    return words.get(str(value).strip().casefold(), value)
+
+
+def _mira_freezing_date(value):
+    normalized = value.strip().casefold()
+    today = datetime.date.today()
+    if normalized == "today":
+        return today
+    if normalized == "tomorrow":
+        return today + datetime.timedelta(days=1)
+    if normalized == "day after tomorrow":
+        return today + datetime.timedelta(days=2)
+    weekdays = {
+        name.casefold(): index
+        for index, name in enumerate(
+            ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        )
+    }
+    weekday = re.fullmatch(r"(?:next\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)", normalized)
+    if weekday:
+        days_ahead = (weekdays[weekday.group(1)] - today.weekday()) % 7 or 7
+        return today + datetime.timedelta(days=days_ahead)
+    return datetime.date.fromisoformat(value.strip())
+
+
+def _normalize_mira_slot_fields(slot_type, fields):
+    required = {"user_name", "pi_name", "email", "origin", "sample_name", "grids"}
+    if slot_type == "freezing":
+        required.add("freezing_date")
+    elif slot_type == "datacollecting":
+        required.add("days")
+    missing = sorted(name.replace("_", " ") for name in required if not fields.get(name))
+    if missing:
+        raise ValueError("Please include " + ", ".join(missing) + " in the command.")
+
+    origin_text = fields["origin"].casefold().strip()
+    origins = {
+        "internal": "Internal", "iisc": "Internal", "iisc users": "Internal",
+        "external": "External", "academic": "External",
+        "external academic": "External", "external academic users": "External",
+        "industry": "Industry", "industrial": "Industry", "external industry": "Industry",
+    }
+    origin = origins.get(origin_text)
+    if not origin:
+        raise ValueError("Origin must be Internal, External, or Industry.")
+    user_name = fields["user_name"].strip()
+    pi_name = fields["pi_name"].strip()
+    email = fields["email"].strip()
+    sample_name = fields["sample_name"].strip()
+    esm = fields.get("esm", "").strip()
+    if any(len(value) > limit for value, limit in (
+        (user_name, 100), (pi_name, 100), (email, 150), (sample_name, 150), (esm, 150),
+    )):
+        raise ValueError("A name, email, sample, or institute is too long.")
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise ValueError("Please include a valid email address.")
+    try:
+        grids = int(_mira_number(fields["grids"]))
+        if grids < 1:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError("Grid count must be a positive whole number.") from None
+
+    normalized = {
+        "user_name": user_name, "pi_name": pi_name, "email": email,
+        "origin": origin, "esm": esm, "sample_name": sample_name, "grids": grids,
+    }
+    if slot_type == "freezing":
+        try:
+            freezing_date = _mira_freezing_date(fields["freezing_date"])
+        except ValueError:
+            raise ValueError("Say a freezing date such as “tomorrow”, “Friday”, or “2026-10-14”.") from None
+        if freezing_date < datetime.date.today() or freezing_date.weekday() >= 5:
+            raise ValueError("Choose a future weekday for freezing.")
+        normalized["freezing_date"] = freezing_date.isoformat()
+    elif slot_type == "datacollecting":
+        try:
+            days = int(_mira_number(fields["days"]))
+            if days < 1:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise ValueError("Data-collection days must be a positive whole number.") from None
+        normalized["days"] = days
+    else:
+        normalized["days"] = 1
+
+    table = _MIRA_SLOT_TABLES[slot_type][1]
+    conn = get_db()
+    cur = conn.cursor()
+    active_statuses = "'waiting','ongoing','active'" if table == "freezing_bookings" else "'waiting','ongoing'"
+    cur.execute(
+        f"SELECT id FROM {table} WHERE email=? AND status IN ({active_statuses})",
+        [email],
+    )
+    duplicate = cur.fetchone()
+    cur.close()
+    conn.close()
+    if duplicate:
+        raise ValueError("That email already has an active slot of this type.")
+    return normalized
+
+
+def _parse_mira_slot_command(question):
+    text = question.strip()
+    text = re.sub(r"^(?:mira[, ]+|please\s+)+", "", text, flags=re.IGNORECASE)
+    operation = re.search(
+        r"\b(book|reserve|schedule|create|add|register|delete|remove|cancel|"
+        r"change|edit|update|set)\b",
+        text,
+        re.I,
+    )
+    if operation:
+        verb = operation.group(1).casefold()
+    elif re.search(r"\b(?:need|want)\b.*\b(?:slot|booking)\b", text, re.I):
+        verb = "book"
+    else:
+        return None
+    type_names = "data[- ]collection|data collecting|imaging|screening|freezing"
+    if verb in {"book", "reserve", "schedule", "create", "add", "register"}:
+        type_match = re.search(rf"\b({type_names})(?:\s+slot|\s+booking)?\b", text, re.I)
+        slot_type = _mira_slot_type(type_match.group(1)) if type_match else None
+        if not slot_type:
+            raise ValueError("Say data collection, screening, or freezing slot.")
+        fields = _normalize_mira_slot_fields(slot_type[0], _mira_command_fields(text))
+        return {
+            "action": "create", "slot_type": slot_type[0], "fields": fields,
+        }
+
+    target = re.search(
+        rf"\b({type_names})(?:\s+slot)?(?:\s+(?:id|number))?\s*(\d+)\b",
+        text,
+        re.I,
+    )
+    if not target:
+        raise ValueError("Tell me the slot type and ID, for example “delete freezing slot 12”.")
+    slot_type = _mira_slot_type(target.group(1))
+    slot_id = int(target.group(2))
+    if verb in {"delete", "remove", "cancel"}:
+        return {"action": "delete", "slot_type": slot_type[0], "slot_id": slot_id}
+
+    tail = text[target.end():].strip(" ,;:.'’")
+    tail = re.sub(r"^(?:please\s+)?(?:change|edit|update|set|make)\s+", "", tail, flags=re.I)
+    field_match = re.match(r"^(?:the\s+)?(.+?)\s+(?:to|as|is)\s+(.+)$", tail, re.I)
+    if field_match:
+        field_label = re.sub(r"^(?:the\s+)", "", field_match.group(1).strip().casefold())
+        new_value = field_match.group(2).strip(" .,:;")
+    else:
+        prefix = text[:target.start()]
+        aliases = sorted(_MIRA_SLOT_FIELDS, key=len, reverse=True)
+        field_pattern = "|".join(re.escape(alias) for alias in aliases)
+        leading_field = re.search(
+            rf"\b(?:change|edit|update|set|make)\s+(?:the\s+)?({field_pattern})"
+            rf"(?:\s+(?:for|on|in|of))?\s*$",
+            prefix,
+            re.I,
+        )
+        trailing_value = re.match(r"^(?:to|as|is)\s+(.+)$", tail, re.I)
+        if leading_field and trailing_value:
+            field_label = leading_field.group(1).casefold()
+            new_value = trailing_value.group(1).strip(" .,:;")
+        else:
+            raise ValueError(
+                "Tell me which detail to change and its new value, for example “set freezing 12 grids to 3”."
+            )
+    field_name = _MIRA_SLOT_FIELDS.get(field_label)
+    if not field_name:
+        field_alias = next(
+            (
+                alias for alias in sorted(_MIRA_SLOT_FIELDS, key=len, reverse=True)
+                if re.fullmatch(rf"(?:the\s+)?{re.escape(alias)}", field_label)
+            ),
+            None,
+        )
+        field_name = _MIRA_SLOT_FIELDS.get(field_alias) if field_alias else None
+    if not field_name or field_name not in _MIRA_MUTABLE_COLUMNS[slot_type[1]]:
+        raise ValueError("I can change the name, PI, email, origin, institute, sample, grids, days, or date. Which one should I update?")
+    if not new_value:
+        raise ValueError("Please say the new value after “to”.")
+    return {
+        "action": "update", "slot_type": slot_type[0], "slot_id": slot_id,
+        "field": field_name, "value": new_value,
+    }
+
+
+def _slot_action_fingerprint(record):
+    return {
+        key: str(record.get(key) or "")
+        for key in ("id", "user_name", "pi_name", "email", "origin", "sample_name", "grids", "days", "freezing_date", "status")
+    }
+
+
+def _prepare_mira_slot_preview(draft):
+    slot_type, table, endpoint = _MIRA_SLOT_TABLES[draft["slot_type"]]
+    preview = {
+        "action": draft["action"],
+        "slot_type": slot_type,
+        "title": "",
+        "fields": [],
+        "token": uuid.uuid4().hex,
+    }
+    if draft["action"] == "create":
+        values = _normalize_mira_slot_fields(slot_type, draft["fields"])
+        draft["fields"] = values
+        preview["title"] = f"Create {slot_type.replace('datacollecting', 'data collection')} slot"
+        preview["fields"] = [
+            {"label": key.replace("_", " ").title(), "value": str(value)}
+            for key, value in values.items() if value not in ("", None)
+        ]
+        preview["navigation"] = url_for(endpoint)
+    else:
+        conn = get_db()
+        cur = conn.cursor()
+        cur.execute(f"SELECT * FROM {table} WHERE id=?", [draft["slot_id"]])
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        if not row:
+            raise ValueError("I could not find that slot. Check its type and ID.")
+        record = dict(row)
+        allowed_statuses = {"waiting", "ongoing"} if table != "freezing_bookings" else {"active"}
+        if str(record.get("status", "")).casefold() not in allowed_statuses:
+            raise ValueError("Mira can only change or delete waiting or active, uncompleted slots.")
+        draft["snapshot"] = _slot_action_fingerprint(record)
+        preview["fields"] = [
+            {"label": "Slot ID", "value": str(draft["slot_id"])},
+            {"label": "User", "value": str(record.get("user_name") or "")},
+            {"label": "PI", "value": str(record.get("pi_name") or "")},
+            {"label": "Sample", "value": str(record.get("sample_name") or "")},
+            {"label": "Status", "value": str(record.get("status") or "")},
+        ]
+        if draft["action"] == "delete":
+            preview["title"] = f"Delete {slot_type} slot"
+            preview["navigation"] = url_for(endpoint)
+        else:
+            field = draft["field"]
+            new_value = draft["value"]
+            max_length = 100 if field in {"user_name", "pi_name"} else 150
+            if field in {"user_name", "pi_name", "sample_name", "esm"} and len(new_value) > max_length:
+                raise ValueError("That value is too long.")
+            if field == "email" and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new_value):
+                raise ValueError("Please provide a valid email address.")
+            if field == "origin":
+                origin = {
+                    "internal": "Internal", "iisc": "Internal",
+                    "external": "External", "academic": "External",
+                    "industry": "Industry", "industrial": "Industry",
+                }.get(new_value.casefold())
+                if not origin:
+                    raise ValueError("Origin must be Internal, External, or Industry.")
+                new_value = origin
+            if field in {"grids", "days"}:
+                try:
+                    new_value = int(_mira_number(new_value))
+                    max_value = GRID_LIMIT_PER_DAY if table == "freezing_bookings" and field == "grids" else 4
+                    if new_value < 1 or new_value > max_value:
+                        raise ValueError
+                except ValueError:
+                    raise ValueError(f"{field.title()} must be a whole number from 1 to {max_value}.") from None
+            if field == "freezing_date":
+                try:
+                    selected_date = _mira_freezing_date(new_value)
+                except ValueError:
+                    raise ValueError("Say a date such as “2026-10-14”, “tomorrow”, or “Friday”.") from None
+                new_value = selected_date.isoformat()
+                if selected_date < datetime.date.today() or selected_date.weekday() >= 5:
+                    raise ValueError("Choose a future weekday for freezing.")
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COALESCE(SUM(grids), 0) AS total FROM freezing_bookings "
+                    "WHERE freezing_date=? AND status='active' AND id<>?",
+                    [new_value, draft["slot_id"]],
+                )
+                used = int(cur.fetchone()["total"] or 0)
+                cur.close()
+                conn.close()
+                if used + int(record.get("grids") or 0) > GRID_LIMIT_PER_DAY:
+                    raise ValueError("That date does not have enough remaining grid capacity.")
+            if field == "grids" and table == "freezing_bookings":
+                conn = get_db()
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT COALESCE(SUM(grids), 0) AS total FROM freezing_bookings "
+                    "WHERE freezing_date=? AND status='active' AND id<>?",
+                    [record["freezing_date"], draft["slot_id"]],
+                )
+                used = int(cur.fetchone()["total"] or 0)
+                cur.close()
+                conn.close()
+                if used + new_value > GRID_LIMIT_PER_DAY:
+                    raise ValueError("That change exceeds the daily freezing grid limit.")
+            draft["value"] = str(new_value)
+            draft["old_value"] = str(record.get(field) or "")
+            preview["title"] = f"Change {slot_type} slot {draft['slot_id']}"
+            preview["fields"].extend([
+                {"label": field.replace("_", " ").title(), "value": draft["old_value"] or "(empty)", "old": True},
+                {"label": "New " + field.replace("_", " "), "value": str(new_value)},
+            ])
+            preview["navigation"] = url_for(endpoint)
+
+    canonical = json.dumps(draft, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    session["_mira_slot_action_hash"] = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    session["_mira_slot_action_token"] = preview["token"]
+    session["_mira_slot_action_expires"] = (
+        datetime.datetime.now().timestamp() + 180
+    )
+    preview["draft"] = draft
+    return preview
 
 
 @admin_bp.route("/assistant/query", methods=["POST"])
@@ -502,17 +938,268 @@ def assistant_query():
             "navigation": url_for(schedule_services[0]),
         })
     if schedule_request:
-        answer = "Which schedule would you like to open: freezing, screening, or data collection?"
-    elif re.search(r"\b(revenue|billing|billed|income|received|outstanding|csic|payment|collected)\b", normalized_question):
+        return jsonify({
+            "answer": "Which schedule would you like to open: freezing, screening, or data collection?",
+            "navigation": None,
+        })
+
+    try:
+        draft = _parse_mira_slot_command(question)
+    except ValueError as exc:
+        return jsonify({"answer": str(exc)}), 200
+    if draft:
+        try:
+            preview = _prepare_mira_slot_preview(draft)
+        except ValueError as exc:
+            return jsonify({"answer": str(exc)}), 200
+        return jsonify({
+            "answer": "Here is the exact slot change I understood. Review it before confirming.",
+            "action_preview": preview,
+        })
+
+    if re.search(r"\b(revenue|billing|billed|income|received|outstanding|csic|payment|collected)\b", normalized_question):
         answer = _admin_assistant_revenue(normalized_question)
+        navigation = url_for("admin.panel", _anchor="revenue-dashboard")
     elif re.search(r"\b(freez\w*|availability|available|capacity|slots?)\b", normalized_question):
         answer = _admin_assistant_freezing(normalized_question)
+        answer += (
+            " I’m taking you to Freezing: active slots are confirmed bookings awaiting "
+            "completion; enter the actual grids and billing details there, then choose "
+            "Complete. Completed slots are listed below for reference."
+        )
+        navigation = url_for("admin.freezing_admin", _anchor="active-freezing-slots")
     else:
         answer = (
-            "I can answer questions about revenue and billing, or freezing availability. "
-            "Try “Summarize revenue this year” or “What freezing is available today?”"
+            "I can help with revenue and billing, freezing availability, or slot changes. "
+            "Ask naturally, such as “How much freezing space is left?”, "
+            "“Book freezing for Jane; email jane@example.org; PI Dr Rao; "
+            "sample Sample A; 2 grids; origin IISc; tomorrow”, or "
+            "“Cancel freezing slot 12”. I’ll show a preview before changing anything."
         )
-    return jsonify({"answer": answer})
+        navigation = None
+    return jsonify({"answer": answer, "navigation": navigation})
+
+
+@admin_bp.route("/assistant/slot/confirm", methods=["POST"])
+def assistant_slot_confirm():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to manage slots with Mira."}), 401
+    payload = request.get_json()
+    if not isinstance(payload, dict) or not isinstance(payload.get("draft"), dict):
+        return jsonify({"error": "The slot preview is missing. Ask Mira to prepare it again."}), 400
+
+    draft = payload["draft"]
+    token = payload.get("token")
+    canonical = json.dumps(draft, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    draft_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    expires = session.get("_mira_slot_action_expires", 0)
+    if not isinstance(token, str) or not compare_digest(
+        token, str(session.get("_mira_slot_action_token", ""))
+    ):
+        return jsonify({"error": "This preview is no longer active. Ask Mira to prepare it again."}), 409
+    if not isinstance(expires, (int, float)) or datetime.datetime.now().timestamp() > expires:
+        session.pop("_mira_slot_action_hash", None)
+        session.pop("_mira_slot_action_token", None)
+        session.pop("_mira_slot_action_expires", None)
+        return jsonify({"error": "This preview expired. Ask Mira to prepare it again."}), 409
+    if not compare_digest(draft_hash, str(session.get("_mira_slot_action_hash", ""))):
+        return jsonify({"error": "The preview details changed. Ask Mira to prepare it again."}), 409
+
+    session.pop("_mira_slot_action_hash", None)
+    session.pop("_mira_slot_action_token", None)
+    session.pop("_mira_slot_action_expires", None)
+    try:
+        result = _apply_mira_slot_action(draft)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+    endpoint = _MIRA_SLOT_TABLES[draft["slot_type"]][2]
+    anchor = "active-freezing-slots" if draft["slot_type"] == "freezing" else None
+    return jsonify({
+        "answer": result,
+        "navigation": url_for(endpoint, _anchor=anchor),
+    })
+
+
+@admin_bp.route("/assistant/slot/cancel", methods=["POST"])
+def assistant_slot_cancel():
+    if not session.get("admin_logged_in"):
+        return jsonify({"error": "Please sign in to manage slots with Mira."}), 401
+    payload = request.get_json()
+    token = payload.get("token") if isinstance(payload, dict) else None
+    if isinstance(token, str) and compare_digest(
+        token, str(session.get("_mira_slot_action_token", ""))
+    ):
+        session.pop("_mira_slot_action_hash", None)
+        session.pop("_mira_slot_action_token", None)
+        session.pop("_mira_slot_action_expires", None)
+    return jsonify({"cancelled": True})
+
+
+def _apply_mira_slot_action(draft):
+    slot_type = draft.get("slot_type")
+    mapping = _MIRA_SLOT_TABLES.get(slot_type)
+    if not mapping:
+        raise ValueError("That slot type is not supported.")
+    _, table, _ = mapping
+    action = draft.get("action")
+
+    if action == "create":
+        fields = _normalize_mira_slot_fields(slot_type, draft.get("fields", {}))
+        if slot_type == "freezing":
+            success, message = register_freezing(
+                fields["user_name"], fields["pi_name"], fields["email"], fields["origin"],
+                fields["sample_name"], fields["grids"], fields["freezing_date"],
+                allow_over_capacity=True,
+            )
+        elif slot_type == "screening":
+            success, message = register_screening(
+                fields["user_name"], fields["pi_name"], fields["email"], fields["origin"],
+                fields["esm"], fields["sample_name"], fields["grids"], 1,
+            )
+        else:
+            success, message = register_imaging(
+                fields["user_name"], fields["pi_name"], fields["email"], fields["origin"],
+                fields["esm"], fields["sample_name"], fields["grids"], fields["days"],
+            )
+        if not success:
+            raise ValueError(message)
+        return message + " The slot is now visible in the admin slots page."
+
+    if action not in {"delete", "update"}:
+        raise ValueError("That slot action is not supported.")
+    slot_id = draft.get("slot_id")
+    if not isinstance(slot_id, int) or slot_id < 1:
+        raise ValueError("The slot ID is invalid.")
+
+    conn = get_db()
+    cur = conn.cursor()
+    if _is_sqlite_url():
+        cur.execute("BEGIN IMMEDIATE")
+    else:
+        conn.begin()
+    lock_suffix = "" if _is_sqlite_url() else " FOR UPDATE"
+    cur.execute(f"SELECT * FROM {table} WHERE id=?{lock_suffix}", [slot_id])
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise ValueError("That slot no longer exists. Refresh the slot list and try again.")
+    record = dict(row)
+    status = str(record.get("status") or "").casefold()
+    expected_statuses = {"active"} if table == "freezing_bookings" else {"waiting", "ongoing"}
+    if status not in expected_statuses:
+        cur.close()
+        conn.close()
+        raise ValueError("That slot is no longer waiting or active; completed slots cannot be changed by Mira.")
+    if _slot_action_fingerprint(record) != draft.get("snapshot"):
+        cur.close()
+        conn.close()
+        raise ValueError("That slot changed after the preview. Ask Mira to prepare a fresh preview.")
+
+    if action == "delete":
+        cur.execute(
+            f"DELETE FROM {table} WHERE id=? AND status=?",
+            [slot_id, record["status"]],
+        )
+        deleted = cur.rowcount
+        conn.commit()
+        cur.close()
+        conn.close()
+        if not deleted:
+            raise ValueError("That slot could not be deleted because it changed. Refresh and try again.")
+        return f"Deleted {slot_type} slot {slot_id} for {record.get('user_name') or 'the selected user'}."
+
+    field = draft.get("field")
+    value = draft.get("value")
+    if field not in _MIRA_MUTABLE_COLUMNS[table] or not isinstance(value, str):
+        cur.close()
+        conn.close()
+        raise ValueError("That field cannot be changed by Mira.")
+    if field == "email":
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            cur.close()
+            conn.close()
+            raise ValueError("Please provide a valid email address.")
+        statuses = "'waiting','ongoing','active'" if table == "freezing_bookings" else "'waiting','ongoing'"
+        cur.execute(
+            f"SELECT id FROM {table} WHERE email=? AND id<>? AND status IN ({statuses})",
+            [value, slot_id],
+        )
+        if cur.fetchone():
+            cur.close()
+            conn.close()
+            raise ValueError("That email already has an active slot of this type.")
+    max_length = 100 if field in {"user_name", "pi_name"} else 150
+    if field in {"user_name", "pi_name", "sample_name", "esm"} and len(value) > max_length:
+        cur.close()
+        conn.close()
+        raise ValueError("That value is too long.")
+    if field == "origin":
+        origin = {
+            "internal": "Internal", "iisc": "Internal",
+            "external": "External", "academic": "External",
+            "external academic": "External", "industry": "Industry",
+            "industrial": "Industry", "external industry": "Industry",
+        }.get(value.casefold())
+        if not origin:
+            cur.close()
+            conn.close()
+            raise ValueError("Origin must be Internal, External, or Industry.")
+        value = origin
+    if field in {"grids", "days"}:
+        try:
+            number = int(value)
+            maximum = GRID_LIMIT_PER_DAY if table == "freezing_bookings" and field == "grids" else 4
+            if not 1 <= number <= maximum:
+                raise ValueError
+        except ValueError:
+            cur.close()
+            conn.close()
+            raise ValueError(f"{field.title()} must be a whole number from 1 to {maximum}.") from None
+        value = number
+    if field == "freezing_date":
+        try:
+            selected_date = datetime.date.fromisoformat(value)
+        except ValueError:
+            cur.close()
+            conn.close()
+            raise ValueError("Freezing date must use YYYY-MM-DD format.") from None
+        if selected_date < datetime.date.today() or selected_date.weekday() >= 5:
+            cur.close()
+            conn.close()
+            raise ValueError("Choose a future weekday for freezing.")
+        cur.execute(
+            "SELECT COALESCE(SUM(grids), 0) AS total FROM freezing_bookings "
+            "WHERE freezing_date=? AND status='active' AND id<>?",
+            [value, slot_id],
+        )
+        used = int(cur.fetchone()["total"] or 0)
+        if used + int(record.get("grids") or 0) > GRID_LIMIT_PER_DAY:
+            cur.close()
+            conn.close()
+            raise ValueError("That date does not have enough remaining grid capacity.")
+    if field == "grids" and table == "freezing_bookings":
+        cur.execute(
+            "SELECT COALESCE(SUM(grids), 0) AS total FROM freezing_bookings "
+            "WHERE freezing_date=? AND status='active' AND id<>?",
+            [record["freezing_date"], slot_id],
+        )
+        used = int(cur.fetchone()["total"] or 0)
+        if used + value > GRID_LIMIT_PER_DAY:
+            cur.close()
+            conn.close()
+            raise ValueError("That change exceeds the daily freezing grid limit.")
+    cur.execute(
+        f"UPDATE {table} SET {field}=? WHERE id=? AND status=? AND {field}=?",
+        [value, slot_id, record["status"], record.get(field)],
+    )
+    updated = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    if not updated:
+        raise ValueError("That slot could not be updated because it changed. Refresh and try again.")
+    return f"Updated {slot_type} slot {slot_id}: {field.replace('_', ' ')} is now {value}."
 
 
 @admin_bp.route("/assistant/transcribe", methods=["POST"])
@@ -616,7 +1303,7 @@ def assistant_speak():
         return jsonify({"error": "Spoken answers must be 5,000 characters or fewer."}), 400
 
     if not deepgram_key:
-        return jsonify({"error": "Spoken answers are not configured. Add a Deepgram API key in Render environment settings."}), 503
+        return jsonify({"error": "Spoken answers are not configured. Add a Deepgram API key in environment settings."}), 503
 
     api_url = "https://api.deepgram.com/v1/speak?" + urllib.parse.urlencode({
         "model": "aura-2-helena-en",
@@ -647,7 +1334,7 @@ def assistant_speak():
             message = "Spoken answers are not configured correctly. An administrator must check the Deepgram API key."
             status_code = 503
         else:
-            message = "The speech service could not generate audio. The answer is still shown above."
+            message = "The speech service could not generate audio from the provided text. The answer is still shown above."
             status_code = 502
         current_app.logger.warning("Deepgram speech request failed with HTTP %s.", exc.code)
         exc.close()
@@ -1161,8 +1848,14 @@ def maintenance():
     publications = cur.fetchall()
     cur.execute("SELECT * FROM managed_instruments ORDER BY id DESC")
     instruments = cur.fetchall()
+    cur.execute(
+        """SELECT * FROM facility_notices
+           ORDER BY COALESCE(event_date, '1900-01-01') DESC, updated_at DESC, id DESC"""
+    )
+    facility_notices = cur.fetchall()
     edit_publication = None
     edit_instrument = None
+    edit_notice = None
     publication_id = request.args.get("edit_publication", type=int)
     instrument_id = request.args.get("edit_instrument", type=int)
     if publication_id:
@@ -1171,6 +1864,10 @@ def maintenance():
     if instrument_id:
         cur.execute("SELECT * FROM managed_instruments WHERE id=?", [instrument_id])
         edit_instrument = cur.fetchone()
+    notice_id = request.args.get("edit_notice", type=int)
+    if notice_id:
+        cur.execute("SELECT * FROM facility_notices WHERE id=?", [notice_id])
+        edit_notice = cur.fetchone()
     cur.close()
     conn.close()
     return render_template(
@@ -1179,6 +1876,8 @@ def maintenance():
         instruments=instruments,
         edit_publication=edit_publication,
         edit_instrument=edit_instrument,
+        facility_notices=facility_notices,
+        edit_notice=edit_notice,
     )
 
 
@@ -1291,6 +1990,79 @@ def delete_instrument(instrument_id):
     cur.close()
     conn.close()
     flash("Instrument removed.", "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/notices/save", methods=["POST"])
+def save_facility_notice():
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    title = request.form.get("title", "").strip()
+    message = request.form.get("message", "").strip()
+    date_text = request.form.get("event_date", "").strip()
+    link_url = request.form.get("link_url", "").strip()
+    notice_id = request.form.get("id", type=int)
+    if not title or len(title) > 160:
+        flash("Notification title is required and must be 160 characters or fewer.", "error")
+        return redirect(url_for("admin.maintenance"))
+    if not message or len(message) > 1000:
+        flash("Notification details are required and must be 1000 characters or fewer.", "error")
+        return redirect(url_for("admin.maintenance"))
+    if len(link_url) > 500 or not _content_url_is_safe(link_url):
+        flash("Notification link must use HTTPS, HTTP, or a local /static/ path.", "error")
+        return redirect(url_for("admin.maintenance"))
+    event_date = None
+    if date_text:
+        try:
+            event_date = datetime.date.fromisoformat(date_text)
+        except ValueError:
+            flash("Enter a valid event date.", "error")
+            return redirect(url_for("admin.maintenance"))
+    is_active = 1 if request.form.get("is_active") == "1" else 0
+
+    conn = get_db()
+    cur = conn.cursor()
+    if notice_id:
+        cur.execute("SELECT id FROM facility_notices WHERE id=?", [notice_id])
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            flash("Notification not found.", "error")
+            return redirect(url_for("admin.maintenance"))
+        cur.execute(
+            """UPDATE facility_notices SET title=?, message=?, event_date=?,
+               link_url=?, is_active=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+            [title, message, event_date, link_url or None, is_active, notice_id],
+        )
+    else:
+        cur.execute(
+            """INSERT INTO facility_notices
+               (title, message, event_date, link_url, is_active)
+               VALUES (?, ?, ?, ?, ?)""",
+            [title, message, event_date, link_url or None, is_active],
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash("Facility notification saved.", "success")
+    return redirect(url_for("admin.maintenance"))
+
+
+@admin_bp.route("/maintenance/notices/<int:notice_id>/delete", methods=["POST"])
+def delete_facility_notice(notice_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM facility_notices WHERE id=?", [notice_id])
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(
+        "Facility notification removed." if deleted else "Notification not found.",
+        "success" if deleted else "error",
+    )
     return redirect(url_for("admin.maintenance"))
 
 
@@ -1795,6 +2567,9 @@ def datacollecting():
         "admin_datacollecting.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
+        linked_grids=booking_grid_links_for_bookings(
+            "data_collection", [registration["id"] for registration in ongoing]
+        ),
     )
 
 
@@ -1871,9 +2646,14 @@ def complete_dc(booking_id):
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM bookings WHERE id=? AND status='ongoing'", [booking_id])
+    _begin(conn)
+    cur.execute(
+        "SELECT * FROM bookings WHERE id=? AND status='ongoing'" + _lock_clause(),
+        [booking_id],
+    )
     booking = cur.fetchone()
     if not booking:
+        conn.rollback()
         cur.close()
         conn.close()
         flash("That data collection booking is no longer ongoing.")
@@ -1885,10 +2665,26 @@ def complete_dc(booking_id):
             clipped_grids_value,
         )
     except ValueError as exc:
+        conn.rollback()
         cur.close()
         conn.close()
         flash(str(exc))
         return redirect(url_for("admin.datacollecting"))
+    try:
+        complete_booking_grid_moves(
+            cur, "data_collection", booking_id, request.form, session.get("admin_user_id")
+        )
+    except InventoryError as exc:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.datacollecting"))
+    except Exception:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        raise
     cur.execute(
         """UPDATE bookings SET status='completed', completion_date=?,
            actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
@@ -1926,17 +2722,25 @@ def complete_dc(booking_id):
     return redirect(url_for("admin.datacollecting"))
 
 
-@admin_bp.route("/datacollecting/delete/<int:booking_id>")
+@admin_bp.route("/datacollecting/delete/<int:booking_id>", methods=["POST"])
 def delete_dc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
     conn = get_db()
     cur  = conn.cursor()
-    cur.execute("DELETE FROM bookings WHERE id=?", [booking_id])
+    cur.execute(
+        "DELETE FROM bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
+        [booking_id],
+    )
+    deleted = cur.rowcount
     conn.commit()
     cur.close()
     conn.close()
+    flash(
+        "Data-collection slot deleted." if deleted else "That slot could not be found or is already completed.",
+        "success" if deleted else "registration",
+    )
     return redirect(url_for("admin.datacollecting"))
 
 
@@ -2097,6 +2901,9 @@ def screening_admin():
         "admin_screening.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
+        linked_grids=booking_grid_links_for_bookings(
+            "screening", [registration["id"] for registration in ongoing]
+        ),
     )
 
 
@@ -2171,9 +2978,14 @@ def complete_sc(booking_id):
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT * FROM screening_bookings WHERE id=? AND status='ongoing'", [booking_id])
+    _begin(conn)
+    cur.execute(
+        "SELECT * FROM screening_bookings WHERE id=? AND status='ongoing'" + _lock_clause(),
+        [booking_id],
+    )
     booking = cur.fetchone()
     if not booking:
+        conn.rollback()
         cur.close()
         conn.close()
         flash("That screening booking is no longer ongoing.")
@@ -2185,10 +2997,26 @@ def complete_sc(booking_id):
             clipped_grids_value,
         )
     except ValueError as exc:
+        conn.rollback()
         cur.close()
         conn.close()
         flash(str(exc))
         return redirect(url_for("admin.screening_admin"))
+    try:
+        complete_booking_grid_moves(
+            cur, "screening", booking_id, request.form, session.get("admin_user_id")
+        )
+    except InventoryError as exc:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash(str(exc))
+        return redirect(url_for("admin.screening_admin"))
+    except Exception:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        raise
     cur.execute(
         """UPDATE screening_bookings SET status='completed', completion_date=?,
            actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
@@ -2226,17 +3054,25 @@ def complete_sc(booking_id):
     return redirect(url_for("admin.screening_admin"))
 
 
-@admin_bp.route("/screening/delete/<int:booking_id>")
+@admin_bp.route("/screening/delete/<int:booking_id>", methods=["POST"])
 def delete_sc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
     conn = get_db()
     cur  = conn.cursor()
-    cur.execute("DELETE FROM screening_bookings WHERE id=?", [booking_id])
+    cur.execute(
+        "DELETE FROM screening_bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
+        [booking_id],
+    )
+    deleted = cur.rowcount
     conn.commit()
     cur.close()
     conn.close()
+    flash(
+        "Screening slot deleted." if deleted else "That slot could not be found or is already completed.",
+        "success" if deleted else "registration",
+    )
     return redirect(url_for("admin.screening_admin"))
 
 

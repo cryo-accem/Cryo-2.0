@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
 from blueprints.public import get_combined_ongoing_slots
+from inventory_service import _begin, link_selected_grids_to_booking
 
 imaging_bp = Blueprint("imaging", __name__)
 
@@ -27,7 +28,8 @@ def list_view():
     )
 
 
-def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids, days):
+def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids, days,
+                     grid_codes=None):
     """
     Insert a new imaging booking.
     Returns (success: bool, message: str).
@@ -35,26 +37,36 @@ def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids,
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT id FROM bookings WHERE email=? AND status IN ('waiting','ongoing')",
-        [email],
-    )
-    if cur.fetchone():
+    try:
+        _begin(conn)
+        cur.execute(
+            "SELECT id FROM bookings WHERE email=? AND status IN ('waiting','ongoing')",
+            [email],
+        )
+        if cur.fetchone():
+            conn.rollback()
+            return False, "This email is already registered for an Imaging slot."
+
+        cur.execute(
+            """INSERT INTO bookings
+               (user_name, pi_name, email, origin, esm, sample_name,
+                grids, days, registration_date, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
+            (user_name, pi_name, email, origin, esm, sample_name,
+             grids, days, datetime.date.today()),
+        )
+        booking_id = cur.lastrowid
+        if grid_codes:
+            link_selected_grids_to_booking(
+                cur, "data_collection", booking_id, grid_codes, user_name, sample_name
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         cur.close()
         conn.close()
-        return False, "This email is already registered for an Imaging slot."
-
-    cur.execute(
-        """INSERT INTO bookings
-           (user_name, pi_name, email, origin, esm, sample_name,
-            grids, days, registration_date, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
-        (user_name, pi_name, email, origin, esm, sample_name,
-         grids, days, datetime.date.today()),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
 
     send_email(
         email,

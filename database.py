@@ -554,6 +554,18 @@ def init_db():
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS facility_notices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title VARCHAR(160) NOT NULL,
+                message TEXT NOT NULL,
+                event_date DATE,
+                link_url VARCHAR(500),
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
     else:
         cur.execute("""
             CREATE TABLE IF NOT EXISTS managed_publications (
@@ -588,6 +600,18 @@ def init_db():
                 title VARCHAR(240) NOT NULL,
                 intro TEXT,
                 additional_content TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS facility_notices (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                title VARCHAR(160) NOT NULL,
+                message TEXT NOT NULL,
+                event_date DATE NULL,
+                link_url VARCHAR(500),
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             )
         """)

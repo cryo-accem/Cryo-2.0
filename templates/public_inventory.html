@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Search grid inventory{% endblock %}
+{% block content %}
+<main class="portal-page"><section class="page-content inventory-page">
+  <header class="page-header page-header--portal"><div><div class="eyebrow">Private-by-search inventory lookup</div><h1>Find your grids</h1><p>Search using the researcher name and sample name recorded with the grids. Only matching records are shown.</p></div><a class="button" href="{{ url_for('register.register') }}">Book a slot</a></header>
+  <section class="inventory-panel">
+    <form class="public-inventory-search" action="{{ url_for('public.grid_inventory') }}" method="get">
+      <label>Name of user / researcher<input type="text" name="researcher_name" value="{{ researcher_name }}" maxlength="150" required autocomplete="name"></label>
+      <label>Sample name<input type="text" name="sample_name" value="{{ sample_name }}" maxlength="180" required></label>
+      <button class="button" type="submit">Search my grids</button>
+    </form>
+    {% if search_error %}
+      <p class="empty-message">{{ search_error }}</p>
+    {% elif searched %}
+      {% if grids %}
+        <p class="public-inventory-result-count">{{ grids|length }} matching grid{{ '' if grids|length == 1 else 's' }} found for <strong>{{ researcher_name }}</strong> · <strong>{{ sample_name }}</strong>.</p>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Grid</th><th>Sample</th><th>Current storage</th><th>Booking availability</th></tr></thead><tbody>
+          {% for grid in grids %}
+            <tr>
+              <td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span> {{ grid.current_status }}</td>
+              <td>{{ grid.grid_code }}</td>
+              <td>{{ grid.sample_code }} · {{ grid.sample_name }}</td>
+              <td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} · {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}Not currently in storage{% endif %}</td>
+              <td>{% if grid.available %}<span class="public-grid-availability">Available for booking</span>{% elif grid.current_status == 'In Data Collection' %}In data collection{% elif grid.current_status == 'Discarded' %}Discarded{% else %}Already reserved{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody></table></div>
+        <p class="public-inventory-result-note">This lookup only displays grids matching both names exactly. To book an available grid, use the same researcher and sample names on the booking form.</p>
+      {% else %}
+        <p class="empty-message">No grids were found for <strong>{{ researcher_name }}</strong> and <strong>{{ sample_name }}</strong>. Check the spelling or contact the facility team if the inventory entry needs correction.</p>
+      {% endif %}
+    {% elif researcher_name or sample_name %}
+      <p class="empty-message">Enter both the researcher name and sample name to search.</p>
+    {% else %}
+      <p class="public-inventory-prompt">Inventory details are not shown until you search using both your researcher name and sample name.</p>
+    {% endif %}
+  </section>
+</section></main>
+{% endblock %}

@@ -6,7 +6,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css', v='20261013-admin-slot-controls') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css', v='20261015-facility-notices') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <title>{% block title %}{% if page_content %}ACCEM | {{ page_content.title }}{% else %}ACCEM | Cryo-Electron Microscopy{% endif %}{% endblock %}</title>
 </head>
@@ -35,6 +35,22 @@
       {% endif %}
     </div>
   </header>
+  {% if facility_notices and not request.path.startswith('/admin') %}
+  <aside class="facility-notice" aria-label="Facility announcements">
+    <div class="facility-notice__label"><i class="fa-solid fa-bell" aria-hidden="true"></i><span>Facility updates</span></div>
+    <div class="facility-notice__items">
+      {% for notice in facility_notices %}
+      <article class="facility-notice__item">
+        <strong>{{ notice.title }}</strong>
+        {% if notice.event_date %}<time datetime="{{ notice.event_date }}">{{ notice.event_date.strftime('%b %d, %Y') if notice.event_date.strftime is defined else notice.event_date }}</time>{% endif %}
+        <span>{{ notice.message }}</span>
+        {% if notice.link_url %}<a href="{{ notice.link_url }}" target="_blank" rel="noopener noreferrer">More details <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}
+      </article>
+      {% endfor %}
+    </div>
+    <button class="facility-notice__dismiss" type="button" aria-label="Dismiss facility announcements"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+  </aside>
+  {% endif %}
   {% if request.path.startswith('/admin') and request.path != '/admin/' %}
   <aside class="admin-sidebar" aria-label="Admin navigation">
     <div class="admin-sidebar__identity"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><div><strong>ACCEM Admin</strong><small>Facility operations</small></div></div>
@@ -69,12 +85,11 @@
         <div><span class="admin-assistant__eyebrow">Admin assistant</span><h2>Mira</h2></div>
         <button class="admin-assistant__close" type="button" data-assistant-close aria-label="Close assistant"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
       </header>
-      <p class="admin-assistant__privacy">Answers use read-only admin records. Tap the microphone to record, then tap again to transcribe. Voice recordings and spoken answers are processed by Deepgram. See <a href="https://developers.deepgram.com/trust-security/your-data" target="_blank" rel="noopener noreferrer">Deepgram data controls</a>.</p>
       <div class="admin-assistant__messages" data-assistant-messages aria-live="polite" aria-relevant="additions"></div>
-      <form class="admin-assistant__form" data-assistant-form action="{{ url_for('admin.assistant_query') }}" data-transcription-url="{{ url_for('admin.assistant_transcribe') }}" method="post">
+      <form class="admin-assistant__form" data-assistant-form action="{{ url_for('admin.assistant_query') }}" data-transcription-url="{{ url_for('admin.assistant_transcribe') }}" data-slot-confirm-url="{{ url_for('admin.assistant_slot_confirm') }}" data-slot-cancel-url="{{ url_for('admin.assistant_slot_cancel') }}" method="post">
         <input type="hidden" data-assistant-csrf value="{{ csrf_token }}">
-        <label class="sr-only" for="admin-assistant-question">Speak or type a question about revenue or freezing availability</label>
-        <textarea id="admin-assistant-question" data-assistant-question rows="2" maxlength="500" placeholder="Tap the microphone, speak, then tap again to send your recording..." required></textarea>
+        <label class="sr-only" for="admin-assistant-question">Ask Mira a question or give a voice command to manage an admin slot</label>
+        <textarea id="admin-assistant-question" data-assistant-question rows="2" maxlength="500" placeholder="Ask naturally, e.g. “book freezing for Jane…”, or ask about revenue/freezing" required></textarea>
         <p class="admin-assistant__status" data-assistant-status role="status">Tap the microphone to record a question, or type one below.</p>
         <div class="admin-assistant__actions">
           <button class="button admin-assistant__voice-button" type="button" data-assistant-mic aria-label="Start voice recording" aria-pressed="false"><i class="fa-solid fa-microphone" aria-hidden="true"></i><span>Start recording</span></button>
@@ -97,12 +112,23 @@
   {% endif %}
 </div>
 <script>
+document.querySelectorAll(".facility-notice__dismiss").forEach((button) => {
+  button.addEventListener("click", () => button.closest(".facility-notice")?.remove());
+});
+</script>
+<script>
 // Initialize donut chart tooltips
 document.querySelectorAll('[data-donut]').forEach((donut) => {
   const tooltip = donut.querySelector('.donut-tooltip');
   donut.querySelectorAll('.donut-segment').forEach((segment) => {
     const showTooltip = () => {
-      tooltip.innerHTML = `${segment.dataset.label}<br><strong>${segment.dataset.value}</strong>`;
+      const value = document.createElement("strong");
+      value.textContent = segment.dataset.value;
+      tooltip.replaceChildren(
+        document.createTextNode(`${segment.dataset.label} `),
+        document.createElement("br"),
+        value,
+      );
       tooltip.classList.add('is-visible');
     };
     const hideTooltip = () => tooltip.classList.remove('is-visible');
@@ -167,18 +193,6 @@ document.querySelectorAll('[data-donut]').forEach((donut) => {
       requestAnimationFrame(animateTotal);
     }
 
-    // Create SVG chart HTML
-    let svgSegments = '<circle class="donut-track" cx="60" cy="60" r="52" pathLength="100"></circle>';
-    
-    data.forEach((item) => {
-      svgSegments += `
-        <circle class="donut-segment" tabindex="0" role="img" aria-label="${item.label}: ${item.value} users" 
-          cx="60" cy="60" r="52" pathLength="100" 
-          style="--segment-color: ${item.color}; stroke-dasharray: ${item.end - item.start} 100; stroke-dashoffset: -${item.start}" 
-          data-label="${item.label}" data-value="${item.value} users"></circle>
-      `;
-    });
-
     // Create the chart and facility metric cards
     const chartHTML = `
       <article class="category-stat-card">
@@ -189,7 +203,8 @@ document.querySelectorAll('[data-donut]').forEach((donut) => {
         <div class="category-stat-card__body">
           <div class="category-stat-card__chart donut-chart" data-donut>
             <svg viewBox="0 0 120 120" role="img" aria-label="Users grouped by affiliation">
-              ${svgSegments}
+              <circle class="donut-track" cx="60" cy="60" r="52" pathLength="100"></circle>
+              <g data-chart-segments></g>
             </svg>
             <div class="donut-center"><strong data-count-to="${total}">0</strong><span>users</span></div>
             <div class="donut-tooltip" role="status"></div>
@@ -221,6 +236,25 @@ document.querySelectorAll('[data-donut]').forEach((donut) => {
     `;
 
     container.innerHTML = chartHTML;
+    const segmentGroup = container.querySelector("[data-chart-segments]");
+    const svgNamespace = "http://www.w3.org/2000/svg";
+    data.forEach((item) => {
+      const segment = document.createElementNS(svgNamespace, "circle");
+      segment.setAttribute("class", "donut-segment");
+      segment.setAttribute("tabindex", "0");
+      segment.setAttribute("role", "img");
+      segment.setAttribute("aria-label", `${item.label}: ${item.value} users`);
+      segment.setAttribute("cx", "60");
+      segment.setAttribute("cy", "60");
+      segment.setAttribute("r", "52");
+      segment.setAttribute("pathLength", "100");
+      segment.style.setProperty("--segment-color", item.color);
+      segment.style.strokeDasharray = `${item.end - item.start} 100`;
+      segment.style.strokeDashoffset = `-${item.start}`;
+      segment.dataset.label = item.label;
+      segment.dataset.value = `${item.value} users`;
+      segmentGroup.append(segment);
+    });
     container.querySelectorAll("[data-count-to]").forEach((counter) => {
       const target = Number(counter.dataset.countTo);
       const suffix = counter.dataset.countSuffix || "";
@@ -240,7 +274,13 @@ document.querySelectorAll('[data-donut]').forEach((donut) => {
       const tooltip = donut.querySelector('.donut-tooltip');
       donut.querySelectorAll('.donut-segment').forEach((segment) => {
         const showTooltip = () => {
-          tooltip.innerHTML = `${segment.dataset.label}<br><strong>${segment.dataset.value}</strong>`;
+          const value = document.createElement("strong");
+          value.textContent = segment.dataset.value;
+          tooltip.replaceChildren(
+            document.createTextNode(`${segment.dataset.label} `),
+            document.createElement("br"),
+            value,
+          );
           tooltip.classList.add('is-visible');
         };
         const hideTooltip = () => tooltip.classList.remove('is-visible');
@@ -301,7 +341,7 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 </script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-deepgram-wav-speech') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-wav-audio') }}" defer></script>
 {% endif %}
 </body>
 </html>

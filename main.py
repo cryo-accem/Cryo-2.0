@@ -7,7 +7,7 @@ from flask import Flask, abort, request, session
 from database import init_db
 from extensions import init_mail
 
-from blueprints.public    import public_bp
+from blueprints.public    import public_bp, get_active_facility_notices
 from blueprints.imaging   import imaging_bp
 from blueprints.freezing  import freezing_bp
 from blueprints.screening import screening_bp
@@ -55,6 +55,11 @@ def create_app() -> Flask:
         return {
             "csrf_token": _CSRFToken(token),
             "current_year": datetime.date.today().year,
+            "facility_notices": (
+                get_active_facility_notices()
+                if not request.path.startswith("/admin")
+                else []
+            ),
             "admin_assistant_enabled": bool(
                 session.get("admin_logged_in") and not session.get("must_change_password")
             ),

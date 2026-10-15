@@ -5,10 +5,15 @@ import re
 import tempfile
 import unittest
 from unittest.mock import patch
+from werkzeug.datastructures import MultiDict
 
 import database
 from main import create_app
 from migrations.apply_grid_inventory import apply_migration
+from inventory_service import (
+    InventoryError, create_data_session, link_grid_to_booking, public_inventory_grids,
+)
+from blueprints.imaging import register_imaging
 
 
 class GridInventoryTests(unittest.TestCase):
@@ -37,7 +42,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1).decode()
 
-    def create_batch(self, count=2):
+    def create_batch(self, count=2, researcher_name="Researcher", sample_name="Test sample"):
         conn = database.get_db()
         grid_type_id = conn.execute(
             "SELECT grid_type_id FROM grid_types WHERE active=1 ORDER BY grid_type_id LIMIT 1"
@@ -48,8 +53,8 @@ class GridInventoryTests(unittest.TestCase):
             data={
                 "_csrf_token": self.csrf_token(),
                 "create_sample": "1",
-                "sample_name": "Test sample",
-                "researcher_name": "Researcher",
+                "sample_name": sample_name,
+                "researcher_name": researcher_name,
                 "lab_name": "Example Lab",
                 "external_reference": "REF-1",
                 "grid_type_id": str(grid_type_id),
@@ -62,9 +67,11 @@ class GridInventoryTests(unittest.TestCase):
         conn = database.get_db()
         codes = [
             row["grid_code"] for row in conn.execute(
-                "SELECT grid_code FROM inventory_grids ORDER BY grid_id"
+                "SELECT grid_code FROM inventory_grids ORDER BY grid_id DESC LIMIT ?",
+                [count],
             ).fetchall()
         ]
+        codes.reverse()
         sample = conn.execute(
             "SELECT sample_code FROM inventory_samples ORDER BY sample_id DESC LIMIT 1"
         ).fetchone()
@@ -104,11 +111,17 @@ class GridInventoryTests(unittest.TestCase):
         row = conn.execute("SELECT sample_name FROM bookings").fetchone()
         version_count = conn.execute(
             "SELECT COUNT(*) AS count FROM inventory_schema_migrations "
-            "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link')"
+            "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link', "
+            "'004_booking_grid_links')"
         ).fetchone()["count"]
+        link_table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name='screening_booking_grids'"
+        ).fetchone()
         conn.close()
         self.assertEqual(row["sample_name"], "Existing sample")
-        self.assertEqual(version_count, 2)
+        self.assertEqual(version_count, 3)
+        self.assertIsNotNone(link_table)
 
     def test_inventory_dashboard_renders_stored_grid_count(self):
         codes = self.create_batch(1)
@@ -122,6 +135,455 @@ class GridInventoryTests(unittest.TestCase):
             dashboard.data.decode(),
             r"<span>Stored</span>\s*<strong>1</strong>",
         )
+
+    def test_public_grid_inventory_link_is_in_home_portal_not_primary_navigation(self):
+        response = self.client.get("/home")
+        self.assertEqual(response.status_code, 200)
+        html = response.data.decode()
+        navigation = re.search(r'<nav class="site-nav"[^>]*>(.*?)</nav>', html, re.S)
+        self.assertIsNotNone(navigation)
+        self.assertNotIn("Grid inventory", navigation.group(1))
+        self.assertRegex(
+            html,
+            r'<a class="portal-card" href="/inventory"><i class="fa-solid fa-boxes-stacked"[^>]*></i><strong>Grid inventory</strong><span>Find your grids by researcher and sample',
+        )
+
+    def test_inventory_dashboard_shows_storage_positions_and_legacy_status_codes(self):
+        frozen, stored, clipped, discarded, in_collection = self.create_batch(5)
+        self.post_storage(stored, "Falcon-A", "GridBox-1", "1")
+        self.post_storage(clipped, "Falcon-A", "GridBox-1", "2")
+        self.client.post(
+            f"/admin/inventory/grids/{clipped}/clipping",
+            data={"_csrf_token": self.csrf_token(), "clipped": "1", "notes": "Demo clip"},
+        )
+        conn = database.get_db()
+        conn.execute(
+            "UPDATE inventory_grids SET current_status='Discarded' WHERE grid_code=?",
+            [discarded],
+        )
+        conn.execute(
+            "UPDATE inventory_grids SET current_status='In Data Collection' WHERE grid_code=?",
+            [in_collection],
+        )
+        conn.commit()
+        conn.close()
+
+        dashboard = self.client.get("/admin/inventory/")
+        self.assertEqual(dashboard.status_code, 200)
+        content = dashboard.data.decode()
+        self.assertIn("Falcon-A", content)
+        self.assertIn("GridBox-1", content)
+        self.assertIn(f'aria-label="Position 1, {stored}, Test sample, Stored"', content)
+        self.assertIn(f'aria-label="Position 2, {clipped}, Test sample, Clipped"', content)
+        for code in (frozen, discarded, in_collection):
+            self.assertIn(f'href="/admin/inventory/grids/{code}"', content)
+        self.assertRegex(content, r">NTI</span>\s*Frozen · not lifted")
+        self.assertRegex(content, r">S</span>")
+        self.assertRegex(content, r">C</span>")
+        self.assertRegex(content, r">D</span>")
+        self.assertRegex(content, r">U</span>")
+
+    def test_public_inventory_and_booking_grid_selection_are_available_without_admin_login(self):
+        selected_grid, other_grid = self.create_batch(2)
+        unrelated_grid = self.create_batch(
+            1, researcher_name="Different Researcher", sample_name="Different sample"
+        )[0]
+        guest = self.app.test_client()
+
+        inventory = guest.get("/inventory")
+        self.assertEqual(inventory.status_code, 200)
+        self.assertNotIn(selected_grid.encode(), inventory.data)
+        inventory = guest.get(
+            "/inventory?researcher_name=Researcher&sample_name=Test%20sample"
+        )
+        self.assertIn(selected_grid.encode(), inventory.data)
+        self.assertIn(other_grid.encode(), inventory.data)
+        self.assertNotIn(unrelated_grid.encode(), inventory.data)
+        self.assertNotIn(b"Register frozen grids", inventory.data)
+
+        form = guest.get("/register")
+        self.assertEqual(form.status_code, 200)
+        csrf_match = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', form.data)
+        self.assertIsNotNone(csrf_match)
+        csrf_token = csrf_match.group(1).decode()
+        self.assertNotIn(selected_grid.encode(), form.data)
+        search = guest.get(
+            "/inventory/search?user_name=Researcher&sample_name=Test%20sample"
+        )
+        self.assertEqual(search.status_code, 200)
+        self.assertEqual(
+            {grid["grid_code"] for grid in search.get_json()["grids"]},
+            {selected_grid, other_grid},
+        )
+        self.assertNotIn(
+            unrelated_grid,
+            {grid["grid_code"] for grid in search.get_json()["grids"]},
+        )
+
+        with patch("blueprints.screening.send_email"):
+            response = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_token,
+                    "reg_type": "screening",
+                    "user_name": "Researcher",
+                    "pi_name": "Grid PI",
+                    "email": "grid-user@example.test",
+                    "origin": "Internal",
+                    "sample_name": "Test sample",
+                    "grids": "4",
+                    "inventory_grid_codes": [selected_grid],
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT id, grids FROM screening_bookings WHERE email=?",
+            ["grid-user@example.test"],
+        ).fetchone()
+        linked_grid = conn.execute(
+            """SELECT g.grid_code FROM screening_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.screening_booking_id=?""",
+            [booking["id"]],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["grids"], 1)
+        self.assertEqual(linked_grid["grid_code"], selected_grid)
+
+        unavailable_form = guest.get("/register")
+        self.assertNotIn(selected_grid.encode(), unavailable_form.data)
+        self.assertNotIn(other_grid.encode(), unavailable_form.data)
+        still_available = guest.get(
+            "/inventory/search?user_name=Researcher&sample_name=Test%20sample"
+        )
+        self.assertEqual(
+            {grid["grid_code"] for grid in still_available.get_json()["grids"]},
+            {other_grid},
+        )
+
+        with patch("blueprints.screening.send_email"):
+            collision = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_token,
+                    "reg_type": "screening",
+                    "user_name": "Researcher",
+                    "pi_name": "Other PI",
+                    "email": "other-user@example.test",
+                    "origin": "Internal",
+                    "sample_name": "Other sample",
+                    "grids": "1",
+                    "inventory_grid_codes": [selected_grid],
+                },
+            )
+        self.assertEqual(collision.status_code, 302)
+        conn = database.get_db()
+        booking_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM screening_bookings"
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(booking_count, 1)
+
+        with patch("blueprints.imaging.send_email"):
+            data_collection_response = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_token,
+                    "reg_type": "datacollecting",
+                    "user_name": "Researcher",
+                    "pi_name": "Data PI",
+                    "email": "data-user@example.test",
+                    "origin": "Internal",
+                    "sample_name": "Test sample",
+                    "grids": "1",
+                    "days": "1",
+                    "inventory_grid_codes": [other_grid],
+                },
+            )
+        self.assertEqual(data_collection_response.status_code, 302)
+        conn = database.get_db()
+        data_booking = conn.execute(
+            "SELECT id, grids FROM bookings WHERE email=?",
+            ["data-user@example.test"],
+        ).fetchone()
+        data_link = conn.execute(
+            """SELECT g.grid_code FROM data_collection_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.booking_id=?""",
+            [data_booking["id"]],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(data_booking["grids"], 1)
+        self.assertEqual(data_link["grid_code"], other_grid)
+
+    def test_public_registration_rejects_unrecognized_origin_values(self):
+        response = self.client.post(
+            "/register",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "reg_type": "screening",
+                "user_name": "Untrusted User",
+                "pi_name": "Test PI",
+                "email": "untrusted@example.test",
+                "origin": '<img src=x onerror=alert(1)>',
+                "sample_name": "Test sample",
+                "grids": "1",
+                "days": "1",
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"Choose a valid user origin.", response.data)
+        conn = database.get_db()
+        booking_counts = [
+            conn.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()["count"]
+            for table in ("bookings", "screening_bookings", "freezing_bookings")
+        ]
+        conn.close()
+        self.assertEqual(booking_counts, [0, 0, 0])
+
+    def test_screening_completion_moves_linked_grid_atomically(self):
+        grid_code, occupied_code = self.create_batch(2)
+        self.post_storage(occupied_code, "Falcon-C", "Box-C", "1")
+        conn = database.get_db()
+        conn.execute(
+            """INSERT INTO screening_bookings
+               (user_name, pi_name, email, origin, sample_name, grids, days, status)
+               VALUES ('Grid User', 'Grid PI', 'complete@example.test', 'Internal',
+                       'Test sample', 1, 1, 'ongoing')"""
+        )
+        booking_id = conn.execute(
+            "SELECT id FROM screening_bookings WHERE email='complete@example.test'"
+        ).fetchone()["id"]
+        grid_id = conn.execute(
+            "SELECT grid_id FROM inventory_grids WHERE grid_code=?", [grid_code]
+        ).fetchone()["grid_id"]
+        conn.execute(
+            """INSERT INTO screening_booking_grids
+               (screening_booking_id, grid_id, linked_at)
+               VALUES (?, ?, '2025-01-02 12:00:00')""",
+            [booking_id, grid_id],
+        )
+        conn.commit()
+        conn.close()
+
+        completion = {
+            "_csrf_token": self.csrf_token(),
+            "actual_slots": "1",
+            "actual_grids": "1",
+            "grid_source": "user provided",
+            "grid_type": "",
+            "clipped_grids": "0",
+            "inventory_grid_code": [grid_code],
+            "inventory_outcome": ["store"],
+            "inventory_discard_notes": [""],
+            "inventory_falcon": ["Falcon-C"],
+            "inventory_box": ["Box-C"],
+            "inventory_position": ["1"],
+        }
+        with patch("blueprints.admin.send_email"):
+            conflict = self.client.post(
+                f"/admin/screening/complete/{booking_id}", data=completion
+            )
+        self.assertEqual(conflict.status_code, 302)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT status, total_billed FROM screening_bookings WHERE id=?", [booking_id]
+        ).fetchone()
+        locations = conn.execute(
+            "SELECT COUNT(*) AS count FROM storage_locations "
+            "WHERE grid_id=? AND removed_at IS NULL",
+            [grid_id],
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(booking["status"], "ongoing")
+        self.assertEqual(locations, 0)
+
+        completion["inventory_falcon"] = ["Falcon-D"]
+        completion["inventory_box"] = ["Box-D"]
+        completion["inventory_position"] = ["4"]
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/screening/complete/{booking_id}", data=completion
+            )
+        self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT status FROM screening_bookings WHERE id=?", [booking_id]
+        ).fetchone()
+        location = conn.execute(
+            """SELECT falcon_container_id, grid_box_name, grid_position
+               FROM storage_locations WHERE grid_id=? AND removed_at IS NULL""",
+            [grid_id],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["status"], "completed")
+        self.assertEqual(
+            (location["falcon_container_id"], location["grid_box_name"], location["grid_position"]),
+            ("Falcon-D", "Box-D", "4"),
+        )
+
+    def test_screening_and_data_collection_completion_can_discard_individual_grids(self):
+        for service_type in ("screening", "data_collection"):
+            first_grid, discarded_grid = self.create_batch(2)
+            conn = database.get_db()
+            booking_table = "screening_bookings" if service_type == "screening" else "bookings"
+            link_table = (
+                "screening_booking_grids"
+                if service_type == "screening"
+                else "data_collection_booking_grids"
+            )
+            booking_column = (
+                "screening_booking_id" if service_type == "screening" else "booking_id"
+            )
+            conn.execute(
+                f"""INSERT INTO {booking_table}
+                    (user_name, pi_name, email, origin, sample_name, grids, days, status)
+                    VALUES (?, ?, ?, 'Internal', 'Test sample', 2, 1, 'ongoing')""",
+                [f"{service_type} user", "Grid PI", f"{service_type}@example.test"],
+            )
+            booking_id = conn.execute(
+                f"SELECT id FROM {booking_table} WHERE email=?",
+                [f"{service_type}@example.test"],
+            ).fetchone()["id"]
+            for grid_code in (first_grid, discarded_grid):
+                grid_id = conn.execute(
+                    "SELECT grid_id FROM inventory_grids WHERE grid_code=?", [grid_code]
+                ).fetchone()["grid_id"]
+                conn.execute(
+                    f"INSERT INTO {link_table} ({booking_column}, grid_id, linked_at) "
+                    "VALUES (?, ?, '2025-01-02 12:00:00')",
+                    [booking_id, grid_id],
+                )
+            conn.commit()
+            conn.close()
+
+            completion = {
+                "_csrf_token": self.csrf_token(),
+                "actual_slots": "1",
+                "actual_grids": "2",
+                "grid_source": "user provided",
+                "grid_type": "",
+                "service_stage": "Screening / Clipping" if service_type == "screening" else "Data Collection",
+                "clipped_grids": "0",
+                "inventory_grid_code": [first_grid, discarded_grid],
+                "inventory_outcome": ["store", "discard"],
+                "inventory_discard_notes": [
+                    "",
+                    f"Discarded after {service_type.replace('_', ' ')}",
+                ],
+                "inventory_falcon": ["Falcon-Return", ""],
+                "inventory_box": ["Box-Return", ""],
+                "inventory_position": ["A1" if service_type == "screening" else "A2", ""],
+            }
+            endpoint = "screening" if service_type == "screening" else "datacollecting"
+            with patch("blueprints.admin.send_email"):
+                response = self.client.post(
+                    f"/admin/{endpoint}/complete/{booking_id}",
+                    data=completion,
+                    follow_redirects=True,
+                )
+            self.assertEqual(response.status_code, 200)
+
+            conn = database.get_db()
+            states = {
+                row["grid_code"]: row["current_status"]
+                for row in conn.execute(
+                    """SELECT g.grid_code, g.current_status
+                       FROM inventory_grids g
+                       WHERE g.grid_code IN (?, ?)""",
+                    [first_grid, discarded_grid],
+                ).fetchall()
+            }
+            discarded_location_count = conn.execute(
+                """SELECT COUNT(*) AS count FROM storage_locations sl
+                   JOIN inventory_grids g ON g.grid_id=sl.grid_id
+                   WHERE g.grid_code=? AND sl.removed_at IS NULL""",
+                [discarded_grid],
+            ).fetchone()["count"]
+            discard_event = conn.execute(
+                """SELECT notes FROM grid_events e
+                   JOIN inventory_grids g ON g.grid_id=e.grid_id
+                   WHERE g.grid_code=? AND e.event_type='grid_discarded'""",
+                [discarded_grid],
+            ).fetchone()
+            conn.close()
+
+            self.assertEqual(states[first_grid], "Stored", response.data.decode())
+            self.assertEqual(states[discarded_grid], "Discarded")
+            self.assertEqual(discarded_location_count, 0)
+            self.assertEqual(
+                discard_event["notes"], f"Discarded after {service_type.replace('_', ' ')}"
+            )
+            public_available_codes = {
+                grid["grid_code"]
+                for grid in public_inventory_grids(
+                    "Researcher", "Test sample", available_only=True
+                )
+            }
+            self.assertIn(first_grid, public_available_codes)
+            self.assertNotIn(discarded_grid, public_available_codes)
+            conn = database.get_db()
+            conn.execute(
+                f"""INSERT INTO {booking_table}
+                    (user_name, pi_name, email, origin, sample_name, grids, days, status)
+                    VALUES ('Another user', 'Another PI', ?, 'Internal', 'Test sample', 1, 1, 'waiting')""",
+                [f"retry-{service_type}@example.test"],
+            )
+            new_booking_id = conn.execute(
+                f"SELECT id FROM {booking_table} WHERE email=?",
+                [f"retry-{service_type}@example.test"],
+            ).fetchone()["id"]
+            conn.commit()
+            conn.close()
+            with self.assertRaisesRegex(InventoryError, "not available"):
+                link_grid_to_booking(
+                    {
+                        "service_type": service_type,
+                        "booking_id": str(new_booking_id),
+                        "grid_code": discarded_grid,
+                    },
+                    None,
+                )
+
+    def test_data_collection_session_must_use_the_booking_selected_grids(self):
+        selected_grid, other_grid = self.create_batch(2)
+        with patch("blueprints.imaging.send_email"):
+            success, _ = register_imaging(
+                "Researcher", "Data PI", "session@example.test", "Internal", "",
+                "Test sample", 1, 1, grid_codes=[selected_grid],
+            )
+        self.assertTrue(success)
+        conn = database.get_db()
+        booking_id = conn.execute(
+            "SELECT id FROM bookings WHERE email=?", ["session@example.test"]
+        ).fetchone()["id"]
+        operator_id = conn.execute(
+            "SELECT id FROM users WHERE role='admin' LIMIT 1"
+        ).fetchone()["id"]
+        conn.close()
+
+        session_fields = MultiDict([
+            ("booking_reference", str(booking_id)),
+            ("grid_codes", other_grid),
+            ("start_time", "2025-01-02T10:30"),
+            ("instrument", "Talos"),
+            ("notes", ""),
+        ])
+        with self.assertRaisesRegex(InventoryError, "exactly those grids"):
+            create_data_session(session_fields, operator_id)
+
+        session_fields.setlist("grid_codes", [selected_grid])
+        created = create_data_session(session_fields, operator_id)
+        self.assertTrue(created["session_code"].startswith("ACCEM-DC-"))
+        conn = database.get_db()
+        status = conn.execute(
+            "SELECT current_status FROM inventory_grids WHERE grid_code=?",
+            [selected_grid],
+        ).fetchone()["current_status"]
+        conn.close()
+        self.assertEqual(status, "In Data Collection")
 
     def test_batch_registration_assigns_unique_grid_ids_and_search_filters_work(self):
         codes = self.create_batch(3)
@@ -305,6 +767,96 @@ class GridInventoryTests(unittest.TestCase):
         ).fetchone()["count"]
         conn.close()
         self.assertEqual(updated, 2)
+
+    def test_bulk_discard_marks_selected_grids_and_prevents_storage(self):
+        first, second, untouched = self.create_batch(3)
+        self.post_storage(first, "FALCON-1", "Box-A", "A1")
+        self.post_storage(second, "FALCON-1", "Box-A", "A2")
+        response = self.client.post(
+            "/admin/inventory/grids/bulk-discard",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "selected_grid_codes": [first, second],
+                "notes": "Discarded after review",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Discarded 2 grid(s)", response.data)
+        conn = database.get_db()
+        statuses = {
+            row["grid_code"]: row["current_status"]
+            for row in conn.execute(
+                "SELECT grid_code, current_status FROM inventory_grids"
+            ).fetchall()
+        }
+        removed_locations = conn.execute(
+            "SELECT COUNT(*) AS count FROM storage_locations "
+            "WHERE grid_id IN (SELECT grid_id FROM inventory_grids "
+            "WHERE grid_code IN (?, ?)) AND removed_at IS NOT NULL",
+            [first, second],
+        ).fetchone()["count"]
+        events = conn.execute(
+            """SELECT COUNT(*) AS count FROM grid_events e
+               JOIN inventory_grids g ON g.grid_id=e.grid_id
+               WHERE g.grid_code IN (?, ?) AND e.event_type='grid_discarded'
+                 AND e.notes='Discarded after review'""",
+            [first, second],
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(statuses[first], "Discarded")
+        self.assertEqual(statuses[second], "Discarded")
+        self.assertEqual(statuses[untouched], "Frozen")
+        self.assertEqual(removed_locations, 2)
+        self.assertEqual(events, 2)
+        storage = self.post_storage(first, "FALCON-1", "Box-A", "A1")
+        self.assertEqual(storage.status_code, 302)
+        detail = self.client.get(f"/admin/inventory/grids/{first}")
+        self.assertIn(b"is discarded and cannot be stored", detail.data)
+
+    def test_bulk_discard_rejects_active_booking_without_partial_changes(self):
+        first, second = self.create_batch(2)
+        conn = database.get_db()
+        conn.execute(
+            """INSERT INTO screening_bookings
+               (user_name, pi_name, email, origin, sample_name, grids, days, status)
+               VALUES ('Grid User', 'Grid PI', 'reserved@example.test', 'Internal',
+                       'Test sample', 1, 1, 'ongoing')"""
+        )
+        booking_id = conn.execute(
+            "SELECT id FROM screening_bookings WHERE email='reserved@example.test'"
+        ).fetchone()["id"]
+        grid_id = conn.execute(
+            "SELECT grid_id FROM inventory_grids WHERE grid_code=?", [first]
+        ).fetchone()["grid_id"]
+        conn.execute(
+            """INSERT INTO screening_booking_grids
+               (screening_booking_id, grid_id, linked_at)
+               VALUES (?, ?, '2025-01-02 12:00:00')""",
+            [booking_id, grid_id],
+        )
+        conn.commit()
+        conn.close()
+
+        response = self.client.post(
+            "/admin/inventory/grids/bulk-discard",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "selected_grid_codes": [first, second],
+            },
+            follow_redirects=True,
+        )
+        self.assertIn(b"is reserved by an active booking", response.data)
+        conn = database.get_db()
+        statuses = conn.execute(
+            "SELECT current_status FROM inventory_grids ORDER BY grid_id"
+        ).fetchall()
+        events = conn.execute(
+            "SELECT COUNT(*) AS count FROM grid_events WHERE event_type='grid_discarded'"
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual([row["current_status"] for row in statuses], ["Frozen", "Frozen"])
+        self.assertEqual(events, 0)
 
     def test_invalid_search_filter_is_rejected_and_grid_type_can_be_deactivated(self):
         grid_type = self.client.post(

@@ -13,6 +13,8 @@
   const status = assistant.querySelector("[data-assistant-status]");
   const csrfToken = assistant.querySelector("[data-assistant-csrf]").value;
   const transcriptionUrl = form.dataset.transcriptionUrl;
+  const slotConfirmUrl = form.dataset.slotConfirmUrl;
+  const slotCancelUrl = form.dataset.slotCancelUrl;
   let mediaRecorder = null;
   let recordingStream = null;
   let recordedChunks = [];
@@ -29,7 +31,7 @@
   let currentAudio = null;
   let currentAudioUrl = null;
   let currentUtterance = null;
-  const welcomeText = "Hello, I’m Mira. Ask me about revenue, billing, or freezing availability.";
+  let pendingActionCard = null;
   const silenceAfterSpeechMs = 1400;
   const voiceActivityThreshold = 0.025;
 
@@ -41,6 +43,7 @@
     message.append(body);
     messages.append(message);
     messages.scrollTop = messages.scrollHeight;
+    return message;
   };
 
   const updateMicButton = () => {
@@ -63,7 +66,11 @@
     if (audioContext) {
       const context = audioContext;
       audioContext = null;
-      void context.close();
+      if (context.state !== "closed") {
+        void context.close().catch((error) => {
+          console.warn("Could not close Mira's voice activity detector:", error);
+        });
+      }
     }
   };
 
@@ -101,7 +108,7 @@
   const speakWithBrowserVoice = (text, reason) => {
     releaseSpokenAudio();
     if (!("speechSynthesis" in window) || typeof window.SpeechSynthesisUtterance !== "function") {
-      finishSpokenAudio(`${reason} Your browser does not provide a speech voice; the answer remains available as text.`);
+      finishSpokenAudio(`${reason} Your browser does not provide a speech voice, so the answer remains available as text.`);
       return;
     }
 
@@ -139,6 +146,98 @@
 
   const showAudioFallback = (messageText, text) => {
     speakWithBrowserVoice(text, messageText);
+  };
+
+  const postSlotAction = async (url, body) => {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrfToken,
+      },
+      body: JSON.stringify(body),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "The slot action failed.");
+    return result;
+  };
+
+  const renderActionPreview = (preview) => {
+    if (pendingActionCard) pendingActionCard.remove();
+    const card = document.createElement("article");
+    card.className = "admin-assistant__message admin-assistant__message--preview";
+    const heading = document.createElement("strong");
+    heading.textContent = preview.title;
+    const details = document.createElement("ul");
+    for (const item of preview.fields) {
+      const line = document.createElement("li");
+      const label = document.createElement("strong");
+      label.textContent = `${item.label}: `;
+      line.append(label, document.createTextNode(item.value));
+      details.append(line);
+    }
+    const note = document.createElement("p");
+    note.textContent = preview.action === "delete"
+      ? "This permanently deletes the selected uncompleted slot. Nothing changes until you confirm."
+      : "This is a preview only. Nothing changes and no registration email is sent until you confirm.";
+    const actions = document.createElement("div");
+    actions.className = "admin-assistant__preview-actions";
+    const confirm = document.createElement("button");
+    confirm.className = preview.action === "delete" ? "button danger" : "button";
+    confirm.type = "button";
+    confirm.textContent = preview.action === "delete" ? "Confirm deletion" : "Confirm & apply";
+    const cancel = document.createElement("button");
+    cancel.className = "button secondary";
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    actions.append(confirm, cancel);
+    card.append(heading, details, note, actions);
+    messages.append(card);
+    messages.scrollTop = messages.scrollHeight;
+    pendingActionCard = card;
+
+    confirm.addEventListener("click", async () => {
+      confirm.disabled = true;
+      cancel.disabled = true;
+      mic.disabled = true;
+      submit.disabled = true;
+      status.textContent = "Applying the confirmed slot change…";
+      try {
+        const result = await postSlotAction(slotConfirmUrl, {
+          token: preview.token,
+          draft: preview.draft,
+        });
+        card.remove();
+        pendingActionCard = null;
+        addMessage("assistant", result.answer);
+        sessionStorage.setItem("mira-navigation-answer", result.answer);
+        status.textContent = "Change saved. Opening the updated slots page…";
+        window.location.assign(result.navigation);
+      } catch (error) {
+        console.error("Mira slot action failed:", error);
+        note.textContent = error instanceof Error
+          ? error.message
+          : "The slot change failed. Please try again.";
+        confirm.disabled = false;
+        cancel.disabled = false;
+        mic.disabled = false;
+        submit.disabled = false;
+        status.textContent = "The change was not applied. Review the message and try again.";
+      }
+    });
+    cancel.addEventListener("click", async () => {
+      confirm.disabled = true;
+      cancel.disabled = true;
+      try {
+        await postSlotAction(slotCancelUrl, { token: preview.token });
+      } catch (error) {
+        console.error("Could not cancel Mira slot preview:", error);
+      } finally {
+        card.remove();
+        pendingActionCard = null;
+        status.textContent = "Preview cancelled. No slot changes were made.";
+      }
+    });
   };
 
   const transcribeRecording = async (recording) => {
@@ -312,10 +411,12 @@
           if (response.status === 401 || response.redirected) {
             throw new Error("Your admin session has expired. Sign in again, then ask Mira to speak.");
           }
-          throw new Error(result.error || "The speech service did not return playable audio. The answer is still shown above.");
+          throw new Error(
+            result.error || "The speech service did not return playable audio. The answer is still shown above."
+          );
         }
         const audioBlob = await response.blob();
-        if (!audioBlob.size) {
+        if (audioBlob.size === 0) {
           throw new Error("The speech service returned an empty audio file. The answer is still shown above.");
         }
         return audioBlob;
@@ -325,19 +426,19 @@
         const audio = new Audio(currentAudioUrl);
         currentAudio = audio;
         audio.onended = () => {
-          finishSpokenAudio("Answer read aloud in Mira’s voice. You can ask another question.");
+          finishSpokenAudio("Answer read aloud in Mira’s feminine voice. You can ask another question.");
         };
         audio.onplay = () => {
           isSpeaking = true;
           assistantBusy = true;
           mic.disabled = true;
-          status.textContent = "Speaking the answer in Mira’s voice…";
+          status.textContent = "Speaking the answer in Mira’s feminine voice…";
         };
         audio.onerror = () => {
           if (currentAudio !== audio) return;
           showAudioFallback("Mira’s audio was generated, but this browser could not decode it.", text);
         };
-        status.textContent = "Speaking the answer in Mira’s voice…";
+        status.textContent = "Speaking the answer in Mira’s feminine voice…";
         return audio.play().catch((error) => {
           if (error.name === "NotAllowedError") {
             speakWithBrowserVoice(text, "Your browser blocked Deepgram audio playback.");
@@ -362,11 +463,12 @@
   };
 
   const pendingNavigationAnswer = sessionStorage.getItem("mira-navigation-answer");
-  if (pendingNavigationAnswer) sessionStorage.removeItem("mira-navigation-answer");
-  addMessage(
-    "assistant",
-    "I’m Mira. Ask me about revenue, billing, or freezing availability. I’ll listen for a pause and send your question automatically."
-  );
+  if (pendingNavigationAnswer) {
+    sessionStorage.removeItem("mira-navigation-answer");
+  }
+  const welcomeText =
+    "Hi, I’m Mira, your ACCEM admin assistant. I can help with revenue, billing, and freezing availability. What can I help you with today?";
+  addMessage("assistant", welcomeText);
   if (pendingNavigationAnswer) {
     addMessage("assistant", pendingNavigationAnswer);
     setOpen(true);
@@ -375,6 +477,12 @@
     setOpen(true);
     speakReply(welcomeText);
   }
+  const openRevenueDetailsForNavigation = () => {
+    if (window.location.hash !== "#revenue-dashboard") return;
+    document.querySelector(".revenue-details")?.setAttribute("open", "");
+  };
+  openRevenueDetailsForNavigation();
+  window.addEventListener("hashchange", openRevenueDetailsForNavigation);
   toggle.addEventListener("click", () => {
     const open = panel.hidden;
     if (!open) {
@@ -406,6 +514,7 @@
     cancelRecording();
     assistantBusy = true;
     let answerToSpeak = null;
+    let actionPreviewReady = false;
     addMessage("user", question);
     input.value = "";
     submit.disabled = true;
@@ -422,13 +531,18 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "The assistant request failed.");
+      addMessage("assistant", result.answer);
+      if (result.action_preview) {
+        actionPreviewReady = true;
+        renderActionPreview(result.action_preview);
+        status.textContent = "Review the slot details above. Confirm to apply, or cancel.";
+        return;
+      }
       if (typeof result.navigation === "string" && result.navigation.startsWith("/admin/")) {
         sessionStorage.setItem("mira-navigation-answer", result.answer);
-        status.textContent = "Opening the schedule…";
         window.location.assign(result.navigation);
         return;
       }
-      addMessage("assistant", result.answer);
       answerToSpeak = result.answer;
     } catch (error) {
       console.error("Admin assistant request failed:", error);
@@ -443,7 +557,9 @@
         status.textContent = "Preparing spoken answer…";
       } else {
         assistantBusy = false;
-        status.textContent = "Tap the microphone to record a question, or type one below.";
+        if (!actionPreviewReady) {
+          status.textContent = "Tap the microphone to record a question or command, or type one below.";
+        }
       }
       input.focus();
     }

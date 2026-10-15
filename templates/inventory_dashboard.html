@@ -15,6 +15,59 @@
     <article class="inventory-metric"><span>{{ label }}</span><strong>{{ value }}</strong></article>
     {% endfor %}
   </section>
+  <section class="inventory-panel inventory-storage-map">
+    <div class="inventory-panel__heading">
+      <div><span class="chart-kicker">Storage arrangement</span><h2>Grid storage map</h2><p>Browse occupied positions by Falcon container and grid box. Select a grid to open its record.</p></div>
+      <a class="button small secondary" href="{{ url_for('inventory.storage') }}">Manage storage</a>
+    </div>
+    <ul class="inventory-storage-legend" aria-label="Grid status codes">
+      <li><span class="inventory-storage-code inventory-storage-code--frozen">NTI</span> Frozen · not lifted</li>
+      <li><span class="inventory-storage-code inventory-storage-code--stored">S</span> Stored</li>
+      <li><span class="inventory-storage-code inventory-storage-code--clipped">C</span> Clipped</li>
+      <li><span class="inventory-storage-code inventory-storage-code--discarded">D</span> Discarded</li>
+      <li><span class="inventory-storage-code inventory-storage-code--used">U</span> In data collection</li>
+    </ul>
+    {% if stored_grids %}
+      <div class="inventory-storage-containers">
+        {% for container, container_grids in stored_grids|groupby('falcon_container_id') %}
+          <section class="inventory-storage-container">
+            <h3>{{ container }}</h3>
+            <div class="inventory-storage-boxes">
+              {% for box, box_grids in container_grids|groupby('grid_box_name') %}
+                <section class="inventory-storage-box">
+                  <h4>{{ box }} <span>{{ box_grids|length }} stored</span></h4>
+                  <div class="inventory-storage-positions">
+                    {% for grid in box_grids %}
+                      <a class="inventory-storage-position" href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.sample_name }}, {{ grid.status_label }}">
+                        <span class="inventory-storage-position__number">{{ grid.grid_position }}</span>
+                        <strong>{{ grid.grid_code }}</strong>
+                        <span class="inventory-storage-position__sample">{{ grid.sample_code }} · {{ grid.sample_name }}</span>
+                        <span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span>
+                      </a>
+                    {% endfor %}
+                  </div>
+                </section>
+              {% endfor %}
+            </div>
+          </section>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-message">No grids currently have an active storage position.</p>
+    {% endif %}
+  </section>
+  <section class="inventory-panel">
+    <div class="inventory-panel__heading"><div><span class="chart-kicker">Grid status</span><h2>Not currently in storage</h2><p>Frozen grids stay marked NTI until lifted; data-collection and discarded grids are listed separately.</p></div></div>
+    {% if not_stored_grids %}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Grid</th><th>Sample</th><th>Freezing batch</th><th>Frozen</th></tr></thead><tbody>
+        {% for grid in not_stored_grids %}
+          <tr><td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}" title="{{ grid.status_label }}">{{ grid.status_code }}</span> {{ grid.status_label }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.batch_code }}</td><td>{{ grid.frozen_at|facility_time }}</td></tr>
+        {% endfor %}
+      </tbody></table></div>
+    {% else %}
+      <p class="empty-message">All active grids have a storage position.</p>
+    {% endif %}
+  </section>
   <div class="inventory-dashboard-grid">
     <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Inventory mix</span><h2>Grids by type</h2></div></div>
       {% if by_type %}<div class="inventory-breakdown">{% for item in by_type %}<div><span>{{ item.grid_type_name }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grids have been registered.</p>{% endif %}

@@ -1,10 +1,17 @@
 # Grid Inventory migration
 
-The migrations are additive and safe to rerun. They create inventory tables,
-indexes, grid type options, identifier sequences, and an optional link from a
-completed freezing booking to its inventory batch and blot conditions; they do
-not alter or replace existing booking, billing, user, or other application
-tables.
+The migrations are additive and tracked in `inventory_schema_migrations`.
+They create inventory tables, indexes, grid type options, identifier
+sequences, an optional link from a completed freezing booking to its inventory
+batch, optional per-grid blot conditions, and auditable links from screening
+and data-collection bookings to selected inventory grids; they do not alter or
+replace existing booking, billing, user, or other application tables.
+
+Public booking forms can reserve up to four available inventory grids for
+screening or data collection. The grid links are stored in the booking-link
+tables created by migration `004_booking_grid_links`. Completion of a linked
+booking records each grid's confirmed Falcon, box, and position in its
+storage-location history within the same transaction as booking completion.
 
 Before applying it to production, back up the configured MySQL database and
 confirm `DATABASE_URL` points to the intended database. Then run from the

@@ -54,6 +54,214 @@ class AdminAssistantTests(unittest.TestCase):
             headers={"X-CSRF-Token": "assistant-test-token"},
         )
 
+    def prepare_slot_action(self, command):
+        response = self.ask(command)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("action_preview", response.get_json())
+        return response.get_json()["action_preview"]
+
+    def confirm_slot_action(self, preview, token=None, draft=None):
+        return self.client.post(
+            "/admin/assistant/slot/confirm",
+            json={
+                "token": token or preview["token"],
+                "draft": draft or preview["draft"],
+            },
+            headers={"X-CSRF-Token": "assistant-test-token"},
+        )
+
+    def test_mira_welcome_opens_once_after_admin_login(self):
+        with self.client.session_transaction() as session:
+            session["mira_welcome"] = True
+
+        first_dashboard = self.client.get("/admin/panel")
+        second_dashboard = self.client.get("/admin/panel")
+
+        self.assertEqual(first_dashboard.status_code, 200)
+        self.assertIn(b'data-auto-open="true"', first_dashboard.data)
+        self.assertEqual(second_dashboard.status_code, 200)
+        self.assertIn(b'data-auto-open="false"', second_dashboard.data)
+
+    def test_voice_booking_preview_does_not_mutate_until_confirmed(self):
+        next_weekday = datetime.date.today() + datetime.timedelta(days=1)
+        while next_weekday.weekday() >= 5:
+            next_weekday += datetime.timedelta(days=1)
+        command = (
+            "Book freezing slot; user Jane Doe; PI Dr Smith; "
+            "email jane@example.test; origin Internal; sample Sample A; "
+            f"grids 2; date {next_weekday.isoformat()}"
+        )
+
+        preview = self.prepare_slot_action(command)
+        conn = database.get_db()
+        self.assertIsNone(
+            conn.execute(
+                "SELECT id FROM freezing_bookings WHERE email=?",
+                ["jane@example.test"],
+            ).fetchone()
+        )
+        conn.close()
+        self.assertIn("Jane Doe", [item["value"] for item in preview["fields"]])
+
+        with patch("blueprints.freezing.send_email"):
+            response = self.confirm_slot_action(preview)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("now visible in the admin slots page", response.get_json()["answer"])
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT user_name, grids, freezing_date, status FROM freezing_bookings WHERE email=?",
+            ["jane@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["user_name"], "Jane Doe")
+        self.assertEqual(booking["grids"], 2)
+        self.assertEqual(booking["freezing_date"], next_weekday.isoformat())
+        self.assertEqual(booking["status"], "active")
+
+    def test_mira_understands_plain_language_booking_and_spoken_values(self):
+        next_weekday = datetime.date.today() + datetime.timedelta(days=1)
+        while next_weekday.weekday() >= 5:
+            next_weekday += datetime.timedelta(days=1)
+        weekday_name = next_weekday.strftime("%A")
+
+        preview = self.prepare_slot_action(
+            "Can you book a freezing slot for Jane Doe; PI Dr Smith; "
+            "email jane-plain@example.test; origin IISc; sample Sample A; "
+            f"two grids on {weekday_name}"
+        )
+
+        preview_values = {item["label"]: item["value"] for item in preview["fields"]}
+        self.assertEqual(preview_values["User Name"], "Jane Doe")
+        self.assertEqual(preview_values["Grids"], "2")
+        self.assertEqual(preview_values["Freezing Date"], next_weekday.isoformat())
+        conn = database.get_db()
+        self.assertIsNone(
+            conn.execute(
+                "SELECT id FROM freezing_bookings WHERE email=?",
+                ["jane-plain@example.test"],
+            ).fetchone()
+        )
+        conn.close()
+
+    def test_mira_understands_plain_language_slot_edits_and_cancellation(self):
+        conn = database.get_db()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO freezing_bookings
+               (user_name, pi_name, email, origin, sample_name, grids, freezing_date, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active')""",
+            ["Plain User", "Plain PI", "plain@example.test", "Internal", "Plain Sample", 1, "2030-01-02"],
+        )
+        slot_id = cur.lastrowid
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        preview = self.prepare_slot_action(
+            f"Please change grids for freezing slot {slot_id} to three"
+        )
+        self.assertEqual(preview["draft"]["value"], "3")
+        response = self.confirm_slot_action(preview)
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db()
+        self.assertEqual(
+            conn.execute(
+                "SELECT grids FROM freezing_bookings WHERE id=?", [slot_id]
+            ).fetchone()["grids"],
+            3,
+        )
+        conn.close()
+
+        cancel_preview = self.prepare_slot_action(f"Cancel freezing {slot_id}")
+        self.assertEqual(cancel_preview["action"], "delete")
+
+    def test_voice_screening_booking_uses_confirmed_preview(self):
+        preview = self.prepare_slot_action(
+            "Book screening slot; user Alex Doe; PI Dr Test PI; "
+            "email alex@example.test; origin External; institute IISc; "
+            "sample Sample B; grids 1"
+        )
+        with patch("blueprints.screening.send_email"):
+            response = self.confirm_slot_action(preview)
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT user_name, pi_name, origin, sample_name, status FROM screening_bookings WHERE email=?",
+            ["alex@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["user_name"], "Alex Doe")
+        self.assertEqual(booking["pi_name"], "Dr Test PI")
+        self.assertEqual(booking["origin"], "External")
+        self.assertEqual(booking["sample_name"], "Sample B")
+        self.assertEqual(booking["status"], "waiting")
+
+    def test_voice_data_collection_booking_uses_confirmed_preview(self):
+        preview = self.prepare_slot_action(
+            "Book data collection slot; user Sam Doe; PI Dr Rao; "
+            "email sam@example.test; origin Industry; institute Cryo Lab; "
+            "sample Sample C; grids 2; days 3"
+        )
+        with patch("blueprints.imaging.send_email"):
+            response = self.confirm_slot_action(preview)
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT user_name, origin, esm, grids, days, status FROM bookings WHERE email=?",
+            ["sam@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["user_name"], "Sam Doe")
+        self.assertEqual(booking["origin"], "Industry")
+        self.assertEqual(booking["esm"], "Cryo Lab")
+        self.assertEqual(booking["grids"], 2)
+        self.assertEqual(booking["days"], 3)
+        self.assertEqual(booking["status"], "waiting")
+
+    def test_voice_slot_update_and_delete_require_confirmed_unchanged_preview(self):
+        conn = database.get_db()
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO freezing_bookings
+               (user_name, pi_name, email, origin, sample_name, grids, freezing_date, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active')""",
+            ["Update User", "Update PI", "update@example.test", "Internal", "Update Sample", 1, "2030-01-02"],
+        )
+        slot_id = cur.lastrowid
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        update_preview = self.prepare_slot_action(
+            f"Change freezing slot ID {slot_id} grids to 3"
+        )
+        response = self.confirm_slot_action(update_preview)
+        self.assertEqual(response.status_code, 200)
+        conn = database.get_db()
+        self.assertEqual(
+            conn.execute("SELECT grids FROM freezing_bookings WHERE id=?", [slot_id]).fetchone()["grids"],
+            3,
+        )
+        conn.close()
+
+        delete_preview = self.prepare_slot_action(f"Delete freezing slot ID {slot_id}")
+        changed_draft = dict(delete_preview["draft"])
+        changed_draft["slot_id"] = slot_id + 1
+        tampered = self.confirm_slot_action(delete_preview, draft=changed_draft)
+        self.assertEqual(tampered.status_code, 409)
+        conn = database.get_db()
+        self.assertIsNotNone(
+            conn.execute("SELECT id FROM freezing_bookings WHERE id=?", [slot_id]).fetchone()
+        )
+        conn.close()
+        deleted = self.confirm_slot_action(delete_preview)
+        self.assertEqual(deleted.status_code, 200)
+        conn = database.get_db()
+        self.assertIsNone(
+            conn.execute("SELECT id FROM freezing_bookings WHERE id=?", [slot_id]).fetchone()
+        )
+        conn.close()
+
     def test_freezing_answer_reads_active_and_completed_log_entries(self):
         today = datetime.date.today().isoformat()
         conn = database.get_db()
@@ -87,6 +295,11 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn("2 active booking(s) reserve 5 grid(s)", answer)
         self.assertIn("Researcher One, Sample One, 3 grid(s)", answer)
         self.assertIn("Completed log: 1 booking(s), 3 actual grid(s)", answer)
+        self.assertIn("enter the actual grids and billing details", answer)
+        self.assertEqual(
+            response.get_json()["navigation"],
+            "/admin/freezing#active-freezing-slots",
+        )
 
     def test_revenue_answer_uses_dashboard_calculation_for_period(self):
         current_year = datetime.date.today().year
@@ -105,6 +318,10 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn("Revenue summary for this year to date", answer)
         self.assertIn("CSIC project record(s)", answer)
         self.assertIn("₹1,234.50", answer)
+        self.assertEqual(
+            response.get_json()["navigation"],
+            "/admin/panel#revenue-dashboard",
+        )
 
     def test_unsupported_daily_revenue_is_not_reported_as_a_precise_total(self):
         response = self.ask("How much revenue did we make today?")
@@ -112,14 +329,7 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("don't track every source at daily granularity", response.get_json()["answer"])
 
-    def test_unknown_question_gets_supported_topics(self):
-        response = self.ask("What is the weather today?")
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("revenue and billing", response.get_json()["answer"])
-        self.assertIn("freezing availability", response.get_json()["answer"])
-
-    def test_schedule_requests_navigate_to_the_matching_schedule(self):
+    def test_schedule_requests_navigate_to_the_matching_admin_queue(self):
         cases = {
             "Show me freezing schedule": "/admin/freezing",
             "Open the screening schedule": "/admin/screening",
@@ -130,15 +340,24 @@ class AdminAssistantTests(unittest.TestCase):
             with self.subTest(question=question):
                 response = self.ask(question)
                 self.assertEqual(response.status_code, 200)
-                self.assertEqual(response.get_json()["navigation"], expected_url)
-                self.assertIn("active, waiting, and completed slots", response.get_json()["answer"])
+                result = response.get_json()
+                self.assertEqual(result["navigation"], expected_url)
+                self.assertIn("active, waiting, and completed slots", result["answer"])
 
-    def test_schedule_request_for_multiple_services_asks_which_schedule(self):
-        response = self.ask("Show the freezing and screening schedule")
+    def test_schedule_request_for_multiple_services_asks_which_one(self):
+        response = self.ask("Show me the freezing and screening schedule")
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("navigate_url", response.get_json())
+        self.assertIsNone(response.get_json()["navigation"])
         self.assertIn("Which schedule", response.get_json()["answer"])
+
+    def test_unknown_question_gets_supported_topics(self):
+        response = self.ask("What is the weather today?")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("revenue and billing", response.get_json()["answer"])
+        self.assertIn("freezing availability", response.get_json()["answer"])
+        self.assertIsNone(response.get_json()["navigation"])
 
     def test_invalid_and_oversized_questions_are_rejected(self):
         empty = self.ask("  ")
@@ -305,13 +524,14 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertIn(b'data-auto-open="true"', first_response.data)
         self.assertIn(b'data-auto-open="false"', second_response.data)
 
-    def test_spoken_answer_uses_deepgram_helena_wav_when_configured(self):
+    def test_spoken_answer_uses_deepgram_helena_voice_when_configured(self):
         audio_data = b"RIFF\x04\x00\x00\x00WAVE"
+        provider_response = io.BytesIO(audio_data)
         with (
             patch.dict(os.environ, {"DEEPGRAM_API_KEY": "deepgram-test-key"}),
             patch(
                 "blueprints.admin.urllib.request.urlopen",
-                return_value=io.BytesIO(audio_data),
+                return_value=provider_response,
             ) as urlopen,
         ):
             response = self.speak("  Freezing availability is eight grids today.  ")
@@ -329,14 +549,12 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertEqual(query["model"], ["aura-2-helena-en"])
         self.assertEqual(query["encoding"], ["linear16"])
         self.assertEqual(query["container"], ["wav"])
-        self.assertEqual(
-            provider_request.get_header("Authorization"),
-            "Token deepgram-test-key",
-        )
+        self.assertEqual(provider_request.get_header("Authorization"), "Token deepgram-test-key")
         self.assertEqual(provider_request.get_header("Accept"), "audio/wav")
-        self.assertEqual(json.loads(provider_request.data), {
-            "text": "Freezing availability is eight grids today.",
-        })
+        self.assertEqual(
+            json.loads(provider_request.data),
+            {"text": "Freezing availability is eight grids today."},
+        )
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 30)
 
     def test_spoken_answer_rejects_non_wav_provider_response(self):
