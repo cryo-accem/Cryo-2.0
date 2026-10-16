@@ -42,9 +42,9 @@
           <section id="inventory-grid-picker" class="form-field full hidden"
                    data-search-url="{{ url_for('public.search_public_inventory') }}"
                    data-inventory-url="{{ url_for('public.grid_inventory') }}">
-            <div><label>Choose your grids from inventory <span class="form-hint">Optional · up to four grids</span></label><p class="form-hint">Available grids appear after your name and sample match the inventory record. Leave grids unselected to use your own.</p></div>
+            <div><label>Choose your grids from inventory <span class="form-hint">Optional · up to four grids</span></label><p class="form-hint">Available grids associated with your username appear below. The sample name is shown for each grid. Leave grids unselected to use your own.</p></div>
             <div class="public-grid-selection" id="public-grid-results" role="group" aria-label="Matching available inventory grids" aria-live="polite">
-              <p class="empty-message">Enter your name and sample name above to check for matching grids.</p>
+              <p class="empty-message">Enter your name above to check for matching grids.</p>
             </div>
             <p class="public-grid-inventory-link">Looking for a grid that is not available to book? <a id="full-inventory-link" href="{{ url_for('public.grid_inventory') }}">Search the full inventory by username</a>.</p>
           </section>
@@ -152,7 +152,7 @@ function showGridSearchMessage(message) {
 function renderAvailableGrids(grids) {
   inventoryGridResults.replaceChildren();
   if (!grids.length) {
-    showGridSearchMessage('No available grids match this name and sample. Search the full inventory below to see whether other grids are recorded.');
+    showGridSearchMessage('No available grids are recorded for this username. Search the full inventory below to see whether other grids are recorded.');
     return;
   }
   grids.forEach(grid => {
@@ -190,12 +190,11 @@ function renderAvailableGrids(grids) {
 }
 async function searchMatchingGrids() {
   const name = userNameInput.value.trim();
-  const sample = sampleNameInput.value.trim();
   const fullInventoryUrl = new URL(inventoryGridPicker.dataset.inventoryUrl, window.location.origin);
   fullInventoryUrl.searchParams.set('username', name);
   fullInventoryLink.href = fullInventoryUrl.toString();
-  if (!name || !sample) {
-    showGridSearchMessage('Enter your name and sample name above to check for matching grids.');
+  if (!name) {
+    showGridSearchMessage('Enter your name above to check for matching grids.');
     return;
   }
   if (gridSearchRequest) gridSearchRequest.abort();
@@ -203,7 +202,6 @@ async function searchMatchingGrids() {
   showGridSearchMessage('Checking for matching grids…');
   const searchUrl = new URL(inventoryGridPicker.dataset.searchUrl, window.location.origin);
   searchUrl.searchParams.set('user_name', name);
-  searchUrl.searchParams.set('sample_name', sample);
   try {
     const response = await fetch(searchUrl, { signal: gridSearchRequest.signal });
     if (!response.ok) throw new Error(`Grid search failed with status ${response.status}.`);

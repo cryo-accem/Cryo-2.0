@@ -621,7 +621,7 @@ def _current_location(cursor, grid_id, lock=False):
 
 
 def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
-                session_id=None, operation_reference=None):
+                session_id=None, operation_reference=None, mark_stored=False):
     if grid["current_status"] == "Discarded":
         raise InventoryError(f"{grid['grid_code']} is discarded and cannot be stored.")
     if session_id and grid["current_status"] != "In Data Collection":
@@ -667,10 +667,11 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (grid["grid_id"], container, box, position, event_time, actor_id, notes),
     )
-    cursor.execute(
-        "UPDATE inventory_grids SET current_status='Stored' WHERE grid_id=?",
-        [grid["grid_id"]],
-    )
+    if session_id or mark_stored:
+        cursor.execute(
+            "UPDATE inventory_grids SET current_status='Stored' WHERE grid_id=?",
+            [grid["grid_id"]],
+        )
     if session_id:
         event_type = "returned_to_storage"
     elif old_location:
@@ -884,7 +885,7 @@ def unlink_grid_from_booking(fields, actor_id):
 
 
 def link_selected_grids_to_booking(
-    cursor, service_type, booking_id, grid_codes, researcher_name, sample_name
+    cursor, service_type, booking_id, grid_codes, researcher_name
 ):
     link_targets = {
         "screening": ("screening_booking_grids", "screening_booking_id", "SCREENING"),
@@ -907,16 +908,15 @@ def link_selected_grids_to_booking(
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                LEFT JOIN users u ON u.id=s.linked_user_id
                WHERE g.grid_code=?
-                 AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
                  AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
                       OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))"""
             + _lock_clause(),
-            [code, sample_name, researcher_name, researcher_name],
+            [code, researcher_name, researcher_name],
         )
         grid = cursor.fetchone()
         if not grid:
             raise InventoryError(
-                f"{code} does not match the entered researcher and sample."
+                f"{code} is not associated with the entered username."
             )
         if grid["current_status"] not in {"Frozen", "Clipped", "Stored"}:
             raise InventoryError(
@@ -1095,6 +1095,7 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
             "Storage confirmed when the linked booking was completed.",
             event_time,
             operation_reference=f"{operation_prefix}-{booking_id}",
+            mark_stored=True,
         )
     return count
 
@@ -1669,8 +1670,8 @@ def dashboard_data():
     try:
         cursor.execute(
             """SELECT COUNT(*) AS total,
-                 SUM(CASE WHEN current_status IN ('Frozen','Clipped') THEN 1 ELSE 0 END) AS frozen,
-                 SUM(CASE WHEN clipped=1 THEN 1 ELSE 0 END) AS clipped,
+                 SUM(CASE WHEN current_status='Frozen' THEN 1 ELSE 0 END) AS frozen,
+                 SUM(CASE WHEN current_status='Clipped' THEN 1 ELSE 0 END) AS clipped,
                  SUM(CASE WHEN current_status='Stored' THEN 1 ELSE 0 END) AS stored_count,
                  SUM(CASE WHEN current_status='In Data Collection' THEN 1 ELSE 0 END) AS collecting,
                  SUM(CASE WHEN current_status='Discarded' THEN 1 ELSE 0 END) AS discarded
@@ -1727,7 +1728,7 @@ def dashboard_storage():
             if item["current_status"] == "Discarded":
                 item["status_code"] = "D"
                 item["status_label"] = "Discarded"
-            elif item["clipped"] or item["current_status"] == "Clipped":
+            elif item["current_status"] == "Clipped":
                 item["status_code"] = "C"
                 item["status_label"] = "Clipped"
             elif item["current_status"] == "Stored":
@@ -1735,10 +1736,10 @@ def dashboard_storage():
                 item["status_label"] = "Stored"
             elif item["current_status"] == "In Data Collection":
                 item["status_code"] = "U"
-                item["status_label"] = "In data collection"
+                item["status_label"] = "In microscope"
             else:
-                item["status_code"] = "NTI"
-                item["status_label"] = "Frozen · not lifted"
+                item["status_code"] = "F"
+                item["status_label"] = "Frozen"
 
             if item["falcon_container_id"] is None:
                 not_stored.append(item)

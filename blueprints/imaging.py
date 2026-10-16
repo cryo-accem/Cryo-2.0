@@ -58,7 +58,7 @@ def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids,
         booking_id = cur.lastrowid
         if grid_codes:
             link_selected_grids_to_booking(
-                cur, "data_collection", booking_id, grid_codes, user_name, sample_name
+                cur, "data_collection", booking_id, grid_codes, user_name
             )
         conn.commit()
     except Exception:

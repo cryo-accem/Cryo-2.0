@@ -125,7 +125,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(version_count, 3)
         self.assertIsNotNone(link_table)
 
-    def test_inventory_dashboard_renders_stored_grid_count(self):
+    def test_inventory_dashboard_keeps_frozen_grid_status_when_position_is_assigned(self):
         codes = self.create_batch(1)
         response = self.post_storage(codes[0], "FALCON-1", "Box-A", "A1")
         self.assertEqual(response.status_code, 302)
@@ -135,7 +135,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         self.assertRegex(
             dashboard.data.decode(),
-            r"<span>Stored</span>\s*<strong>1</strong>",
+            r"<span>Frozen</span>\s*<strong>1</strong>",
         )
 
     def test_public_grid_inventory_link_is_in_home_portal_not_primary_navigation(self):
@@ -150,7 +150,7 @@ class GridInventoryTests(unittest.TestCase):
             r'<a class="portal-card" href="/inventory"><i class="fa-solid fa-boxes-stacked"[^>]*></i><strong>Grid inventory</strong><span>Find your grids by username',
         )
 
-    def test_inventory_dashboard_shows_storage_positions_and_legacy_status_codes(self):
+    def test_inventory_dashboard_shows_storage_positions_with_distinct_lifecycle_codes(self):
         frozen, stored, clipped, discarded, in_collection = self.create_batch(5)
         self.post_storage(stored, "Falcon-A", "GridBox-1", "1")
         self.post_storage(clipped, "Falcon-A", "GridBox-1", "2")
@@ -175,14 +175,14 @@ class GridInventoryTests(unittest.TestCase):
         content = dashboard.data.decode()
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
-        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Stored"', content)
+        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Frozen"', content)
         self.assertIn(f'aria-label="Position 2, {clipped}, Researcher, Clipped"', content)
         for code in (frozen, discarded, in_collection):
             self.assertIn(f'href="/admin/inventory/grids/{code}"', content)
-        self.assertRegex(content, r">NTI</span>\s*Frozen · not lifted")
-        self.assertRegex(content, r">S</span>")
+        self.assertRegex(content, r">F</span>\s*Frozen")
         self.assertRegex(content, r">C</span>")
         self.assertRegex(content, r">D</span>")
+        self.assertRegex(content, r">U</span>\s*In microscope")
         self.assertRegex(content, r">U</span>")
 
     def test_storage_groups_all_positions_by_falcon_and_box(self):
@@ -466,6 +466,72 @@ class GridInventoryTests(unittest.TestCase):
         conn.close()
         self.assertEqual(data_booking["grids"], 1)
         self.assertEqual(data_link["grid_code"], other_grid)
+
+    def test_username_search_and_screening_picker_include_linked_account_grids_across_samples(self):
+        selected_grid = self.create_batch(
+            1, researcher_name="Different display name", sample_name="Stored sample"
+        )[0]
+        unrelated_grid = self.create_batch(
+            1, researcher_name="Different researcher", sample_name="Another sample"
+        )[0]
+        conn = database.get_db()
+        conn.execute(
+            "INSERT INTO users (username, email, password_hash, role) "
+            "VALUES (?, ?, ?, 'user')",
+            ["Subajit", "subajit@example.test", "unused"],
+        )
+        user_id = conn.execute(
+            "SELECT id FROM users WHERE username=?", ["Subajit"]
+        ).fetchone()["id"]
+        conn.execute(
+            """UPDATE inventory_samples SET linked_user_id=?
+               WHERE sample_id=(SELECT sample_id FROM inventory_grids WHERE grid_code=?)""",
+            [user_id, selected_grid],
+        )
+        conn.commit()
+        conn.close()
+
+        guest = self.app.test_client()
+        inventory = guest.get("/inventory?username=Subajit")
+        self.assertIn(selected_grid.encode(), inventory.data)
+        self.assertNotIn(unrelated_grid.encode(), inventory.data)
+
+        search = guest.get("/inventory/search?user_name=Subajit")
+        self.assertEqual(search.status_code, 200)
+        grids = search.get_json()["grids"]
+        self.assertEqual([grid["grid_code"] for grid in grids], [selected_grid])
+        self.assertEqual(grids[0]["sample_name"], "Stored sample")
+
+        form = guest.get("/register")
+        csrf_match = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', form.data)
+        self.assertIsNotNone(csrf_match)
+        with patch("blueprints.screening.send_email"):
+            response = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_match.group(1).decode(),
+                    "reg_type": "screening",
+                    "user_name": "Subajit",
+                    "pi_name": "Grid PI",
+                    "email": "subajit-screening@example.test",
+                    "origin": "Internal",
+                    "sample_name": "Booking",
+                    "grids": "1",
+                    "inventory_grid_codes": [selected_grid],
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+
+        conn = database.get_db()
+        linked_grid = conn.execute(
+            """SELECT g.grid_code FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE b.email=?""",
+            ["subajit-screening@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(linked_grid["grid_code"], selected_grid)
 
     def test_public_registration_rejects_unrecognized_origin_values(self):
         response = self.client.post(
@@ -787,7 +853,7 @@ class GridInventoryTests(unittest.TestCase):
         ).fetchall()
         conn.close()
         self.assertEqual([row["grid_position"] for row in positions], ["A1", "A2"])
-        self.assertEqual([row["current_status"] for row in statuses], ["Stored", "Stored"])
+        self.assertEqual([row["current_status"] for row in statuses], ["Frozen", "Frozen"])
 
         types_page = self.client.get("/admin/inventory/grid-types")
         self.assertEqual(types_page.status_code, 200)
@@ -1050,7 +1116,7 @@ class GridInventoryTests(unittest.TestCase):
         ).fetchall()
         conn.close()
         self.assertEqual(rows[0]["clipped"], 1)
-        self.assertEqual(rows[0]["current_status"], "Stored")
+        self.assertEqual(rows[0]["current_status"], "Clipped")
         self.assertEqual(rows[1]["clipped"], 0)
         self.assertEqual(rows[1]["current_status"], "Frozen")
 

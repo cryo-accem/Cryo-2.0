@@ -21,11 +21,11 @@
       <a class="button small secondary" href="{{ url_for('inventory.storage') }}">Manage storage</a>
     </div>
     <ul class="inventory-storage-legend" aria-label="Grid status codes">
-      <li><span class="inventory-storage-code inventory-storage-code--frozen">NTI</span> Frozen · not lifted</li>
+      <li><span class="inventory-storage-code inventory-storage-code--frozen">F</span> Frozen</li>
       <li><span class="inventory-storage-code inventory-storage-code--stored">S</span> Stored</li>
       <li><span class="inventory-storage-code inventory-storage-code--clipped">C</span> Clipped</li>
       <li><span class="inventory-storage-code inventory-storage-code--discarded">D</span> Discarded</li>
-      <li><span class="inventory-storage-code inventory-storage-code--used">U</span> In data collection</li>
+      <li><span class="inventory-storage-code inventory-storage-code--used">U</span> In microscope</li>
     </ul>
     {% if stored_grids %}
       <div class="inventory-storage-containers">
@@ -57,7 +57,7 @@
     {% endif %}
   </section>
   <section class="inventory-panel">
-    <div class="inventory-panel__heading"><div><span class="chart-kicker">Grid status</span><h2>Not currently in storage</h2><p>Frozen grids stay marked NTI until lifted; data-collection and discarded grids are listed separately.</p></div></div>
+    <div class="inventory-panel__heading"><div><span class="chart-kicker">Grid status</span><h2>Not currently in storage</h2><p>Frozen grids remain F until their status changes; grids in the microscope and discarded grids are listed separately.</p></div></div>
     {% if not_stored_grids %}
       <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Grid</th><th>Sample</th><th>Freezing batch</th><th>Frozen</th></tr></thead><tbody>
         {% for grid in not_stored_grids %}

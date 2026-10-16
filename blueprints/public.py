@@ -79,12 +79,11 @@ def grid_inventory():
 @public_bp.route("/inventory/search")
 def search_public_inventory():
     researcher_name = request.args.get("user_name", "").strip()
-    sample_name = request.args.get("sample_name", "").strip()
-    if not researcher_name or not sample_name:
+    if not researcher_name:
         return jsonify({"grids": []})
-    if len(researcher_name) > 150 or len(sample_name) > 180:
-        return jsonify({"error": "Enter a shorter researcher or sample name."}), 400
-    grids = public_inventory_grids(researcher_name, sample_name, available_only=True)
+    if len(researcher_name) > 150:
+        return jsonify({"error": "Enter a shorter username."}), 400
+    grids = public_inventory_grids(researcher_name, available_only=True)
     return jsonify({
         "grids": [
             {

@@ -59,7 +59,7 @@ def register_screening(user_name, pi_name, email, origin, esm, sample_name, grid
         booking_id = cur.lastrowid
         if grid_codes:
             link_selected_grids_to_booking(
-                cur, "screening", booking_id, grid_codes, user_name, sample_name
+                cur, "screening", booking_id, grid_codes, user_name
             )
         conn.commit()
     except Exception:
