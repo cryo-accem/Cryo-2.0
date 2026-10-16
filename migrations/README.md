@@ -8,6 +8,8 @@ and data-collection bookings to selected inventory grids; they do not alter or
 replace existing booking, billing, user, or other application tables.
 Migration `005_grid_types` activates the four supported grid types and
 deactivates other options without deleting types referenced by historical grids.
+The active types are Quantifoil holey carbon, Carbon-coated grids, Gold
+Quantifoil Gold Grids, and Graphene-coated grids.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link
