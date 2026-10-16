@@ -61,6 +61,37 @@ class AdminCsicProjectTests(unittest.TestCase):
         self.assertIn(b"<span>GST (18%)</span>", response.data)
         self.assertIn(b'<article class="csic-project-row">', response.data)
         self.assertIn(b"Save changes", response.data)
+        self.assertIn(b"Net revenue (except CSIC)", response.data)
+        self.assertIn(
+            b"Dashboard net revenue excludes CSIC project income", response.data
+        )
+
+    def test_dashboard_primary_net_revenue_excludes_csic_project_amounts(self):
+        baseline = self.client.get("/admin/panel")
+        self.assertEqual(baseline.status_code, 200)
+        primary_value_pattern = (
+            rb'<article class="revenue-primary-stat"><span>Net revenue '
+            rb'\(except CSIC\)</span><strong>\xe2\x82\xb9([^<]+)</strong>'
+        )
+        baseline_value = re.search(primary_value_pattern, baseline.data)
+        self.assertIsNotNone(baseline_value)
+
+        response = self.client.post(
+            "/admin/csic-projects",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "company_name": "Separate Account CSIC Ltd",
+                "year": str(datetime.date.today().year),
+                "net_amount": "100000.00",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        dashboard_value = re.search(primary_value_pattern, response.data)
+        self.assertIsNotNone(dashboard_value)
+        self.assertEqual(dashboard_value.group(1), baseline_value.group(1))
+        self.assertIn(b"CSIC net revenue</span><strong>\xe2\x82\xb9100,000.00", response.data)
 
     def test_csic_gst_rounds_half_up_to_two_decimal_places(self):
         current_year = datetime.date.today().year
