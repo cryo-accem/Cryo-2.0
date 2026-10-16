@@ -64,6 +64,11 @@ def _text(value, label, limit, required=False):
     return cleaned or None
 
 
+def _partial_match_pattern(value):
+    escaped = value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    return f"%{escaped}%"
+
+
 def _positive_int(value, label, maximum=None):
     try:
         parsed = int(value)
@@ -908,10 +913,14 @@ def link_selected_grids_to_booking(
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                LEFT JOIN users u ON u.id=s.linked_user_id
                WHERE g.grid_code=?
-                 AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
-                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))"""
+                 AND (LOWER(TRIM(s.researcher_name)) LIKE LOWER(?) ESCAPE '!'
+                      OR LOWER(TRIM(u.username)) LIKE LOWER(?) ESCAPE '!')"""
             + _lock_clause(),
-            [code, researcher_name, researcher_name],
+            [
+                code,
+                _partial_match_pattern(researcher_name),
+                _partial_match_pattern(researcher_name),
+            ],
         )
         grid = cursor.fetchone()
         if not grid:
@@ -1469,13 +1478,17 @@ def _grid_filters(args):
     if query:
         pattern = f"%{query}%"
         where.append(
-            "(g.grid_code LIKE ? OR s.sample_code LIKE ? OR s.sample_name LIKE ? "
-            "OR s.researcher_name LIKE ? "
+            "(LOWER(g.grid_code) LIKE LOWER(?) OR LOWER(s.sample_code) LIKE LOWER(?) "
+            "OR LOWER(s.sample_name) LIKE LOWER(?) "
+            "OR LOWER(s.researcher_name) LIKE LOWER(?) "
             "OR EXISTS (SELECT 1 FROM users linked_user "
-            "WHERE linked_user.id=s.linked_user_id AND linked_user.username LIKE ?) "
-            "OR gt.grid_type_name LIKE ? "
-            "OR sl.falcon_container_id LIKE ? OR sl.grid_box_name LIKE ? "
-            "OR sl.grid_position LIKE ? OR fb.batch_code LIKE ?)"
+            "WHERE linked_user.id=s.linked_user_id "
+            "AND LOWER(linked_user.username) LIKE LOWER(?)) "
+            "OR LOWER(gt.grid_type_name) LIKE LOWER(?) "
+            "OR LOWER(sl.falcon_container_id) LIKE LOWER(?) "
+            "OR LOWER(sl.grid_box_name) LIKE LOWER(?) "
+            "OR LOWER(sl.grid_position) LIKE LOWER(?) "
+            "OR LOWER(fb.batch_code) LIKE LOWER(?))"
         )
         values.extend([pattern] * 10)
     for key, expression in (
@@ -1786,10 +1799,11 @@ def public_inventory_grids(researcher_name, sample_name=None, available_only=Fal
                LEFT JOIN users u ON u.id=s.linked_user_id
                LEFT JOIN storage_locations sl
                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
-               WHERE (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
-                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))
+               WHERE (LOWER(TRIM(s.researcher_name)) LIKE LOWER(?) ESCAPE '!'
+                      OR LOWER(TRIM(u.username)) LIKE LOWER(?) ESCAPE '!')
                """
-        values = [researcher_name, researcher_name]
+        match_pattern = _partial_match_pattern(researcher_name)
+        values = [match_pattern, match_pattern]
         if sample_name:
             query += " AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))"
             values.append(sample_name)
@@ -1817,14 +1831,14 @@ def public_inventory_grids(researcher_name, sample_name=None, available_only=Fal
             item = dict(row)
             if item["current_status"] == "Discarded":
                 item["status_code"] = "D"
-            elif item["clipped"] or item["current_status"] == "Clipped":
+            elif item["current_status"] == "Clipped":
                 item["status_code"] = "C"
             elif item["current_status"] == "Stored":
                 item["status_code"] = "S"
             elif item["current_status"] == "In Data Collection":
                 item["status_code"] = "U"
             else:
-                item["status_code"] = "NTI"
+                item["status_code"] = "F"
             if not available_only or item["available"]:
                 rows.append(item)
         return rows

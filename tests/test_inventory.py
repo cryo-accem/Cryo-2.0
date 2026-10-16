@@ -114,7 +114,8 @@ class GridInventoryTests(unittest.TestCase):
         version_count = conn.execute(
             "SELECT COUNT(*) AS count FROM inventory_schema_migrations "
             "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link', "
-            "'004_booking_grid_links', '005_grid_types')"
+            "'004_booking_grid_links', '005_grid_types', "
+            "'006_existing_stored_grids_frozen')"
         ).fetchone()["count"]
         link_table = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
@@ -128,7 +129,7 @@ class GridInventoryTests(unittest.TestCase):
         }
         conn.close()
         self.assertEqual(row["sample_name"], "Existing sample")
-        self.assertEqual(version_count, 4)
+        self.assertEqual(version_count, 5)
         self.assertIsNotNone(link_table)
         self.assertEqual(
             active_types,
@@ -179,6 +180,40 @@ class GridInventoryTests(unittest.TestCase):
             },
         )
         self.assertEqual(inactive_other, 0)
+
+    def test_legacy_stored_grids_with_positions_migrate_to_frozen(self):
+        code = self.create_batch(1)[0]
+        self.post_storage(code, "FALCON-LEGACY", "Box-Legacy", "A1")
+        conn = database.get_db()
+        conn.execute(
+            "UPDATE inventory_grids SET current_status='Stored' WHERE grid_code=?",
+            [code],
+        )
+        conn.execute(
+            "DELETE FROM inventory_schema_migrations "
+            "WHERE version='006_existing_stored_grids_frozen'"
+        )
+        conn.commit()
+        conn.close()
+
+        apply_migration()
+
+        conn = database.get_db()
+        status = conn.execute(
+            "SELECT current_status FROM inventory_grids WHERE grid_code=?", [code]
+        ).fetchone()["current_status"]
+        active_location = conn.execute(
+            """SELECT falcon_container_id, grid_box_name, grid_position
+               FROM storage_locations
+               WHERE grid_id=(SELECT grid_id FROM inventory_grids WHERE grid_code=?)
+                 AND removed_at IS NULL""",
+            [code],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(status, "Frozen")
+        self.assertEqual(
+            tuple(active_location), ("FALCON-LEGACY", "Box-Legacy", "A1")
+        )
 
     def test_inventory_dashboard_keeps_frozen_grid_status_when_position_is_assigned(self):
         codes = self.create_batch(1)
@@ -382,7 +417,7 @@ class GridInventoryTests(unittest.TestCase):
     def test_public_inventory_and_booking_grid_selection_are_available_without_admin_login(self):
         selected_grid, other_grid = self.create_batch(2)
         unrelated_grid = self.create_batch(
-            1, researcher_name="Different Researcher", sample_name="Different sample"
+            1, researcher_name="Different Scientist", sample_name="Different sample"
         )[0]
         guest = self.app.test_client()
 
@@ -527,7 +562,7 @@ class GridInventoryTests(unittest.TestCase):
             1, researcher_name="Different display name", sample_name="Stored sample"
         )[0]
         unrelated_grid = self.create_batch(
-            1, researcher_name="Different researcher", sample_name="Another sample"
+            1, researcher_name="Different scientist", sample_name="Another sample"
         )[0]
         conn = database.get_db()
         conn.execute(
@@ -590,6 +625,46 @@ class GridInventoryTests(unittest.TestCase):
         ).fetchone()
         conn.close()
         self.assertEqual(linked_grid["grid_code"], selected_grid)
+
+    def test_name_search_matches_first_or_last_name_without_case_sensitivity(self):
+        grid = self.create_batch(
+            1, researcher_name="Subhajit Mahanty", sample_name="Name search sample"
+        )[0]
+        guest = self.app.test_client()
+
+        for name_variant in ("subhajit", "MAHANTY", "sUbHaJiT mAhAnTy"):
+            response = guest.get(f"/inventory?username={name_variant.replace(' ', '%20')}")
+            self.assertIn(grid.encode(), response.data, name_variant)
+
+        for query in ("SUBHAJIT", "mahanty"):
+            response = self.client.get(f"/admin/inventory/grids?q={query}")
+            self.assertIn(grid.encode(), response.data, query)
+
+        search = guest.get("/inventory/search?user_name=mahanty")
+        self.assertEqual(
+            [item["grid_code"] for item in search.get_json()["grids"]],
+            [grid],
+        )
+
+        form = guest.get("/register")
+        csrf_match = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', form.data)
+        self.assertIsNotNone(csrf_match)
+        with patch("blueprints.screening.send_email"):
+            booking = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_match.group(1).decode(),
+                    "reg_type": "screening",
+                    "user_name": "subhajit",
+                    "pi_name": "Grid PI",
+                    "email": "subhajit-search@example.test",
+                    "origin": "Internal",
+                    "sample_name": "A different booking sample",
+                    "grids": "1",
+                    "inventory_grid_codes": [grid],
+                },
+            )
+        self.assertEqual(booking.status_code, 302)
 
     def test_public_registration_rejects_unrecognized_origin_values(self):
         response = self.client.post(

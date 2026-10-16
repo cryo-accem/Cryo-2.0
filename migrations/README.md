@@ -10,6 +10,9 @@ Migration `005_grid_types` activates the four supported grid types and
 deactivates other options without deleting types referenced by historical grids.
 The active types are Quantifoil holey carbon, Carbon-coated grids, Gold
 Quantifoil Gold Grids, and Graphene-coated grids.
+Migration `006_existing_stored_grids_frozen` corrects existing grids that have
+an active storage location but still carry the legacy `Stored` status to
+`Frozen`; their storage-location records are retained.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link

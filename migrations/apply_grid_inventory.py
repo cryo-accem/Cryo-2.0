@@ -15,6 +15,7 @@ MIGRATIONS = (
     "003_per_grid_blot_conditions",
     "004_booking_grid_links",
     "005_grid_types",
+    "006_existing_stored_grids_frozen",
 )
 
 
