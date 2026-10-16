@@ -468,14 +468,11 @@
   }
   const welcomeText =
     "Hi, I’m Mira, your ACCEM admin assistant. I can help with revenue, billing, and freezing availability. What can I help you with today?";
-  addMessage("assistant", welcomeText);
   if (pendingNavigationAnswer) {
+    addMessage("assistant", welcomeText);
     addMessage("assistant", pendingNavigationAnswer);
     setOpen(true);
-  } else if (assistant.dataset.autoOpen === "true") {
     hasWelcomed = true;
-    setOpen(true);
-    speakReply(welcomeText);
   }
   const openRevenueDetailsForNavigation = () => {
     if (window.location.hash !== "#revenue-dashboard") return;
@@ -492,6 +489,7 @@
     setOpen(open);
     if (open && !hasWelcomed) {
       hasWelcomed = true;
+      addMessage("assistant", welcomeText);
       speakReply(welcomeText);
     }
   });

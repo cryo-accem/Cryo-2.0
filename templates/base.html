@@ -76,7 +76,7 @@
   {% endwith %}
   {% block content %}{% endblock %}
   {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant" data-speech-url="{{ url_for('admin.assistant_speak') }}" data-auto-open="{{ 'true' if show_mira_welcome|default(false) else 'false' }}">
+  <section class="admin-assistant" data-admin-assistant aria-label="ACCEM admin assistant" data-speech-url="{{ url_for('admin.assistant_speak') }}">
     <button class="admin-assistant__toggle" type="button" data-assistant-toggle aria-expanded="false" aria-controls="admin-assistant-panel">
       <i class="fa-solid fa-comment-dots" aria-hidden="true"></i><span>Ask Mira</span>
     </button>

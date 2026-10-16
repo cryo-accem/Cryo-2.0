@@ -70,7 +70,7 @@ class AdminAssistantTests(unittest.TestCase):
             headers={"X-CSRF-Token": "assistant-test-token"},
         )
 
-    def test_mira_welcome_opens_once_after_admin_login(self):
+    def test_mira_does_not_open_automatically_on_dashboard_load(self):
         with self.client.session_transaction() as session:
             session["mira_welcome"] = True
 
@@ -78,9 +78,12 @@ class AdminAssistantTests(unittest.TestCase):
         second_dashboard = self.client.get("/admin/panel")
 
         self.assertEqual(first_dashboard.status_code, 200)
-        self.assertIn(b'data-auto-open="true"', first_dashboard.data)
+        self.assertIn(b'data-admin-assistant', first_dashboard.data)
+        self.assertNotIn(b'data-auto-open=', first_dashboard.data)
         self.assertEqual(second_dashboard.status_code, 200)
-        self.assertIn(b'data-auto-open="false"', second_dashboard.data)
+        self.assertNotIn(b'data-auto-open=', second_dashboard.data)
+        with self.client.session_transaction() as session:
+            self.assertNotIn("mira_welcome", session)
 
     def test_voice_booking_preview_does_not_mutate_until_confirmed(self):
         next_weekday = datetime.date.today() + datetime.timedelta(days=1)
@@ -514,15 +517,16 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertNotIn("private test phrase", error)
         self.assertNotIn("private-test-key", error)
 
-    def test_login_welcome_flag_opens_mira_once_on_dashboard(self):
+    def test_legacy_mira_welcome_flag_does_not_open_dashboard_assistant(self):
         with self.client.session_transaction() as session:
             session["mira_welcome"] = True
 
         first_response = self.client.get("/admin/panel")
         second_response = self.client.get("/admin/panel")
 
-        self.assertIn(b'data-auto-open="true"', first_response.data)
-        self.assertIn(b'data-auto-open="false"', second_response.data)
+        self.assertIn(b'data-admin-assistant', first_response.data)
+        self.assertNotIn(b'data-auto-open=', first_response.data)
+        self.assertNotIn(b'data-auto-open=', second_response.data)
 
     def test_spoken_answer_uses_deepgram_helena_voice_when_configured(self):
         audio_data = b"RIFF\x04\x00\x00\x00WAVE"

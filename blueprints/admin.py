@@ -182,7 +182,6 @@ def login():
             session.permanent = True
             session["admin_logged_in"] = True
             session["admin_user_id"] = user["id"]
-            session["mira_welcome"] = True
             if user["must_change_password"]:
                 session["must_change_password"] = True
                 return redirect(url_for("admin.change_password"))
@@ -276,6 +275,7 @@ def billing_preview():
 def panel():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
+    session.pop("mira_welcome", None)
     slot_form_state = session.pop("_admin_slot_form_state", {})
     conn = get_db()
     cur = conn.cursor()
@@ -314,7 +314,6 @@ def panel():
         waiting_start = waiting_end
     return render_template(
         "admin_panel.html",
-        show_mira_welcome=session.pop("mira_welcome", False),
         pi_chart=pi_chart,
         pi_total=pi_total,
         waiting_chart=waiting_chart,
