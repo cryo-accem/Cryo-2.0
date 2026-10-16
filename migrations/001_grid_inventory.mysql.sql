@@ -170,9 +170,9 @@ CREATE TABLE IF NOT EXISTS grid_events (
 
 INSERT IGNORE INTO grid_types (grid_type_name) VALUES
     ('Quantifoil holey carbon'),
-    ('Gold-coated holey carbon'),
-    ('Graphene-coated grid'),
-    ('Other');
+    ('Carbon-coated grids'),
+    ('Gold Quantifoil Gold Grids'),
+    ('Graphene-coated grids');
 
 INSERT IGNORE INTO inventory_id_sequences (sequence_name, next_value) VALUES
     ('grid', 0),

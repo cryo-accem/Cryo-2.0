@@ -14,6 +14,7 @@ MIGRATIONS = (
     "002_freezing_inventory_link",
     "003_per_grid_blot_conditions",
     "004_booking_grid_links",
+    "005_grid_types",
 )
 
 

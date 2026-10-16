@@ -6,6 +6,8 @@ sequences, an optional link from a completed freezing booking to its inventory
 batch, optional per-grid blot conditions, and auditable links from screening
 and data-collection bookings to selected inventory grids; they do not alter or
 replace existing booking, billing, user, or other application tables.
+Migration `005_grid_types` activates the four supported grid types and
+deactivates other options without deleting types referenced by historical grids.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link

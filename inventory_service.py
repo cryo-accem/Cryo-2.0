@@ -1351,7 +1351,7 @@ def all_grid_types():
     try:
         cursor.execute(
             "SELECT grid_type_id, grid_type_name, active FROM grid_types "
-            "ORDER BY grid_type_name"
+            "WHERE grid_type_name <> 'Other' ORDER BY grid_type_name"
         )
         return cursor.fetchall()
     finally:
@@ -1470,11 +1470,14 @@ def _grid_filters(args):
         pattern = f"%{query}%"
         where.append(
             "(g.grid_code LIKE ? OR s.sample_code LIKE ? OR s.sample_name LIKE ? "
-            "OR s.researcher_name LIKE ? OR gt.grid_type_name LIKE ? "
+            "OR s.researcher_name LIKE ? "
+            "OR EXISTS (SELECT 1 FROM users linked_user "
+            "WHERE linked_user.id=s.linked_user_id AND linked_user.username LIKE ?) "
+            "OR gt.grid_type_name LIKE ? "
             "OR sl.falcon_container_id LIKE ? OR sl.grid_box_name LIKE ? "
             "OR sl.grid_position LIKE ? OR fb.batch_code LIKE ?)"
         )
-        values.extend([pattern] * 9)
+        values.extend([pattern] * 10)
     for key, expression in (
         ("status", "g.current_status=?"),
         ("clipped", "g.clipped=?"),

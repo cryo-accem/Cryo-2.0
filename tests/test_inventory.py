@@ -114,16 +114,71 @@ class GridInventoryTests(unittest.TestCase):
         version_count = conn.execute(
             "SELECT COUNT(*) AS count FROM inventory_schema_migrations "
             "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link', "
-            "'004_booking_grid_links')"
+            "'004_booking_grid_links', '005_grid_types')"
         ).fetchone()["count"]
         link_table = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name='screening_booking_grids'"
         ).fetchone()
+        active_types = {
+            row["grid_type_name"]
+            for row in conn.execute(
+                "SELECT grid_type_name FROM grid_types WHERE active=1"
+            ).fetchall()
+        }
         conn.close()
         self.assertEqual(row["sample_name"], "Existing sample")
-        self.assertEqual(version_count, 3)
+        self.assertEqual(version_count, 4)
         self.assertIsNotNone(link_table)
+        self.assertEqual(
+            active_types,
+            {
+                "Quantifoil holey carbon",
+                "Carbon-coated grids",
+                "Gold Quantifoil Gold Grids",
+                "Graphene-coated grids",
+            },
+        )
+
+    def test_grid_type_migration_leaves_only_requested_types_active(self):
+        conn = database.get_db()
+        conn.execute("DELETE FROM inventory_schema_migrations WHERE version='005_grid_types'")
+        conn.execute("DELETE FROM grid_types WHERE grid_type_name='Carbon-coated grids'")
+        conn.executemany(
+            "INSERT INTO grid_types (grid_type_name, active) VALUES (?, 1)",
+            [
+                ("Gold-coated holey carbon",),
+                ("Graphene-coated grid",),
+                ("Other",),
+                ("Retired custom type",),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        apply_migration()
+
+        conn = database.get_db()
+        active_types = {
+            row["grid_type_name"]
+            for row in conn.execute(
+                "SELECT grid_type_name FROM grid_types WHERE active=1"
+            ).fetchall()
+        }
+        inactive_other = conn.execute(
+            "SELECT active FROM grid_types WHERE grid_type_name='Other'"
+        ).fetchone()["active"]
+        conn.close()
+        self.assertEqual(
+            active_types,
+            {
+                "Quantifoil holey carbon",
+                "Carbon-coated grids",
+                "Gold Quantifoil Gold Grids",
+                "Graphene-coated grids",
+            },
+        )
+        self.assertEqual(inactive_other, 0)
 
     def test_inventory_dashboard_keeps_frozen_grid_status_when_position_is_assigned(self):
         codes = self.create_batch(1)
@@ -501,6 +556,9 @@ class GridInventoryTests(unittest.TestCase):
         grids = search.get_json()["grids"]
         self.assertEqual([grid["grid_code"] for grid in grids], [selected_grid])
         self.assertEqual(grids[0]["sample_name"], "Stored sample")
+        admin_search = self.client.get("/admin/inventory/grids?q=Subajit")
+        self.assertIn(selected_grid.encode(), admin_search.data)
+        self.assertNotIn(unrelated_grid.encode(), admin_search.data)
 
         form = guest.get("/register")
         csrf_match = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', form.data)
@@ -857,6 +915,14 @@ class GridInventoryTests(unittest.TestCase):
 
         types_page = self.client.get("/admin/inventory/grid-types")
         self.assertEqual(types_page.status_code, 200)
+        for grid_type in (
+            "Quantifoil holey carbon",
+            "Carbon-coated grids",
+            "Gold Quantifoil Gold Grids",
+            "Graphene-coated grids",
+        ):
+            self.assertIn(grid_type.encode(), types_page.data)
+        self.assertNotIn(b">Other<", types_page.data)
         created_type = self.client.post(
             "/admin/inventory/grid-types",
             data={"_csrf_token": self.csrf_token(), "action": "create", "grid_type_name": "Custom support grid"},

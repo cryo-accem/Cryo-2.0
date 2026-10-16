@@ -126,9 +126,9 @@ CREATE INDEX IF NOT EXISTS idx_grid_events_time ON grid_events(event_time);
 
 INSERT OR IGNORE INTO grid_types (grid_type_name) VALUES
     ('Quantifoil holey carbon'),
-    ('Gold-coated holey carbon'),
-    ('Graphene-coated grid'),
-    ('Other');
+    ('Carbon-coated grids'),
+    ('Gold Quantifoil Gold Grids'),
+    ('Graphene-coated grids');
 INSERT OR IGNORE INTO inventory_id_sequences (sequence_name, next_value) VALUES
     ('grid', 0),
     ('batch', 0),
