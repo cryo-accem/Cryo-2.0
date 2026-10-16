@@ -1642,6 +1642,11 @@ a { color: inherit; }
 .inventory-storage-form { margin-top: 16px; }
 .inventory-location-current { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding: 13px; border-radius: 9px; background: #eef8f2; color: #28714b !important; }
 .inventory-location-current span { color: #5c7968; font-size: 10px; }
+.inventory-detail-discard { display: grid; gap: 9px; margin-top: 16px; padding: 12px; border: 1px solid #f0d8db; border-radius: 9px; background: #fffafb; }
+.inventory-detail-discard p { margin: 0; color: #718698; font-size: 10px; }
+.inventory-detail-discard form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.inventory-detail-discard label { flex: 1 1 180px; display: grid; gap: 6px; color: #38536a; font-size: 10px; font-weight: 700; }
+.inventory-detail-discard input { width: 100%; min-width: 0; padding: 9px 10px; border: 1px solid #d2dfe7; border-radius: 7px; background: #fff; color: #20384d; font: inherit; font-size: 11px; }
 .inventory-current-tag { margin-left: 5px; padding: 3px 6px; border-radius: 99px; background: #edf9f1; color: #28714b; font-size: 8px; font-weight: 800; text-transform: uppercase; }
 .inventory-timeline { display: grid; gap: 0; padding: 0 0 0 18px; margin: 0; border-left: 2px solid #dce9ee; list-style: none; }
 .inventory-timeline li { position: relative; padding: 0 0 18px 12px; }

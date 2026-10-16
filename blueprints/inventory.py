@@ -16,7 +16,7 @@ from inventory_service import (
     dashboard_storage, facility_time, grid_booking_links, grid_details,
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
     list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
-    register_freezing, search_grid_box_groups, search_storage, session_details,
+    discard_grid_from_storage, register_freezing, search_grid_box_groups, search_storage, session_details,
     set_grid_type_active, store_grid, unlink_grid_from_booking,
     discard_grids, update_clipping, update_grid_type,
 )
@@ -330,6 +330,19 @@ def grid_clipping(grid_code):
         flash(str(exc), "error")
     else:
         flash(f"Clipping status updated for {grid_code}.", "success")
+    return redirect(url_for("inventory.grid_detail", grid_code=grid_code))
+
+
+@inventory_bp.route("/grids/<grid_code>/discard", methods=["POST"])
+def discard_grid_from_storage_route(grid_code):
+    if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
+        abort(404)
+    try:
+        discard_grid_from_storage(grid_code, request.form.get("notes"), _actor_id())
+    except InventoryError as exc:
+        flash(str(exc), "error")
+    else:
+        flash(f"{grid_code} was discarded and its storage position released.", "success")
     return redirect(url_for("inventory.grid_detail", grid_code=grid_code))
 
 

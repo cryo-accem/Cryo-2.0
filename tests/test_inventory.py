@@ -305,6 +305,57 @@ class GridInventoryTests(unittest.TestCase):
         ]
         self.assertEqual(position_order, sorted(position_order))
 
+    def test_grid_detail_loads_and_active_storage_grid_can_be_discarded_individually(self):
+        grid_code = self.create_batch(1)[0]
+        self.assertEqual(
+            self.post_storage(grid_code, "Falcon-detail", "Box-detail", "1").status_code,
+            302,
+        )
+
+        storage = self.client.get("/admin/inventory/storage")
+        self.assertEqual(storage.status_code, 200)
+        self.assertIn(
+            f'href="/admin/inventory/grids/{grid_code}"'.encode(),
+            storage.data,
+        )
+        detail = self.client.get(f"/admin/inventory/grids/{grid_code}")
+        self.assertEqual(detail.status_code, 200)
+        self.assertIn(b"Discard grid", detail.data)
+        with self.client.session_transaction() as admin_session:
+            self.assertTrue(admin_session.get("admin_logged_in"))
+
+        response = self.client.post(
+            f"/admin/inventory/grids/{grid_code}/discard",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "notes": "Long-term storage discard trial",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, f"/admin/inventory/grids/{grid_code}")
+
+        conn = database.get_db()
+        status = conn.execute(
+            "SELECT current_status FROM inventory_grids WHERE grid_code=?",
+            [grid_code],
+        ).fetchone()["current_status"]
+        active_locations = conn.execute(
+            """SELECT COUNT(*) AS count FROM storage_locations sl
+               JOIN inventory_grids g ON g.grid_id=sl.grid_id
+               WHERE g.grid_code=? AND sl.removed_at IS NULL""",
+            [grid_code],
+        ).fetchone()["count"]
+        discard_events = conn.execute(
+            """SELECT COUNT(*) AS count FROM grid_events e
+               JOIN inventory_grids g ON g.grid_id=e.grid_id
+               WHERE g.grid_code=? AND e.event_type='grid_discarded'""",
+            [grid_code],
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(status, "Discarded")
+        self.assertEqual(active_locations, 0)
+        self.assertEqual(discard_events, 1)
+
     def test_search_grids_shows_collapsed_falcon_box_cards_before_grid_rows(self):
         first, second, third = self.create_batch(3)
         self.post_storage(first, "Falcon-Search", "Box-A", "1")
@@ -413,6 +464,217 @@ class GridInventoryTests(unittest.TestCase):
             "completed",
         )
         conn.close()
+
+    def test_isolated_freezing_to_screening_microscope_storage_and_discard_pipeline(self):
+        user_name = "Subhajit Mahanty"
+        sample_name = "ACCEM pipeline dummy sample"
+        email = "pipeline@example.test"
+        freezing_date = datetime.date.today() + datetime.timedelta(days=1)
+        while freezing_date.weekday() >= 5:
+            freezing_date += datetime.timedelta(days=1)
+
+        with patch("blueprints.freezing.send_email"):
+            success, message = register_freezing_booking(
+                user_name, "ACCEM Trial PI", email, "Internal", sample_name, 3,
+                freezing_date.isoformat(),
+            )
+        self.assertTrue(success, message)
+
+        conn = database.get_db()
+        freezing_booking_id = conn.execute(
+            "SELECT id FROM freezing_bookings WHERE email=?", [email]
+        ).fetchone()["id"]
+        grid_type_id = conn.execute(
+            "SELECT grid_type_id FROM grid_types WHERE active=1 ORDER BY grid_type_id LIMIT 1"
+        ).fetchone()["grid_type_id"]
+        conn.close()
+        freezing_completion = {
+            "_csrf_token": self.csrf_token(),
+            "actual_grids": "3",
+            "grid_source": "self_owned",
+            "grid_management": "1",
+            "inventory_grid_sample_name": [sample_name] * 3,
+            "inventory_sample_id": [""] * 3,
+            "inventory_grid_type_id": [str(grid_type_id)] * 3,
+            "inventory_falcon": ["TRIAL-FALCON"] * 3,
+            "inventory_box": ["TRIAL-BOX"] * 3,
+            "inventory_position": ["1", "2", "3"],
+            "blot_seconds": ["1"] * 3,
+            "blot_force": ["1"] * 3,
+        }
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/freezing/complete/{freezing_booking_id}",
+                data=freezing_completion,
+            )
+        self.assertEqual(response.status_code, 302)
+
+        guest = self.app.test_client()
+        inventory_search = guest.get("/inventory/search?user_name=subhajit")
+        self.assertEqual(inventory_search.status_code, 200)
+        grids = inventory_search.get_json()["grids"]
+        grid_codes = [grid["grid_code"] for grid in grids]
+        self.assertEqual(len(grid_codes), 3)
+        conn = database.get_db()
+        frozen_rows = conn.execute(
+            """SELECT g.current_status, COUNT(*) AS count,
+                      SUM(CASE WHEN sl.storage_location_id IS NOT NULL THEN 1 ELSE 0 END)
+                          AS located
+               FROM inventory_grids g
+               LEFT JOIN storage_locations sl
+                 ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
+               WHERE g.grid_code IN (?, ?, ?)
+               GROUP BY g.current_status""",
+            grid_codes,
+        ).fetchall()
+        conn.close()
+        self.assertEqual(
+            [(row["current_status"], row["count"], row["located"]) for row in frozen_rows],
+            [("Frozen", 3, 3)],
+        )
+
+        registration = guest.get("/register")
+        csrf_match = re.search(rb'name="_csrf_token"\s+value="([^"]+)"', registration.data)
+        self.assertIsNotNone(csrf_match)
+        with patch("blueprints.screening.send_email"):
+            response = guest.post(
+                "/register",
+                data={
+                    "_csrf_token": csrf_match.group(1).decode(),
+                    "reg_type": "screening",
+                    "user_name": "Subhajit",
+                    "pi_name": "ACCEM Trial PI",
+                    "email": "pipeline-screening@example.test",
+                    "origin": "Internal",
+                    "sample_name": "Different screening booking sample",
+                    "grids": "3",
+                    "inventory_grid_codes": grid_codes,
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        screening_booking_id = conn.execute(
+            "SELECT id FROM screening_bookings WHERE email=?",
+            ["pipeline-screening@example.test"],
+        ).fetchone()["id"]
+        linked_codes = [
+            row["grid_code"]
+            for row in conn.execute(
+                """SELECT g.grid_code FROM screening_booking_grids l
+                   JOIN inventory_grids g ON g.grid_id=l.grid_id
+                   WHERE l.screening_booking_id=? ORDER BY g.grid_code""",
+                [screening_booking_id],
+            ).fetchall()
+        ]
+        conn.close()
+        self.assertEqual(linked_codes, sorted(grid_codes))
+
+        with patch("blueprints.admin.send_email"):
+            response = self.client.get(f"/admin/screening/load/{screening_booking_id}")
+        self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        screening_status = conn.execute(
+            "SELECT status FROM screening_bookings WHERE id=?",
+            [screening_booking_id],
+        ).fetchone()["status"]
+        conn.close()
+        self.assertEqual(screening_status, "ongoing")
+
+        screening_completion = {
+            "_csrf_token": self.csrf_token(),
+            "actual_slots": "1",
+            "actual_grids": "3",
+            "grid_source": "user provided",
+            "grid_type": "",
+            "clipped_grids": "0",
+            "inventory_grid_code": grid_codes,
+            "inventory_outcome": ["store"] * 3,
+            "inventory_discard_notes": [""] * 3,
+            "inventory_falcon": ["SCREENING-FALCON"] * 3,
+            "inventory_box": ["SCREENING-BOX"] * 3,
+            "inventory_position": ["1", "2", "3"],
+        }
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/screening/complete/{screening_booking_id}",
+                data=screening_completion,
+            )
+        self.assertEqual(response.status_code, 302)
+
+        session_start = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M")
+        response = self.client.post(
+            "/admin/inventory/sessions",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "start_time": session_start,
+                "instrument": "Microscope (isolated trial)",
+                "notes": "Simulated microscope stage; no physical instrument used.",
+                "grid_codes": grid_codes,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        session_id = int(response.location.rsplit("/", 1)[1])
+        conn = database.get_db()
+        session_statuses = {
+            row["current_status"]
+            for row in conn.execute(
+                "SELECT current_status FROM inventory_grids WHERE grid_code IN (?, ?, ?)",
+                grid_codes,
+            ).fetchall()
+        }
+        conn.close()
+        self.assertEqual(session_statuses, {"In Data Collection"})
+        self.assertEqual(
+            self.client.get(response.location).status_code,
+            200,
+        )
+
+        for position, grid_code in enumerate(grid_codes, start=1):
+            response = self.client.post(
+                f"/admin/inventory/sessions/{session_id}/complete/{grid_code}",
+                data={
+                    "_csrf_token": self.csrf_token(),
+                    "outcome": "store",
+                    "falcon_container_id": "FINAL-FALCON",
+                    "grid_box_name": "FINAL-BOX",
+                    "grid_position": str(position),
+                    "notes": "Returned to storage after the isolated trial.",
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        stored_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM inventory_grids "
+            "WHERE grid_code IN (?, ?, ?) AND current_status='Stored'",
+            grid_codes,
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(stored_count, 3)
+
+        response = self.client.post(
+            "/admin/inventory/grids/bulk-discard",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "selected_grid_codes": grid_codes,
+                "notes": "Discarded after the isolated end-to-end workflow test.",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        discarded_count = conn.execute(
+            "SELECT COUNT(*) AS count FROM inventory_grids "
+            "WHERE grid_code IN (?, ?, ?) AND current_status='Discarded'",
+            grid_codes,
+        ).fetchone()["count"]
+        active_location_count = conn.execute(
+            """SELECT COUNT(*) AS count FROM storage_locations sl
+               JOIN inventory_grids g ON g.grid_id=sl.grid_id
+               WHERE g.grid_code IN (?, ?, ?) AND sl.removed_at IS NULL""",
+            grid_codes,
+        ).fetchone()["count"]
+        conn.close()
+        self.assertEqual(discarded_count, 3)
+        self.assertEqual(active_location_count, 0)
 
     def test_public_inventory_and_booking_grid_selection_are_available_without_admin_login(self):
         selected_grid, other_grid = self.create_batch(2)

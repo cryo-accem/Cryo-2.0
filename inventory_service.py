@@ -537,19 +537,7 @@ def discard_grids(grid_codes, notes, actor_id):
             grid = cursor.fetchone()
             if not grid:
                 raise InventoryError(f"Grid {code} was not found.")
-            cursor.execute(
-                """SELECT 1 FROM screening_booking_grids l
-                   JOIN screening_bookings b ON b.id=l.screening_booking_id
-                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
-                   UNION ALL
-                   SELECT 1 FROM data_collection_booking_grids l
-                   JOIN bookings b ON b.id=l.booking_id
-                   WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
-                   LIMIT 1""",
-                [grid["grid_id"], grid["grid_id"]],
-            )
-            if cursor.fetchone():
-                raise InventoryError(f"{code} is reserved by an active booking.")
+            _ensure_grid_not_reserved(cursor, grid["grid_id"], code)
             _discard_grid(
                 cursor,
                 grid,
@@ -560,6 +548,59 @@ def discard_grids(grid_codes, notes, actor_id):
             )
         connection.commit()
         return codes
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def _ensure_grid_not_reserved(cursor, grid_id, grid_code):
+    cursor.execute(
+        """SELECT 1 FROM screening_booking_grids l
+           JOIN screening_bookings b ON b.id=l.screening_booking_id
+           WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+           UNION ALL
+           SELECT 1 FROM data_collection_booking_grids l
+           JOIN bookings b ON b.id=l.booking_id
+           WHERE l.grid_id=? AND b.status IN ('waiting', 'ongoing')
+           LIMIT 1""",
+        [grid_id, grid_id],
+    )
+    if cursor.fetchone():
+        raise InventoryError(f"{grid_code} is reserved by an active booking.")
+
+
+def discard_grid_from_storage(grid_code, notes, actor_id):
+    if not re.fullmatch(r"ACCEM-G-\d{4,}", grid_code):
+        raise InventoryError("Choose a valid inventory grid.")
+    discard_notes = _text(notes, "Discard notes", 2000)
+    event_time = now_utc()
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        cursor.execute(
+            "SELECT grid_id, grid_code, current_status FROM inventory_grids "
+            "WHERE grid_code=?" + _lock_clause(),
+            [grid_code],
+        )
+        grid = cursor.fetchone()
+        if not grid:
+            raise InventoryError("Grid not found.")
+        if not _current_location(cursor, grid["grid_id"], lock=True):
+            raise InventoryError("This grid has no active storage position.")
+        _ensure_grid_not_reserved(cursor, grid["grid_id"], grid_code)
+        _discard_grid(
+            cursor,
+            grid,
+            actor_id,
+            discard_notes,
+            event_time,
+            operation_reference="GRID-DETAIL-DISCARD",
+        )
+        connection.commit()
     except Exception:
         connection.rollback()
         raise

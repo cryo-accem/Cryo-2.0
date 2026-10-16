@@ -110,6 +110,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "inventory.grid_detail",
     "inventory.grid_clipping",
     "inventory.grid_type",
+    "inventory.discard_grid_from_storage_route",
     "inventory.bulk_clipping",
     "inventory.bulk_discard",
     "inventory.grid_storage",
