@@ -273,6 +273,10 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn(f'aria-label="Position 2, {clipped}, Researcher, Clipped"', content)
         self.assertIn(f'class="inventory-storage-code inventory-storage-code--s">S</span>', content)
         self.assertIn(f'class="inventory-storage-code inventory-storage-code--c">C</span>', content)
+        self.assertRegex(
+            content,
+            r'class="inventory-storage-code inventory-storage-code--f"[^>]*>F</span>',
+        )
         self.assertIn(
             f'<article class="inventory-metric inventory-metric--frozen"><span>Frozen</span>',
             content,

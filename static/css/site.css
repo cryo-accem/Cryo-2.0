@@ -1487,8 +1487,8 @@ a { color: inherit; }
 .inventory-metric { min-width: 0; padding: 17px; border: 1px solid #d9e5ec; border-radius: 12px; background: linear-gradient(145deg, #fff, #f8fbfd); }
 .inventory-metric span { display: block; color: #667e90; font-size: 10px; font-weight: 700; }
 .inventory-metric strong { display: block; margin-top: 7px; color: #123d61; font-size: 26px; line-height: 1; }
-.inventory-metric--frozen { border-color: #93c5fd; background: #dbeafe; }
-.inventory-metric--frozen span, .inventory-metric--frozen strong { color: #1e3a8a; }
+.inventory-metric--frozen { border-color: #14b8a6; background: #99f6e4; }
+.inventory-metric--frozen span, .inventory-metric--frozen strong { color: #134e4a; }
 .inventory-metric--stored { border-color: #86efac; background: #dcfce7; }
 .inventory-metric--stored span, .inventory-metric--stored strong { color: #14532d; }
 .inventory-metric--clipped { border-color: #d8b4fe; background: #f3e8ff; }
@@ -1509,8 +1509,8 @@ a { color: inherit; }
 .inventory-breakdown > div { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: 8px; background: #f4f8fa; color: #435a6d; font-size: 11px; }
 .inventory-breakdown strong { color: #123d61; }
 .inventory-breakdown > .inventory-breakdown--status { border: 1px solid transparent; font-weight: 700; }
-.inventory-breakdown--status.inventory-status--frozen { border-color: #93c5fd; background: #dbeafe; color: #1e3a8a; }
-.inventory-breakdown--status.inventory-status--frozen strong { color: #1e3a8a; }
+.inventory-breakdown--status.inventory-status--frozen { border-color: #14b8a6; background: #99f6e4; color: #134e4a; }
+.inventory-breakdown--status.inventory-status--frozen strong { color: #134e4a; }
 .inventory-breakdown--status.inventory-status--stored { border-color: #86efac; background: #dcfce7; color: #14532d; }
 .inventory-breakdown--status.inventory-status--stored strong { color: #14532d; }
 .inventory-breakdown--status.inventory-status--clipped { border-color: #d8b4fe; background: #f3e8ff; color: #581c87; }
@@ -1524,7 +1524,7 @@ a { color: inherit; }
 .inventory-storage-legend { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 0; margin: 0; list-style: none; color: #526b7e; font-size: 10px; }
 .inventory-storage-legend li { display: flex; align-items: center; gap: 6px; }
 .inventory-storage-code { display: inline-flex; min-width: 25px; min-height: 22px; box-sizing: border-box; align-items: center; justify-content: center; padding: 3px 6px; border-radius: 6px; background: #edf5fb; color: #35658d; font-size: 9px; font-weight: 800; line-height: 1; }
-.inventory-storage-code--frozen, .inventory-status--frozen { border: 1px solid #93c5fd; background: #dbeafe; color: #1e3a8a; }
+.inventory-storage-code--f, .inventory-storage-code--frozen, .inventory-status--frozen { border: 1px solid #14b8a6; background: #99f6e4; color: #134e4a; }
 .inventory-storage-code--s, .inventory-storage-code--stored, .inventory-status--stored { border: 1px solid #86efac; background: #dcfce7; color: #14532d; }
 .inventory-storage-code--c, .inventory-storage-code--clipped, .inventory-status--clipped { border: 1px solid #d8b4fe; background: #f3e8ff; color: #581c87; }
 .inventory-storage-code--d, .inventory-storage-code--discarded, .inventory-status--discarded { border: 1px solid #fca5a5; background: #fee2e2; color: #7f1d1d; }
