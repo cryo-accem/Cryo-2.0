@@ -2,10 +2,12 @@
 {% block title %}ACCEM | Search grid inventory{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content inventory-page">
-  <header class="page-header page-header--portal"><div><div class="eyebrow">Inventory lookup</div><h1>Find your grids</h1><p>Enter the username used when booking. Sample names are not required.</p></div><a class="button" href="{{ url_for('register.register') }}">Book a slot</a></header>
+  <header class="page-header page-header--portal"><div><div class="eyebrow">Inventory lookup</div><h1>Find your grids</h1><p>Enter the username used when booking. Sample names are not required.</p></div>{% if selection_mode %}<button class="button" type="button" data-return-to-booking>Return to quick slot</button>{% else %}<a class="button" href="{{ url_for('register.register') }}">Book a slot</a>{% endif %}</header>
   <section class="inventory-panel">
+    {% if selection_mode %}<div class="inventory-selection-intro"><strong>Select grids for the booking</strong><span>Only currently available grids can be selected. Your quick-slot form stays open in the other tab.</span></div>{% endif %}
     <form class="public-inventory-search" action="{{ url_for('public.grid_inventory') }}" method="get">
       <label>Username<input type="text" name="username" value="{{ username }}" maxlength="150" required autocomplete="username"></label>
+      {% if selection_mode %}<input type="hidden" name="select" value="1"><input type="hidden" name="slot_type" value="{{ slot_type }}">{% endif %}
       <button class="button" type="submit">Search my grids</button>
     </form>
     {% if search_error %}
@@ -13,9 +15,10 @@
     {% elif searched %}
       {% if grids %}
         <p class="public-inventory-result-count">{{ grids|length }} grid{{ '' if grids|length == 1 else 's' }} found for username <strong>{{ username }}</strong>.</p>
-        <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Grid</th><th>Current storage</th><th>Booking availability</th></tr></thead><tbody>
+        <div class="table-wrap"><table class="data-table"><thead><tr>{% if selection_mode %}<th>Select</th>{% endif %}<th>Status</th><th>Grid</th><th>Current storage</th><th>Booking availability</th></tr></thead><tbody>
           {% for grid in grids %}
             <tr>
+              {% if selection_mode %}<td>{% if grid.available %}<label class="inventory-select-grid"><input type="checkbox" value="{{ grid.grid_code }}" data-inventory-grid><span>Select</span></label>{% else %}<span class="form-hint">Unavailable</span>{% endif %}</td>{% endif %}
               <td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span> {{ grid.current_status }}</td>
               <td>{{ grid.grid_code }}</td>
               <td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} · {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}Not currently in storage{% endif %}</td>
@@ -23,6 +26,7 @@
             </tr>
           {% endfor %}
         </tbody></table></div>
+        {% if selection_mode %}<div class="inventory-selection-actions"><span data-inventory-selection-count role="status" aria-live="polite">No grids selected.</span><button class="button" type="button" data-use-selected-grids disabled>Use selected grids</button></div>{% endif %}
         <p class="public-inventory-result-note">This lookup matches the username associated with your grid records. To book an available grid, use that same username on the booking form.</p>
       {% else %}
         <p class="empty-message">No grids were found for username <strong>{{ username }}</strong>. Check the spelling or contact the facility team if the inventory entry needs correction.</p>
@@ -32,4 +36,50 @@
     {% endif %}
   </section>
 </section></main>
+{% if selection_mode %}
+<script>
+(() => {
+  const username = {{ username|tojson }};
+  const slotType = {{ slot_type|tojson }};
+  const checkboxes = [...document.querySelectorAll("[data-inventory-grid]")];
+  const count = document.querySelector("[data-inventory-selection-count]");
+  const useButton = document.querySelector("[data-use-selected-grids]");
+  const returnButton = document.querySelector("[data-return-to-booking]");
+  if (!count || !useButton) return;
+
+  const update = () => {
+    const selected = checkboxes.filter((checkbox) => checkbox.checked);
+    count.textContent = selected.length
+      ? `${selected.length} of 4 grids selected.`
+      : "No grids selected.";
+    useButton.disabled = selected.length === 0;
+    checkboxes.forEach((checkbox) => {
+      checkbox.disabled = !checkbox.checked && selected.length >= 4;
+    });
+  };
+
+  checkboxes.forEach((checkbox) => checkbox.addEventListener("change", update));
+  useButton.addEventListener("click", () => {
+    const selected = checkboxes.filter((checkbox) => checkbox.checked);
+    if (!window.opener || window.opener.closed) {
+      count.textContent = "The quick-slot page is no longer open. Reopen this inventory search from the booking form.";
+      return;
+    }
+    window.opener.postMessage({
+      type: "inventory-grid-selection",
+      username,
+      slot_type: slotType,
+      grid_codes: selected.map((checkbox) => checkbox.value),
+    }, window.location.origin);
+    count.textContent = "Grid selection sent to the quick-slot form.";
+    window.close();
+  });
+  returnButton?.addEventListener("click", () => {
+    if (window.opener && !window.opener.closed) window.close();
+    else history.back();
+  });
+  update();
+})();
+</script>
+{% endif %}
 {% endblock %}

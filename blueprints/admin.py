@@ -396,6 +396,9 @@ def _slot_form_redirect(slot_type, message, category="registration", saved=False
             field: request.form.get(field, "")
             for field in field_names
         } if not saved else {},
+        "grid_codes": (
+            request.form.getlist("inventory_grid_codes") if not saved else []
+        ),
     }
     flash(message, category)
     return redirect(url_for("admin.panel", _anchor="create-slot"))
@@ -442,6 +445,13 @@ def add_slot(slot_type):
         return _slot_form_redirect(slot_type, "Enter a valid email address.")
 
     try:
+        grid_codes = []
+        if slot_type in {"screening", "datacollecting"}:
+            grid_codes = request.form.getlist("inventory_grid_codes")
+            if len(set(grid_codes)) != len(grid_codes):
+                raise ValueError("Select each inventory grid only once.")
+            if len(grid_codes) > 4:
+                raise ValueError("Select no more than four inventory grids.")
         if slot_type == "freezing":
             try:
                 grids = int(request.form.get("grids", ""))
@@ -454,18 +464,25 @@ def add_slot(slot_type):
                 request.form.get("freezing_date", "").strip(), allow_over_capacity=True,
             )
         elif slot_type == "screening":
-            try:
-                grids = int(request.form.get("grids", ""))
-            except ValueError as exc:
-                raise ValueError("Enter a whole number of grids.") from exc
-            if grids < 1:
-                raise ValueError("Choose at least 1 grid.")
+            if grid_codes:
+                grids = len(grid_codes)
+            else:
+                try:
+                    grids = int(request.form.get("grids", ""))
+                except ValueError as exc:
+                    raise ValueError("Enter a whole number of grids.") from exc
+                if grids < 1:
+                    raise ValueError("Choose at least 1 grid.")
             success, message = register_screening(
                 user_name, pi_name, email, origin, esm, sample_name, grids, 1,
+                grid_codes=grid_codes,
             )
         else:
             try:
-                grids = int(request.form.get("grids", ""))
+                grids = (
+                    len(grid_codes) if grid_codes
+                    else int(request.form.get("grids", ""))
+                )
                 days = int(request.form.get("days", ""))
             except ValueError as exc:
                 raise ValueError("Enter whole numbers for grids and days.") from exc
@@ -473,8 +490,9 @@ def add_slot(slot_type):
                 raise ValueError("Choose at least 1 grid and 1 day.")
             success, message = register_imaging(
                 user_name, pi_name, email, origin, esm, sample_name, grids, days,
+                grid_codes=grid_codes,
             )
-    except ValueError as exc:
+    except (InventoryError, ValueError) as exc:
         return _slot_form_redirect(slot_type, str(exc))
 
     return _slot_form_redirect(

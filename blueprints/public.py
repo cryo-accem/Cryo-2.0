@@ -59,6 +59,10 @@ def get_combined_ongoing_slots(cur):
 def grid_inventory():
     username = request.args.get("username", request.args.get("researcher_name", "")).strip()
     sample_name = request.args.get("sample_name", "").strip()
+    slot_type = request.args.get("slot_type", "")
+    if slot_type not in {"screening", "datacollecting"}:
+        slot_type = ""
+    selection_mode = request.args.get("select") == "1" and bool(slot_type)
     grids = []
     search_error = ""
     searched = bool(username)
@@ -73,6 +77,8 @@ def grid_inventory():
         sample_name=sample_name,
         searched=searched,
         search_error=search_error,
+        selection_mode=selection_mode,
+        slot_type=slot_type,
     )
 
 

@@ -267,6 +267,10 @@ class GridInventoryTests(unittest.TestCase):
         dashboard = self.client.get("/admin/inventory/")
         self.assertEqual(dashboard.status_code, 200)
         content = dashboard.data.decode()
+        self.assertIn(
+            "/static/css/site.css?v=20261016-muted-inventory-palette",
+            content,
+        )
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
         self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Stored"', content)
@@ -734,6 +738,14 @@ class GridInventoryTests(unittest.TestCase):
         self.assertNotIn(unrelated_grid.encode(), username_lookup.data)
         self.assertNotIn(b"Test sample", username_lookup.data)
         self.assertNotIn(b'name="sample_name"', username_lookup.data)
+        selection_view = guest.get(
+            "/inventory?username=Researcher&select=1&slot_type=screening"
+        )
+        self.assertEqual(selection_view.status_code, 200)
+        self.assertIn(b"Select grids for the booking", selection_view.data)
+        self.assertIn(f'value="{selected_grid}" data-inventory-grid'.encode(), selection_view.data)
+        self.assertIn(b"Use selected grids", selection_view.data)
+        self.assertIn(b'name="slot_type" value="screening"', selection_view.data)
 
         form = guest.get("/register")
         self.assertEqual(form.status_code, 200)
@@ -796,7 +808,17 @@ class GridInventoryTests(unittest.TestCase):
             {grid["grid_code"] for grid in still_available.get_json()["grids"]},
             {other_grid},
         )
-
+        reserved_selection_view = guest.get(
+            "/inventory?username=Researcher&select=1&slot_type=screening"
+        )
+        self.assertNotIn(
+            f'value="{selected_grid}" data-inventory-grid'.encode(),
+            reserved_selection_view.data,
+        )
+        self.assertIn(
+            f'value="{other_grid}" data-inventory-grid'.encode(),
+            reserved_selection_view.data,
+        )
         with patch("blueprints.screening.send_email"):
             collision = guest.post(
                 "/register",
@@ -851,6 +873,106 @@ class GridInventoryTests(unittest.TestCase):
         conn.close()
         self.assertEqual(data_booking["grids"], 1)
         self.assertEqual(data_link["grid_code"], other_grid)
+
+    def test_admin_quick_slots_link_selected_inventory_grids_and_use_selected_count(self):
+        screening_grid, collection_grid = self.create_batch(
+            2, researcher_name="Researcher", sample_name="Admin selected sample"
+        )
+        csrf_token = self.csrf_token()
+
+        with patch("blueprints.screening.send_email"):
+            screening_response = self.client.post(
+                "/admin/panel/slots/screening",
+                data={
+                    "_csrf_token": csrf_token,
+                    "user_name": "Researcher",
+                    "pi_name": "Admin PI",
+                    "email": "admin-screening-grid@example.test",
+                    "origin": "Internal",
+                    "esm": "",
+                    "sample_name": "Admin screening sample",
+                    "grids": "4",
+                    "inventory_grid_codes": [screening_grid],
+                },
+            )
+        with patch("blueprints.imaging.send_email"):
+            collection_response = self.client.post(
+                "/admin/panel/slots/datacollecting",
+                data={
+                    "_csrf_token": csrf_token,
+                    "user_name": "Researcher",
+                    "pi_name": "Admin PI",
+                    "email": "admin-collection-grid@example.test",
+                    "origin": "Internal",
+                    "esm": "",
+                    "sample_name": "Admin collection sample",
+                    "grids": "4",
+                    "days": "2",
+                    "inventory_grid_codes": [collection_grid],
+                },
+            )
+
+        self.assertEqual(screening_response.status_code, 302)
+        self.assertEqual(collection_response.status_code, 302)
+        conn = database.get_db()
+        screening = conn.execute(
+            "SELECT id, grids FROM screening_bookings WHERE email=?",
+            ["admin-screening-grid@example.test"],
+        ).fetchone()
+        screening_link = conn.execute(
+            """SELECT g.grid_code FROM screening_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.screening_booking_id=?""",
+            [screening["id"]],
+        ).fetchone()
+        collection = conn.execute(
+            "SELECT id, grids, days FROM bookings WHERE email=?",
+            ["admin-collection-grid@example.test"],
+        ).fetchone()
+        collection_link = conn.execute(
+            """SELECT g.grid_code FROM data_collection_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.booking_id=?""",
+            [collection["id"]],
+        ).fetchone()
+        conn.close()
+
+        self.assertEqual(screening["grids"], 1)
+        self.assertEqual(screening_link["grid_code"], screening_grid)
+        self.assertEqual(collection["grids"], 1)
+        self.assertEqual(collection["days"], 2)
+        self.assertEqual(collection_link["grid_code"], collection_grid)
+
+    def test_admin_quick_slot_rejects_grid_owned_by_a_different_username(self):
+        grid_code = self.create_batch(
+            1, researcher_name="Researcher", sample_name="Admin selected sample"
+        )[0]
+        response = self.client.post(
+            "/admin/panel/slots/screening",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "user_name": "Different user",
+                "pi_name": "Admin PI",
+                "email": "admin-mismatched-grid@example.test",
+                "origin": "Internal",
+                "esm": "",
+                "sample_name": "Admin screening sample",
+                "grids": "1",
+                "inventory_grid_codes": [grid_code],
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"is not associated with the entered username", response.data)
+        self.assertIn(grid_code.encode(), response.data)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT id FROM screening_bookings WHERE email=?",
+            ["admin-mismatched-grid@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertIsNone(booking)
 
     def test_username_search_and_screening_picker_include_linked_account_grids_across_samples(self):
         selected_grid = self.create_batch(

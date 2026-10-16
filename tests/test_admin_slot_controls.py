@@ -50,6 +50,12 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertIn('data-slot-type="screening"', html)
         self.assertIn('data-slot-type="freezing"', html)
         self.assertIn('class="admin-slot-grid"', html)
+        self.assertEqual(
+            len(re.findall(r'<section class="full" data-admin-inventory-picker', html)),
+            2,
+        )
+        self.assertEqual(html.count("/inventory/search"), 2)
+        self.assertEqual(html.count('target="_blank" rel="opener">Search full inventory by username</a>'), 2)
         self.assertNotRegex(html, r'<input name="(?:grids|days)"[^>]*\bmax=')
         self.assertNotIn("Grids (maximum", html)
 

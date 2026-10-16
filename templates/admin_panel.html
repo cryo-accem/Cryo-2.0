@@ -146,6 +146,13 @@
           <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ slot_form_state.get('values', {}).get('esm', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}"></label>
           <label>Sample name<input name="sample_name" maxlength="150" value="{{ slot_form_state.get('values', {}).get('sample_name', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
           <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
+          <section class="full" data-admin-inventory-picker
+                   data-search-url="{{ url_for('public.search_public_inventory') }}"
+                   data-selected-grid-codes="{{ (slot_form_state.get('grid_codes', []) if slot_form_state.get('slot_type') == 'datacollecting' else [])|tojson|forceescape }}">
+            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · up to four</span><p class="form-hint">Available grids associated with this username appear below. Selecting grids sets the booking count automatically.</p></div>
+            <div class="inventory-grid-picker" data-grid-results role="group" aria-label="Available inventory grids for data collection" aria-live="polite"><p class="empty-message">Enter a username to find available grids.</p></div>
+            <div class="admin-inventory-picker__footer"><p class="form-hint" data-grid-status role="status" aria-live="polite"></p><a data-full-inventory-link data-inventory-url="{{ url_for('public.grid_inventory') }}" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search full inventory by username</a></div>
+          </section>
           <label>Days<input name="days" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('days', '') if slot_form_state.get('slot_type') == 'datacollecting' else '' }}" required></label>
           <button class="button" type="submit">Add data collecting slot</button>
         </form>
@@ -160,6 +167,13 @@
           <label>Institute (if applicable)<input name="esm" maxlength="150" value="{{ slot_form_state.get('values', {}).get('esm', '') if slot_form_state.get('slot_type') == 'screening' else '' }}"></label>
           <label>Sample name<input name="sample_name" maxlength="150" value="{{ slot_form_state.get('values', {}).get('sample_name', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
           <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'screening' else '' }}" required></label>
+          <section class="full" data-admin-inventory-picker
+                   data-search-url="{{ url_for('public.search_public_inventory') }}"
+                   data-selected-grid-codes="{{ (slot_form_state.get('grid_codes', []) if slot_form_state.get('slot_type') == 'screening' else [])|tojson|forceescape }}">
+            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · up to four</span><p class="form-hint">Available grids associated with this username appear below. Selecting grids sets the booking count automatically.</p></div>
+            <div class="inventory-grid-picker" data-grid-results role="group" aria-label="Available inventory grids for screening" aria-live="polite"><p class="empty-message">Enter a username to find available grids.</p></div>
+            <div class="admin-inventory-picker__footer"><p class="form-hint" data-grid-status role="status" aria-live="polite"></p><a data-full-inventory-link data-inventory-url="{{ url_for('public.grid_inventory') }}" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search full inventory by username</a></div>
+          </section>
           <button class="button" type="submit">Add screening slot</button>
         </form>
         <form class="admin-slot-form" id="admin-slot-form-freezing" method="post" action="{{ url_for('admin.add_slot', slot_type='freezing') }}">
@@ -310,13 +324,213 @@
       if (!savedDetails) return;
       for (const field of ["user_name", "pi_name", "esm"]) {
         const input = form.elements.namedItem(field);
-        if (input instanceof HTMLInputElement) input.value = savedDetails[field] || "";
+        if (input instanceof HTMLInputElement) {
+          input.value = savedDetails[field] || "";
+          if (field === "user_name") input.dispatchEvent(new Event("input", { bubbles: true }));
+        }
       }
       const origin = form.elements.namedItem("origin");
       if (origin instanceof HTMLSelectElement) origin.value = savedDetails.origin || "";
       message.textContent = "Saved details filled in. Review or edit them before saving.";
       applyButton.hidden = true;
     });
+  });
+})();
+(() => {
+  document.querySelectorAll("[data-admin-inventory-picker]").forEach((picker) => {
+    const form = picker.closest("form");
+    const results = picker.querySelector("[data-grid-results]");
+    const status = picker.querySelector("[data-grid-status]");
+    const inventoryLink = picker.querySelector("[data-full-inventory-link]");
+    const userName = form?.elements.namedItem("user_name");
+    const gridCount = form?.elements.namedItem("grids");
+    if (!(form instanceof HTMLFormElement) || !results || !status
+        || !(inventoryLink instanceof HTMLAnchorElement)
+        || !(userName instanceof HTMLInputElement)
+        || !(gridCount instanceof HTMLInputElement)) return;
+
+    const slotType = form.id === "admin-slot-form-screening" ? "screening" : "datacollecting";
+    const selectedCodes = new Set(JSON.parse(picker.dataset.selectedGridCodes || "[]"));
+    let lastUserName = userName.value.trim();
+    let manualGridCount = gridCount.value;
+    let timer = 0;
+    let requestNumber = 0;
+    let controller = null;
+
+    const updateInventoryLink = () => {
+      const url = new URL(inventoryLink.dataset.inventoryUrl, window.location.href);
+      const username = userName.value.trim();
+      if (username) {
+        url.searchParams.set("username", username);
+        url.searchParams.set("select", "1");
+        url.searchParams.set("slot_type", slotType);
+      } else {
+        url.searchParams.delete("username");
+        url.searchParams.delete("select");
+        url.searchParams.delete("slot_type");
+      }
+      inventoryLink.href = url.toString();
+    };
+
+    const updateCount = () => {
+      const checked = [...picker.querySelectorAll('input[name="inventory_grid_codes"]:checked')];
+      selectedCodes.clear();
+      checked.forEach((input) => selectedCodes.add(input.value));
+      gridCount.readOnly = checked.length > 0;
+      gridCount.value = checked.length ? String(checked.length) : manualGridCount;
+      picker.querySelectorAll('input[name="inventory_grid_codes"]').forEach((input) => {
+        input.disabled = !input.checked && checked.length >= 4;
+      });
+      status.textContent = checked.length
+        ? `${checked.length} inventory grid${checked.length === 1 ? "" : "s"} selected.`
+        : "";
+    };
+
+    const addGridChoice = (grid, unavailable = false) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "inventory_grid_codes";
+      checkbox.value = grid.grid_code;
+      checkbox.checked = selectedCodes.has(grid.grid_code);
+      checkbox.addEventListener("change", updateCount);
+
+      const details = document.createElement("span");
+      const code = document.createElement("strong");
+      code.textContent = grid.grid_code;
+      const description = document.createElement("small");
+      description.textContent = unavailable
+        ? "Previously selected; no longer available for this username."
+        : `${grid.sample_name || grid.sample_code || "Inventory grid"} · ${grid.status_code || "Available"}`
+          + (grid.falcon_container_id
+            ? ` · ${grid.falcon_container_id}${grid.grid_box_name ? ` / ${grid.grid_box_name}` : ""}${grid.grid_position ? ` / ${grid.grid_position}` : ""}`
+            : "");
+      details.append(code, description);
+      label.append(checkbox, details);
+      results.append(label);
+    };
+
+    const renderResults = (grids) => {
+      results.replaceChildren();
+      const availableCodes = new Set();
+      grids.forEach((grid) => {
+        availableCodes.add(grid.grid_code);
+        addGridChoice(grid);
+      });
+      selectedCodes.forEach((code) => {
+        if (!availableCodes.has(code)) addGridChoice({ grid_code: code }, true);
+      });
+      if (!results.children.length) {
+        const empty = document.createElement("p");
+        empty.className = "empty-message";
+        empty.textContent = "No available inventory grids found for this username.";
+        results.append(empty);
+      }
+      updateCount();
+    };
+
+    const search = async () => {
+      const searchName = userName.value.trim();
+      updateInventoryLink();
+      const currentRequest = ++requestNumber;
+      controller?.abort();
+      controller = null;
+      if (searchName !== lastUserName) {
+        selectedCodes.clear();
+        lastUserName = searchName;
+        results.replaceChildren();
+        updateCount();
+      }
+      if (!searchName) {
+        results.replaceChildren();
+        results.append(Object.assign(document.createElement("p"), {
+          className: "empty-message",
+          textContent: "Enter a username to find available grids.",
+        }));
+        status.textContent = "";
+        return;
+      }
+
+      controller = new AbortController();
+      status.textContent = "Searching available inventory grids…";
+      try {
+        const response = await fetch(
+          `${picker.dataset.searchUrl}?user_name=${encodeURIComponent(searchName)}`,
+          { headers: { Accept: "application/json" }, signal: controller.signal },
+        );
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error("The server returned an unexpected response while searching inventory.");
+        }
+        const data = await response.json();
+        if (currentRequest !== requestNumber) return;
+        if (!response.ok) throw new Error(data.error || "Could not search available inventory grids.");
+        if (!Array.isArray(data.grids)) {
+          throw new Error("The inventory search returned an invalid response.");
+        }
+        renderResults(data.grids);
+        status.textContent = data.grids.length
+          ? `${data.grids.length} available grid${data.grids.length === 1 ? "" : "s"} found.`
+          : selectedCodes.size
+            ? "Previously selected grids are no longer available. Uncheck them to remove them."
+            : "No available grids found for this username.";
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (currentRequest !== requestNumber) return;
+        results.replaceChildren();
+        status.textContent = error instanceof Error
+          ? error.message
+          : "Could not search available inventory grids.";
+      }
+    };
+
+    userName.addEventListener("input", () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(search, 250);
+    });
+    window.addEventListener("message", async (event) => {
+      if (event.origin !== window.location.origin
+          || event.data?.type !== "inventory-grid-selection"
+          || event.data.slot_type !== slotType
+          || typeof event.data.username !== "string"
+          || event.data.username.trim().toLocaleLowerCase()
+            !== userName.value.trim().toLocaleLowerCase()
+          || !Array.isArray(event.data.grid_codes)) return;
+
+      const requestedCodes = [...new Set(event.data.grid_codes.filter(
+        (code) => typeof code === "string",
+      ))].slice(0, 4);
+      await search();
+      if (event.data.username.trim().toLocaleLowerCase()
+          !== userName.value.trim().toLocaleLowerCase()) return;
+      const availableInputs = new Map(
+        [...picker.querySelectorAll('input[name="inventory_grid_codes"]')]
+          .map((input) => [input.value, input]),
+      );
+      const alreadySelected = [...availableInputs.values()]
+        .filter((input) => input.checked).length;
+      const slotsRemaining = Math.max(0, 4 - alreadySelected);
+      const matchingCodes = requestedCodes.filter((code) => availableInputs.has(code));
+      if (matchingCodes.length === 0) {
+        status.textContent = "None of the selected grids are currently available for this username.";
+        return;
+      }
+      const importedCodes = matchingCodes
+        .filter((code) => !availableInputs.get(code).checked)
+        .slice(0, slotsRemaining);
+      importedCodes.forEach((code) => {
+        const input = availableInputs.get(code);
+        if (input) input.checked = true;
+      });
+      updateCount();
+      status.textContent = importedCodes.length
+        ? `${importedCodes.length} grid${importedCodes.length === 1 ? "" : "s"} selected from the full inventory.`
+        : "The selected inventory grids are already included in this booking.";
+    });
+    gridCount.addEventListener("input", () => {
+      if (!gridCount.readOnly) manualGridCount = gridCount.value;
+    });
+    search();
   });
 })();
 (() => {
