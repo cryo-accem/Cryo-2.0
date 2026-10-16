@@ -1917,10 +1917,11 @@ def grid_details(grid_code):
         if not grid:
             return None
         cursor.execute(
-            """SELECT sl.*, stored.username AS stored_by_name, removed.username AS removed_by_name
+            """SELECT sl.*, storage_user.username AS stored_by_name,
+                      removed_user.username AS removed_by_name
                FROM storage_locations sl
-               LEFT JOIN users stored ON stored.id=sl.stored_by
-               LEFT JOIN users removed ON removed.id=sl.removed_by
+               LEFT JOIN users storage_user ON storage_user.id=sl.stored_by
+               LEFT JOIN users removed_user ON removed_user.id=sl.removed_by
                WHERE sl.grid_id=? ORDER BY sl.stored_at DESC, sl.storage_location_id DESC""",
             [grid["grid_id"]],
         )

@@ -250,6 +250,10 @@ class GridInventoryTests(unittest.TestCase):
         )
         conn = database.get_db()
         conn.execute(
+            "UPDATE inventory_grids SET current_status='Stored' WHERE grid_code=?",
+            [stored],
+        )
+        conn.execute(
             "UPDATE inventory_grids SET current_status='Discarded' WHERE grid_code=?",
             [discarded],
         )
@@ -265,8 +269,32 @@ class GridInventoryTests(unittest.TestCase):
         content = dashboard.data.decode()
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
-        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Frozen"', content)
+        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Stored"', content)
         self.assertIn(f'aria-label="Position 2, {clipped}, Researcher, Clipped"', content)
+        self.assertIn(f'class="inventory-storage-code inventory-storage-code--s">S</span>', content)
+        self.assertIn(f'class="inventory-storage-code inventory-storage-code--c">C</span>', content)
+        self.assertIn(
+            f'<article class="inventory-metric inventory-metric--frozen"><span>Frozen</span>',
+            content,
+        )
+        self.assertIn('class="inventory-metric inventory-metric--stored"><span>Stored</span>', content)
+        self.assertIn('class="inventory-metric inventory-metric--clipped"><span>Clipped</span>', content)
+        self.assertIn('class="inventory-metric inventory-metric--discarded"><span>Discarded</span>', content)
+        self.assertIn('class="inventory-metric inventory-metric--in-microscope"><span>In microscope</span>', content)
+        self.assertIn('class="inventory-breakdown--status inventory-status--stored"', content)
+        self.assertIn('class="inventory-breakdown--status inventory-status--clipped"', content)
+        self.assertIn('class="inventory-breakdown--status inventory-status--discarded"', content)
+        self.assertIn('class="inventory-breakdown--status inventory-status--in-microscope"', content)
+        self.assertIn("To open or manage a grid, use Search grids.", content)
+        storage_map = re.search(
+            r'<section class="inventory-panel inventory-storage-map">(.*?)'
+            r'</section>\s*<section class="inventory-panel">',
+            content,
+            re.S,
+        )
+        self.assertIsNotNone(storage_map)
+        self.assertNotIn(f'href="/admin/inventory/grids/{stored}"', storage_map.group(1))
+        self.assertNotIn(f'href="/admin/inventory/grids/{clipped}"', storage_map.group(1))
         for code in (frozen, discarded, in_collection):
             self.assertIn(f'href="/admin/inventory/grids/{code}"', content)
         self.assertRegex(content, r">F</span>\s*Frozen")
@@ -320,6 +348,7 @@ class GridInventoryTests(unittest.TestCase):
         )
         detail = self.client.get(f"/admin/inventory/grids/{grid_code}")
         self.assertEqual(detail.status_code, 200)
+        self.assertRegex(detail.data.decode(), r"<th>Stored by</th>.*?<td>admin</td>")
         self.assertIn(b"Discard grid", detail.data)
         with self.client.session_transaction() as admin_session:
             self.assertTrue(admin_session.get("admin_logged_in"))

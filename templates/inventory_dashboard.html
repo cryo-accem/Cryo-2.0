@@ -11,13 +11,13 @@
     <a href="{{ url_for('inventory.activity') }}">Activity history</a>
   </nav>
   <section class="inventory-metrics" aria-label="Grid totals">
-    {% for label, value in [('Total grids', counts.total or 0), ('Frozen', counts.frozen or 0), ('Clipped', counts.clipped or 0), ('Stored', counts.stored or 0), ('In data collection', counts.collecting or 0), ('Discarded', counts.discarded or 0)] %}
-    <article class="inventory-metric"><span>{{ label }}</span><strong>{{ value }}</strong></article>
+    {% for label, value, status_class in [('Total grids', counts.total or 0, 'total'), ('Frozen', counts.frozen or 0, 'frozen'), ('Clipped', counts.clipped or 0, 'clipped'), ('Stored', counts.stored or 0, 'stored'), ('In microscope', counts.collecting or 0, 'in-microscope'), ('Discarded', counts.discarded or 0, 'discarded')] %}
+    <article class="inventory-metric inventory-metric--{{ status_class }}"><span>{{ label }}</span><strong>{{ value }}</strong></article>
     {% endfor %}
   </section>
   <section class="inventory-panel inventory-storage-map">
     <div class="inventory-panel__heading">
-      <div><span class="chart-kicker">Storage arrangement</span><h2>Grid storage map</h2><p>Browse occupied positions by Falcon container and grid box. Select a grid to open its record.</p></div>
+      <div><span class="chart-kicker">Storage arrangement</span><h2>Grid storage map</h2><p>Browse occupied positions by Falcon container and grid box. To open or manage a grid, use Search grids.</p></div>
       <a class="button small secondary" href="{{ url_for('inventory.storage') }}">Manage storage</a>
     </div>
     <ul class="inventory-storage-legend" aria-label="Grid status codes">
@@ -38,12 +38,12 @@
                   <summary><span>{{ box }}</span><span>{{ box_grids|length }} grid(s)</span></summary>
                   <div class="inventory-storage-positions">
                     {% for grid in box_grids %}
-                      <a class="inventory-storage-position" href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.researcher_name }}, {{ grid.status_label }}">
+                      <div class="inventory-storage-position" role="group" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.researcher_name }}, {{ grid.status_label }}">
                         <span class="inventory-storage-position__number">{{ grid.grid_position }}</span>
                         <strong>{{ grid.grid_code }}</strong>
                         <span class="inventory-storage-position__sample">{{ grid.researcher_name }} · {{ grid.sample_name }}</span>
                         <span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span>
-                      </a>
+                      </div>
                     {% endfor %}
                   </div>
                 </details>
@@ -73,7 +73,7 @@
       {% if by_type %}<div class="inventory-breakdown">{% for item in by_type %}<div><span>{{ item.grid_type_name }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grids have been registered.</p>{% endif %}
     </section>
     <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Lifecycle</span><h2>Grids by status</h2></div></div>
-      {% if by_status %}<div class="inventory-breakdown">{% for item in by_status %}<div><span>{{ item.current_status }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grid status data yet.</p>{% endif %}
+      {% if by_status %}<div class="inventory-breakdown">{% for item in by_status %}<div class="inventory-breakdown--status inventory-status--{{ 'in-microscope' if item.current_status == 'In Data Collection' else item.current_status|lower|replace(' ','-') }}"><span>{{ 'In microscope' if item.current_status == 'In Data Collection' else item.current_status }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grid status data yet.</p>{% endif %}
     </section>
   </div>
   <section class="inventory-panel inventory-recent"><div class="inventory-panel__heading"><div><span class="chart-kicker">Audit trail</span><h2>Recent activity</h2></div><a class="button small secondary" href="{{ url_for('inventory.activity') }}">View full history</a></div>
