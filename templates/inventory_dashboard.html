@@ -30,26 +30,26 @@
     {% if stored_grids %}
       <div class="inventory-storage-containers">
         {% for container, container_grids in stored_grids|groupby('falcon_container_id') %}
-          <section class="inventory-storage-container">
-            <h3>{{ container }}</h3>
+          <details class="inventory-storage-container">
+            <summary>{{ container }} <span>{{ container_grids|length }} grid(s)</span></summary>
             <div class="inventory-storage-boxes">
               {% for box, box_grids in container_grids|groupby('grid_box_name') %}
-                <section class="inventory-storage-box">
-                  <h4>{{ box }} <span>{{ box_grids|length }} stored</span></h4>
+                <details class="inventory-storage-box">
+                  <summary><span>{{ box }}</span><span>{{ box_grids|length }} grid(s)</span></summary>
                   <div class="inventory-storage-positions">
                     {% for grid in box_grids %}
-                      <a class="inventory-storage-position" href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.sample_name }}, {{ grid.status_label }}">
+                      <a class="inventory-storage-position" href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.researcher_name }}, {{ grid.status_label }}">
                         <span class="inventory-storage-position__number">{{ grid.grid_position }}</span>
                         <strong>{{ grid.grid_code }}</strong>
-                        <span class="inventory-storage-position__sample">{{ grid.sample_code }} · {{ grid.sample_name }}</span>
+                        <span class="inventory-storage-position__sample">{{ grid.researcher_name }} · {{ grid.sample_name }}</span>
                         <span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span>
                       </a>
                     {% endfor %}
                   </div>
-                </section>
+                </details>
               {% endfor %}
             </div>
-          </section>
+          </details>
         {% endfor %}
       </div>
     {% else %}

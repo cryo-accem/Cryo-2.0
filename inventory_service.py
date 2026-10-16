@@ -112,6 +112,26 @@ def _location_label(location):
     )
 
 
+def _storage_position_sort_key(item):
+    position = re.split(r"(\d+)", str(item["grid_position"]).casefold())
+    natural_position = tuple(
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in position
+        if part
+    )
+    keys = item.keys()
+    falcon_key = (
+        "storage_falcon_group" if "storage_falcon_group" in keys
+        else "falcon_container_id"
+    )
+    box_key = "storage_box_group" if "storage_box_group" in keys else "grid_box_name"
+    return (
+        str(item[falcon_key] or "").casefold(),
+        str(item[box_key] or "").casefold(),
+        natural_position,
+    )
+
+
 def _event(cursor, grid_id, event_type, actor_id, old_value=None, new_value=None,
            notes=None, session_id=None, operation_reference=None, event_time=None):
     cursor.execute(
@@ -1559,6 +1579,90 @@ def search_grids(args, page=1, page_size=25):
         connection.close()
 
 
+def search_grid_box_groups(args, page=1, page_size=40):
+    where_sql, filter_values = _grid_filters(args)
+    page = max(1, int(page))
+    page_size = max(1, min(100, int(page_size)))
+    joins = """ FROM inventory_grids g
+        JOIN inventory_samples s ON s.sample_id=g.sample_id
+        JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+        JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
+        LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL """
+    falcon_group = (
+        "COALESCE(NULLIF(TRIM(sl.falcon_container_id), ''), 'Unassigned Falcon')"
+    )
+    box_group = (
+        "COALESCE(NULLIF(TRIM(sl.grid_box_name), ''), 'Unassigned box')"
+    )
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            "SELECT COUNT(*) AS total" + joins + where_sql,
+            filter_values,
+        )
+        total_grids = int(cursor.fetchone()["total"])
+        cursor.execute(
+            f"""SELECT COUNT(*) AS total FROM (
+                    SELECT {falcon_group}, {box_group}
+                    {joins}{where_sql}
+                    GROUP BY {falcon_group}, {box_group}
+                ) grouped_boxes""",
+            filter_values,
+        )
+        total_boxes = int(cursor.fetchone()["total"])
+        page = min(page, max(1, (total_boxes + page_size - 1) // page_size))
+        cursor.execute(
+            f"""SELECT {falcon_group} AS storage_falcon_group,
+                       {box_group} AS storage_box_group
+                {joins}{where_sql}
+                GROUP BY {falcon_group}, {box_group}
+                ORDER BY storage_falcon_group, storage_box_group
+                LIMIT ? OFFSET ?""",
+            [*filter_values, page_size, (page - 1) * page_size],
+        )
+        page_groups = cursor.fetchall()
+        if not page_groups:
+            return [], total_grids, total_boxes, page_size, page
+
+        group_filters = []
+        group_values = []
+        for group in page_groups:
+            group_filters.append(
+                f"({falcon_group}=? AND {box_group}=?)"
+            )
+            group_values.extend(
+                [group["storage_falcon_group"], group["storage_box_group"]]
+            )
+        detail_where = where_sql or " WHERE 1=1"
+        cursor.execute(
+            f"""SELECT g.grid_id, g.grid_code, g.current_status, g.clipped,
+                       g.clipped_at, s.sample_code, s.sample_name,
+                       s.researcher_name, gt.grid_type_name, fb.batch_code,
+                       fb.frozen_at,
+                       (SELECT COUNT(*) FROM inventory_grids batch_grid
+                        WHERE batch_grid.batch_id=g.batch_id) AS batch_grid_count,
+                       sl.falcon_container_id, sl.grid_box_name, sl.grid_position,
+                       {falcon_group} AS storage_falcon_group,
+                       {box_group} AS storage_box_group
+                {joins}{detail_where}
+                  AND ({" OR ".join(group_filters)})
+                ORDER BY storage_falcon_group, storage_box_group, g.grid_id DESC""",
+            [*filter_values, *group_values],
+        )
+        rows = [dict(row) for row in cursor.fetchall()]
+        rows.sort(
+            key=lambda item: (
+                *_storage_position_sort_key(item),
+                str(item["grid_code"]),
+            )
+        )
+        return rows, total_grids, total_boxes, page_size, page
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def dashboard_data():
     connection = get_db()
     cursor = connection.cursor()
@@ -1605,7 +1709,8 @@ def dashboard_storage():
     try:
         cursor.execute(
             """SELECT g.grid_code, g.current_status, g.clipped,
-                      s.sample_code, s.sample_name, fb.batch_code, fb.frozen_at,
+                      s.sample_code, s.sample_name, s.researcher_name,
+                      fb.batch_code, fb.frozen_at,
                       sl.falcon_container_id, sl.grid_box_name, sl.grid_position
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
@@ -1639,15 +1744,17 @@ def dashboard_storage():
                 not_stored.append(item)
             else:
                 stored.append(item)
+        stored.sort(key=_storage_position_sort_key)
         return stored, not_stored
     finally:
         cursor.close()
         connection.close()
 
 
-def public_inventory_grids(researcher_name, sample_name, available_only=False):
+def public_inventory_grids(researcher_name, sample_name=None, available_only=False):
     researcher_name = _text(researcher_name, "Researcher name", 150, True)
-    sample_name = _text(sample_name, "Sample name", 180, True)
+    if sample_name:
+        sample_name = _text(sample_name, "Sample name", 180, True)
     connection = get_db()
     cursor = connection.cursor()
     try:
@@ -1677,8 +1784,11 @@ def public_inventory_grids(researcher_name, sample_name, available_only=False):
                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
                WHERE (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
                       OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))
-                 AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))
                """
+        values = [researcher_name, researcher_name]
+        if sample_name:
+            query += " AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))"
+            values.append(sample_name)
         if available_only:
             query += """AND g.current_status IN ('Frozen', 'Clipped', 'Stored')
                          AND NOT EXISTS (
@@ -1697,7 +1807,7 @@ def public_inventory_grids(researcher_name, sample_name, available_only=False):
                          )
                       """
         query += " ORDER BY s.sample_name, g.grid_code"
-        cursor.execute(query, [researcher_name, researcher_name, sample_name])
+        cursor.execute(query, values)
         rows = []
         for row in cursor.fetchall():
             item = dict(row)
@@ -1724,7 +1834,7 @@ def grid_details(grid_code):
     cursor = connection.cursor()
     try:
         cursor.execute(
-            """SELECT g.*, s.sample_code, s.sample_name, s.researcher_name, s.lab_name,
+            """SELECT g.*, s.sample_code,             s.sample_code, s.sample_name, s.researcher_name, s.lab_name,
                       s.description AS sample_description, s.external_reference,
                       linked_user.username AS linked_account_name,
                       fb.batch_code, fb.frozen_at, fb.notes AS preparation_notes,
@@ -1800,15 +1910,16 @@ def search_storage(args):
         cursor.execute(
             """SELECT sl.storage_location_id, sl.falcon_container_id,
                       sl.grid_box_name, sl.grid_position, sl.stored_at, g.grid_code,
-                      g.current_status, s.sample_name, s.researcher_name
+                      g.current_status, s.sample_code, s.sample_name,
+                      s.researcher_name
                FROM storage_locations sl
                JOIN inventory_grids g ON g.grid_id=sl.grid_id
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                WHERE """ + " AND ".join(where) +
-            " ORDER BY sl.falcon_container_id, sl.grid_box_name, sl.grid_position LIMIT 500",
+            " ORDER BY sl.falcon_container_id, sl.grid_box_name, sl.grid_position",
             values,
         )
-        return cursor.fetchall()
+        return sorted(cursor.fetchall(), key=_storage_position_sort_key)
     finally:
         cursor.close()
         connection.close()

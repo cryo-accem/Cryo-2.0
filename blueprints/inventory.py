@@ -16,7 +16,7 @@ from inventory_service import (
     dashboard_storage, facility_time, grid_booking_links, grid_details,
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
     list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
-    register_freezing, search_grids, search_storage, session_details,
+    register_freezing, search_grid_box_groups, search_storage, session_details,
     set_grid_type_active, store_grid, unlink_grid_from_booking,
     discard_grids, update_clipping, update_grid_type,
 )
@@ -107,7 +107,9 @@ def dashboard():
 def grids():
     page = _safe_page(request.args.get("page"))
     try:
-        rows, total, page_size, page = search_grids(request.args, page=page)
+        rows, total, total_boxes, page_size, page = search_grid_box_groups(
+            request.args, page=page
+        )
     except InventoryError as exc:
         flash(str(exc), "error")
         return redirect(url_for("inventory.grids"))
@@ -116,17 +118,21 @@ def grids():
     query_args.pop("page", None)
     export_url = url_for("inventory.export_csv", **query_args)
     previous_url = url_for("inventory.grids", **query_args, page=page - 1) if page > 1 else None
+    pages = max(1, (total_boxes + page_size - 1) // page_size)
     next_url = (
         url_for("inventory.grids", **query_args, page=page + 1)
-        if page < max(1, (total + page_size - 1) // page_size)
+        if page < pages
         else None
     )
     return render_template(
         "inventory_grids.html",
         rows=rows,
         total=total,
+        total_boxes=total_boxes,
         page=page,
-        pages=max(1, (total + page_size - 1) // page_size),
+        pages=pages,
+        first_box=(page - 1) * page_size + 1 if total_boxes else 0,
+        last_box=min(page * page_size, total_boxes),
         filters=request.args,
         query_args=query_args,
         export_url=export_url,

@@ -39,17 +39,19 @@
                 <button class="button small secondary freezing-copy-first" type="button">Copy Grid 1 values to all grids</button>
                 <div class="freezing-grid-positions" aria-live="polite"></div>
                 <template class="freezing-position-template">
-                  <fieldset class="freezing-position-row">
-                    <legend data-grid-label></legend>
-                    <label>Sample name<input name="inventory_grid_sample_name" maxlength="180" required></label>
-                    <label>Match existing inventory sample<select name="inventory_sample_id"><option value="">Create a new inventory sample</option></select></label>
-                    <label>Grid type<select name="inventory_grid_type_id"><option value="">Choose type</option>{% for grid_type in inventory_grid_types %}<option value="{{ grid_type.grid_type_id }}">{{ grid_type.grid_type_name }}</option>{% endfor %}</select></label>
-                    <label>Falcon / container<input name="inventory_falcon" maxlength="100"></label>
-                    <label>Grid box<input name="inventory_box" maxlength="100"></label>
-                    <label>Position<input name="inventory_position" maxlength="40"></label>
-                    <label>Blot seconds<input name="blot_seconds" type="number" min="0.01" max="999999" step="0.01"></label>
-                    <label>Blot force<input name="blot_force" type="number" min="0" max="999999" step="0.01"></label>
-                  </fieldset>
+                  <details class="freezing-grid-entry">
+                    <summary data-grid-label></summary>
+                    <fieldset class="freezing-position-row">
+                      <label>Sample name<input name="inventory_grid_sample_name" maxlength="180" required></label>
+                      <label>Match existing inventory sample<select name="inventory_sample_id"><option value="">Create a new inventory sample</option></select></label>
+                      <label>Grid type<select name="inventory_grid_type_id"><option value="">Choose type</option>{% for grid_type in inventory_grid_types %}<option value="{{ grid_type.grid_type_id }}">{{ grid_type.grid_type_name }}</option>{% endfor %}</select></label>
+                      <label>Falcon / container<input name="inventory_falcon" maxlength="100"></label>
+                      <label>Grid box<input name="inventory_box" maxlength="100"></label>
+                      <label>Position<input name="inventory_position" maxlength="40"></label>
+                      <label>Blot seconds<input name="blot_seconds" type="number" min="0.01" max="999999" step="0.01"></label>
+                      <label>Blot force<input name="blot_force" type="number" min="0" max="999999" step="0.01"></label>
+                    </fieldset>
+                  </details>
                 </template>
               </div>
             </fieldset>
@@ -91,6 +93,9 @@
   .freezing-inventory-toggle input { width: 20px; min-height: 20px; }
   .freezing-inventory-fields { margin-top: 12px; }
   .freezing-inventory-fields[hidden] { display: none; }
+  .freezing-grid-entry { border: 1px solid #cbd9e1; border-radius: 12px; background: white; }
+  .freezing-grid-entry + .freezing-grid-entry { margin-top: 8px; }
+  .freezing-grid-entry > summary { padding: 14px 18px; color: #24445c; font-weight: 700; cursor: pointer; }
   .freezing-position-row { display: grid; grid-template-columns: repeat(4, minmax(160px, 1fr)); gap: 14px; margin: 0; padding: 18px; border: 1px solid #cbd9e1; border-radius: 12px; background: white; box-shadow: 0 2px 8px rgb(20 54 78 / 5%); }
   .freezing-position-row legend, .freezing-inventory-choice legend { font-weight: 700; }
   .freezing-grid-positions { display: grid; gap: 12px; margin-top: 14px; }
@@ -153,7 +158,8 @@ document.querySelectorAll(".freezing-complete-form").forEach((form) => {
     positions.replaceChildren();
     for (let index = 0; index < count; index += 1) {
       const row = positionTemplate.content.cloneNode(true);
-      row.querySelector("[data-grid-label]").textContent = `Grid ${index + 1}`;
+      row.querySelector("[data-grid-label]").textContent = `Grid ${index + 1} · expand to edit`;
+      row.querySelector(".freezing-grid-entry").open = index === 0;
       const fields = getFields(row);
       fields.forEach((field, fieldIndex) => {
         field.required = inventoryToggle.checked && field.name !== "inventory_sample_id";
@@ -223,7 +229,10 @@ document.querySelectorAll(".freezing-complete-form").forEach((form) => {
   positions.addEventListener("input", (event) => {
     const sourceRow = event.target.closest(".freezing-position-row");
     if (!sourceRow) return;
-    const sourceIndex = Array.from(positions.children).indexOf(sourceRow);
+    const sourceIndex = Array.from(
+      positions.querySelectorAll(".freezing-position-row")
+    ).indexOf(sourceRow);
+    if (sourceIndex < 0) return;
     const sourceField = event.target;
     if (sourceField.name === "inventory_sample_id") return;
     if (sourceIndex > 0) {

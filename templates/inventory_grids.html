@@ -17,16 +17,41 @@
     <label class="inventory-filter-actions"><button class="button small" type="submit">Apply filters</button><a class="button small secondary" href="{{ url_for('inventory.grids') }}">Clear</a></label>
   </form>
   <section class="inventory-panel">
-    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) found. Select grids to update clipping or permanently discard them.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
+    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) in {{ total_boxes }} box group(s). Showing box groups {{ first_box }}–{{ last_box }}. Open a box to see individual grids.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
     <form id="bulk-clipping-form" method="post" action="{{ url_for('inventory.bulk_clipping') }}" onsubmit="return confirmBulkAction(this, event)">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
       {% if rows %}<div class="inventory-bulk-controls">
-        <div class="inventory-bulk-controls__selection"><span class="inventory-bulk-controls__eyebrow">Bulk actions</span><strong><span data-selection-count aria-live="polite">0</span> grids selected</strong></div>
+        <div class="inventory-bulk-controls__selection"><span class="inventory-bulk-controls__eyebrow">Bulk actions</span><strong><span data-selection-count aria-live="polite">0</span> grids selected</strong><label class="inventory-select-all"><input type="checkbox" data-select-all aria-label="Select all grids in the shown boxes"> Select all grids in these boxes</label></div>
         <label>Clipping status<select name="clipped"><option value="1">Mark as clipped</option><option value="0">Mark as not clipped</option></select></label>
         <label class="inventory-bulk-controls__notes">Notes (optional)<input name="notes" maxlength="2000" placeholder="Add a reason or context"></label>
         <div class="inventory-bulk-controls__actions"><button class="button small" type="submit" data-bulk-action="clipping" disabled>Apply clipping</button><button class="button small danger" type="submit" formaction="{{ url_for('inventory.bulk_discard') }}" data-bulk-action="discard" disabled>Discard selected</button></div>
       </div>
-      <div class="table-wrap inventory-grid-table-wrap"><table class="data-table inventory-grid-table"><thead><tr><th><input type="checkbox" data-select-all aria-label="Select all grids on this page"></th><th>Grid ID</th><th>Sample</th><th>Researcher</th><th>Grid type</th><th>Frozen</th><th>Clipping</th><th>Status</th><th>Current storage</th></tr></thead><tbody>{% for grid in rows %}{% if loop.first or loop.previtem.batch_code != grid.batch_code %}<tr class="inventory-batch-heading"><th colspan="9" scope="rowgroup">Freezing batch {{ grid.batch_code }} <span>· {{ grid.batch_grid_count }} grids · {{ grid.frozen_at|facility_time }}</span></th></tr>{% endif %}<tr><td><input form="bulk-clipping-form" type="checkbox" name="selected_grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.grid_code }}"></td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.grid_type_name }}</td><td>{{ grid.frozen_at|facility_time }}</td><td>{{ 'Clipped' if grid.clipped else 'Not clipped' }}</td><td><span class="inventory-status inventory-status--{{ grid.current_status|lower|replace(' ','-') }}">{{ grid.current_status }}</span></td><td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} / {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}—{% endif %}</td></tr>{% endfor %}</tbody></table></div>
+      <div class="inventory-search-falcons">
+        {% for falcon, falcon_grids in rows|groupby('storage_falcon_group') %}
+          <section class="inventory-search-falcon">
+            <header class="inventory-search-falcon__heading"><h3>{{ falcon }}</h3><span>{{ falcon_grids|length }} matching grid(s)</span></header>
+            <div class="inventory-search-boxes">
+              {% for box, box_grids in falcon_grids|groupby('storage_box_group') %}
+                <details class="inventory-search-box">
+                  <summary>
+                    <strong>{{ box }}</strong>
+                    <span>{{ box_grids|length }} grid(s)</span>
+                    <small>{{ box_grids|map(attribute='researcher_name')|unique|join(', ') }}</small>
+                    <small>{{ box_grids|map(attribute='sample_name')|unique|join(', ') }}</small>
+                    <small>{{ box_grids|map(attribute='current_status')|unique|join(' · ') }}</small>
+                  </summary>
+                  <div class="table-wrap inventory-grid-table-wrap"><table class="data-table inventory-grid-table"><thead><tr><th>Select</th><th>Grid ID</th><th>Sample</th><th>Researcher</th><th>Grid type</th><th>Frozen</th><th>Clipping</th><th>Status</th><th>Position</th></tr></thead><tbody>
+                    {% for grid in box_grids %}
+                      {% if loop.first or loop.previtem.batch_code != grid.batch_code %}<tr class="inventory-batch-heading"><th colspan="9" scope="rowgroup">Freezing batch {{ grid.batch_code }} <span>· {{ grid.batch_grid_count }} grids · {{ grid.frozen_at|facility_time }}</span></th></tr>{% endif %}
+                      <tr><td><input type="checkbox" name="selected_grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.grid_code }}"></td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.grid_type_name }}</td><td>{{ grid.frozen_at|facility_time }}</td><td>{{ 'Clipped' if grid.clipped else 'Not clipped' }}</td><td><span class="inventory-status inventory-status--{{ grid.current_status|lower|replace(' ','-') }}">{{ grid.current_status }}</span></td><td>{% if grid.grid_position %}{{ grid.grid_position }}{% else %}—{% endif %}</td></tr>
+                    {% endfor %}
+                  </tbody></table></div>
+                </details>
+              {% endfor %}
+            </div>
+          </section>
+        {% endfor %}
+      </div>
       {% else %}<p class="empty-message">No grids match these filters.</p>{% endif %}
     </form>
     {% if pages > 1 %}<nav class="inventory-pagination" aria-label="Inventory result pages">{% if page > 1 %}<a href="{{ previous_url }}">Previous</a>{% endif %}<span>Page {{ page }} of {{ pages }}</span>{% if page < pages %}<a href="{{ next_url }}">Next</a>{% endif %}</nav>{% endif %}
@@ -48,7 +73,7 @@ function updateBulkSelection() {
   }
 }
 document.querySelector("[data-select-all]")?.addEventListener("change", (event) => {
-  gridCheckboxes.forEach((box) => { box.checked = event.target.checked; });
+  gridCheckboxes.forEach((box) => { box.checked = event.currentTarget.checked; });
   updateBulkSelection();
 });
 gridCheckboxes.forEach((box) => box.addEventListener("change", updateBulkSelection));

@@ -57,19 +57,19 @@ def get_combined_ongoing_slots(cur):
 
 @public_bp.route("/inventory")
 def grid_inventory():
-    researcher_name = request.args.get("researcher_name", "").strip()
+    username = request.args.get("username", request.args.get("researcher_name", "")).strip()
     sample_name = request.args.get("sample_name", "").strip()
     grids = []
     search_error = ""
-    searched = bool(researcher_name and sample_name)
-    if len(researcher_name) > 150 or len(sample_name) > 180:
-        search_error = "Enter a shorter researcher or sample name."
+    searched = bool(username)
+    if len(username) > 150 or len(sample_name) > 180:
+        search_error = "Enter a shorter username or sample name."
     elif searched:
-        grids = public_inventory_grids(researcher_name, sample_name)
+        grids = public_inventory_grids(username, sample_name or None)
     return render_template(
         "public_inventory.html",
         grids=grids,
-        researcher_name=researcher_name,
+        username=username,
         sample_name=sample_name,
         searched=searched,
         search_error=search_error,

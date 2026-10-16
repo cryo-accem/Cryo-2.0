@@ -1,4 +1,5 @@
 import csv
+import datetime
 import io
 import os
 import re
@@ -13,6 +14,7 @@ from migrations.apply_grid_inventory import apply_migration
 from inventory_service import (
     InventoryError, create_data_session, link_grid_to_booking, public_inventory_grids,
 )
+from blueprints.freezing import register_freezing as register_freezing_booking
 from blueprints.imaging import register_imaging
 
 
@@ -145,7 +147,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertNotIn("Grid inventory", navigation.group(1))
         self.assertRegex(
             html,
-            r'<a class="portal-card" href="/inventory"><i class="fa-solid fa-boxes-stacked"[^>]*></i><strong>Grid inventory</strong><span>Find your grids by researcher and sample',
+            r'<a class="portal-card" href="/inventory"><i class="fa-solid fa-boxes-stacked"[^>]*></i><strong>Grid inventory</strong><span>Find your grids by username',
         )
 
     def test_inventory_dashboard_shows_storage_positions_and_legacy_status_codes(self):
@@ -173,8 +175,8 @@ class GridInventoryTests(unittest.TestCase):
         content = dashboard.data.decode()
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
-        self.assertIn(f'aria-label="Position 1, {stored}, Test sample, Stored"', content)
-        self.assertIn(f'aria-label="Position 2, {clipped}, Test sample, Clipped"', content)
+        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Stored"', content)
+        self.assertIn(f'aria-label="Position 2, {clipped}, Researcher, Clipped"', content)
         for code in (frozen, discarded, in_collection):
             self.assertIn(f'href="/admin/inventory/grids/{code}"', content)
         self.assertRegex(content, r">NTI</span>\s*Frozen · not lifted")
@@ -182,6 +184,145 @@ class GridInventoryTests(unittest.TestCase):
         self.assertRegex(content, r">C</span>")
         self.assertRegex(content, r">D</span>")
         self.assertRegex(content, r">U</span>")
+
+    def test_storage_groups_all_positions_by_falcon_and_box(self):
+        first, second = self.create_batch(2)
+        self.post_storage(first, "Falcon-A", "GridBox-1", "1")
+        self.post_storage(second, "Falcon-A", "GridBox-1", "2")
+
+        response = self.client.get("/admin/inventory/storage")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode()
+        self.assertIn("<summary>Falcon-A", content)
+        self.assertIn("<summary><span>GridBox-1</span><span>2 grid(s)</span></summary>", content)
+        self.assertIn("Researcher", content)
+        self.assertIn(first, content)
+        self.assertIn(second, content)
+
+    def test_grid_storage_positions_sort_numerically(self):
+        codes = self.create_batch(10)
+        for position, code in enumerate(codes, start=1):
+            self.post_storage(code, "Falcon-Numeric", "Box-Numeric", str(position))
+
+        response = self.client.get("/admin/inventory/storage")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode()
+        position_order = [
+            content.index(f"<strong>{position}</strong>")
+            for position in range(1, 11)
+        ]
+        self.assertEqual(position_order, sorted(position_order))
+
+    def test_search_grids_shows_collapsed_falcon_box_cards_before_grid_rows(self):
+        first, second, third = self.create_batch(3)
+        self.post_storage(first, "Falcon-Search", "Box-A", "1")
+        self.post_storage(second, "Falcon-Search", "Box-A", "2")
+        self.post_storage(third, "Falcon-Search", "Box-B", "1")
+
+        response = self.client.get("/admin/inventory/grids")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode()
+        self.assertIn("3 grid(s) in 2 box group(s)", content)
+        self.assertIn("Falcon-Search", content)
+        self.assertIn("Box-A", content)
+        self.assertIn("Box-B", content)
+        self.assertIn('<details class="inventory-search-box">', content)
+        self.assertIn("2 grid(s)", content)
+        self.assertIn("Select all grids in these boxes", content)
+        self.assertIn(f'value="{first}"', content)
+        self.assertIn(f'value="{second}"', content)
+        self.assertIn(f'value="{third}"', content)
+
+    def test_search_grid_box_pagination_keeps_each_box_complete(self):
+        codes = self.create_batch(3)
+        self.post_storage(codes[0], "Falcon-Pages", "Box-Large", "1")
+        self.post_storage(codes[1], "Falcon-Pages", "Box-Large", "2")
+        self.post_storage(codes[2], "Falcon-Pages", "Box-Large", "3")
+        for index in range(40):
+            code = self.create_batch(1)[0]
+            self.post_storage(code, f"Falcon-{index:02}", "Box", "1")
+
+        response = self.client.get("/admin/inventory/grids?page=2")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode()
+        self.assertIn("43 grid(s) in 41 box group(s)", content)
+        self.assertIn("Page 2 of 2", content)
+        self.assertIn('<summary>', content)
+        self.assertIn("3 grid(s)", content)
+        self.assertIn(f'value="{codes[0]}"', content)
+        self.assertIn(f'value="{codes[1]}"', content)
+        self.assertIn(f'value="{codes[2]}"', content)
+
+    def test_ten_grid_freezing_completion_creates_one_collapsible_storage_group(self):
+        freezing_date = datetime.date.today() + datetime.timedelta(days=1)
+        while freezing_date.weekday() >= 5:
+            freezing_date += datetime.timedelta(days=1)
+        with patch("blueprints.freezing.send_email"):
+            success, message = register_freezing_booking(
+                "LOCAL STORAGE TRIAL",
+                "Trial PI",
+                "trial@example.test",
+                "Internal",
+                "LOCAL STORAGE TRIAL",
+                10,
+                freezing_date.isoformat(),
+                allow_over_capacity=True,
+            )
+        self.assertTrue(success, message)
+
+        conn = database.get_db()
+        booking_id = conn.execute(
+            "SELECT id FROM freezing_bookings WHERE email='trial@example.test'"
+        ).fetchone()["id"]
+        grid_type_id = conn.execute(
+            "SELECT grid_type_id FROM grid_types WHERE active=1 ORDER BY grid_type_id LIMIT 1"
+        ).fetchone()["grid_type_id"]
+        conn.close()
+        completion = {
+            "_csrf_token": self.csrf_token(),
+            "actual_grids": "10",
+            "grid_source": "self_owned",
+            "grid_management": "1",
+            "inventory_grid_sample_name": ["LOCAL STORAGE TRIAL"] * 10,
+            "inventory_sample_id": [""] * 10,
+            "inventory_grid_type_id": [str(grid_type_id)] * 10,
+            "inventory_falcon": ["TRIAL-FALCON"] * 10,
+            "inventory_box": ["TRIAL-BOX"] * 10,
+            "inventory_position": [str(position) for position in range(1, 11)],
+            "blot_seconds": ["1"] * 10,
+            "blot_force": ["1"] * 10,
+        }
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/freezing/complete/{booking_id}", data=completion
+            )
+        self.assertEqual(response.status_code, 302)
+
+        storage = self.client.get("/admin/inventory/storage")
+        content = storage.data.decode()
+        self.assertIn("TRIAL-FALCON", content)
+        self.assertIn("TRIAL-BOX", content)
+        self.assertIn("10 grid(s)", content)
+        for position in range(1, 11):
+            self.assertIn(f"<strong>{position}</strong>", content)
+        conn = database.get_db()
+        self.assertEqual(
+            conn.execute(
+                "SELECT COUNT(*) AS count FROM inventory_grids"
+            ).fetchone()["count"],
+            10,
+        )
+        self.assertEqual(
+            conn.execute(
+                "SELECT status FROM freezing_bookings WHERE id=?", [booking_id]
+            ).fetchone()["status"],
+            "completed",
+        )
+        conn.close()
 
     def test_public_inventory_and_booking_grid_selection_are_available_without_admin_login(self):
         selected_grid, other_grid = self.create_batch(2)
@@ -200,6 +341,14 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn(other_grid.encode(), inventory.data)
         self.assertNotIn(unrelated_grid.encode(), inventory.data)
         self.assertNotIn(b"Register frozen grids", inventory.data)
+
+        username_lookup = guest.get("/inventory?username=Researcher")
+        self.assertEqual(username_lookup.status_code, 200)
+        self.assertIn(selected_grid.encode(), username_lookup.data)
+        self.assertIn(other_grid.encode(), username_lookup.data)
+        self.assertNotIn(unrelated_grid.encode(), username_lookup.data)
+        self.assertNotIn(b"Test sample", username_lookup.data)
+        self.assertNotIn(b'name="sample_name"', username_lookup.data)
 
         form = guest.get("/register")
         self.assertEqual(form.status_code, 200)
