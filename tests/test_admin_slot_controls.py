@@ -34,6 +34,13 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1).decode()
 
+    def test_admin_session_survives_public_pages(self):
+        public_page = self.client.get("/about")
+        admin_page = self.client.get("/admin/panel")
+
+        self.assertEqual(public_page.status_code, 200)
+        self.assertEqual(admin_page.status_code, 200)
+
     def test_create_slot_options_are_collapsed_below_csic_projects(self):
         response = self.client.get("/admin/panel")
         self.assertEqual(response.status_code, 200)

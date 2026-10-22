@@ -161,7 +161,10 @@ def check_admin_session():
             if expects_json:
                 return jsonify({"error": "Change your admin password before continuing."}), 403
             return redirect(url_for("admin.change_password"))
-        if request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS:
+        if (
+            request.endpoint.startswith(("admin.", "inventory."))
+            and request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS
+        ):
             session.pop("admin_logged_in", None)
 
 
