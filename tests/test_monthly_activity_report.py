@@ -92,10 +92,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
         self.assertIn("Completed data collection records", content)
         self.assertIn("Facility-provided grids used", content)
         self.assertIn("Outside/user-provided grids used", content)
-        self.assertIn("INR 126,220.00", content)
+        self.assertIn("INR 123,220.00", content)
         self.assertIn("Sample A", content)
         self.assertIn("Sample B", content)
         self.assertIn("Sample C", content)
+        self.assertIn("Non-billable", content)
         self.assertNotIn("Sample D", content)
 
     def test_report_requires_admin_session(self):
@@ -130,7 +131,7 @@ class MonthlyActivityReportTests(unittest.TestCase):
         self.assertIn("Sample B", content)
         self.assertNotIn("Sample A", content)
         self.assertNotIn("Sample C", content)
-        self.assertIn("INR 2,000.00", content)
+        self.assertIn("INR 0.00", content)
 
 
 if __name__ == "__main__":

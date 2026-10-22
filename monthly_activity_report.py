@@ -12,6 +12,8 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.table import Table
 from docx.shared import Inches, Pt, RGBColor
 
+from revenue import is_non_billable_booking
+
 
 ZERO = Decimal("0")
 
@@ -56,6 +58,10 @@ def _format_date(value: object) -> str:
 
 def _row_revenue(row: Mapping[str, object]) -> Decimal:
     return _decimal(row.get("total_billed") or row.get("grand_total"))
+
+
+def _row_is_billable(row: Mapping[str, object], service: str) -> bool:
+    return service == "Freezing" and not is_non_billable_booking(row)
 
 
 def _add_table(
@@ -105,7 +111,7 @@ def _add_service_table(
             _grids(row),
             _grid_source(row),
             clipped if service != "Freezing" else "—",
-            _money(_row_revenue(row)),
+            _money(_row_revenue(row)) if _row_is_billable(row, service) else "Non-billable",
         ))
     _add_table(
         document,
@@ -152,8 +158,14 @@ def build_monthly_activity_report(
     facility_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "facility")
     outside_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "outside")
     clipped_grids = sum(int(_decimal(row.get("clipped_grids"))) for _, row in clipped_events)
-    current_billed = sum((_row_revenue(row) for row in all_events), ZERO)
-    received = sum((_decimal(row.get("amount_received")) for row in all_events), ZERO)
+    billable_events = [
+        (service, row)
+        for service, events in events_by_service.items()
+        for row in events
+        if _row_is_billable(row, service)
+    ]
+    current_billed = sum((_row_revenue(row) for _, row in billable_events), ZERO)
+    received = sum((_decimal(row.get("amount_received")) for _, row in billable_events), ZERO)
     historical_by_month = {
         month: _decimal(amount)
         for month, amount in historical_revenue
@@ -205,8 +217,10 @@ def build_monthly_activity_report(
         month_start = max(start, month_cursor)
         effective_end = min(end, month_end)
         in_month = [
-            row for row in all_events
+            row for service, events in events_by_service.items()
+            for row in events
             if month_start <= row["_report_date"] <= effective_end
+            and _row_is_billable(row, service)
         ]
         month_history = historical_by_month.get(month_cursor.strftime("%Y-%m"), ZERO)
         month_rows.append((
@@ -241,7 +255,8 @@ def build_monthly_activity_report(
                 row.get("pi_name") or "-",
                 row.get("sample_name") or "-",
                 int(_decimal(row.get("clipped_grids"))),
-                _money(_decimal(row.get("clipping_charge"))),
+                _money(_decimal(row.get("clipping_charge")))
+                if _row_is_billable(row, service) else "Non-billable",
             )
             for service, row in clipped_events
         ]
@@ -261,6 +276,7 @@ def build_monthly_activity_report(
             "and are therefore not included in the activity lists above."
         )
     document.add_paragraph(
+        "Screening and data collection are recorded as activity only and are not billed here. "
         "Grid counts represent completed service uses recorded by the facility; the same grids "
         "may appear in more than one service event. Outside grids include user-provided or "
         "unclassified legacy grid sources."

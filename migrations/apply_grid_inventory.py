@@ -17,6 +17,7 @@ MIGRATIONS = (
     "005_grid_types",
     "006_existing_stored_grids_frozen",
     "007_unlimited_admin_screening",
+    "008_csic_project_entries",
 )
 
 

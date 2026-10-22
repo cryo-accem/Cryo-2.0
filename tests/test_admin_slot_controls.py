@@ -102,6 +102,64 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertEqual(booking["days"], 3)
         self.assertEqual(booking["status"], "waiting")
 
+    def test_csic_project_entry_saves_only_record_details_without_booking_or_revenue(self):
+        response = self.client.post(
+            "/admin/panel/slots/csic_project",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Project Contact",
+                "company_name": "Example Cryo Company",
+                "sample_count": "5",
+                "sample_details": "Five samples for the CSIC project.",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"CSIC project entry saved.", response.data)
+        self.assertIn(b"No booking or billing calculation was created.", response.data)
+        self.assertIn(b"Example Cryo Company", response.data)
+        with self.app.app_context():
+            conn = database.get_db()
+            entry = conn.execute(
+                """SELECT username, company_name, sample_count, sample_details
+                   FROM csic_project_entries"""
+            ).fetchone()
+            self.assertEqual(entry["username"], "Project Contact")
+            self.assertEqual(entry["company_name"], "Example Cryo Company")
+            self.assertEqual(entry["sample_count"], 5)
+            self.assertEqual(entry["sample_details"], "Five samples for the CSIC project.")
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0], 0)
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM screening_bookings").fetchone()[0],
+                0,
+            )
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM csic_projects").fetchone()[0], 0)
+            conn.close()
+
+    def test_csic_project_entry_requires_positive_whole_sample_count(self):
+        response = self.client.post(
+            "/admin/panel/slots/csic_project",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Project Contact",
+                "company_name": "Example Cryo Company",
+                "sample_count": "0",
+                "sample_details": "Sample details",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Sample count must be a whole number greater than zero.", response.data)
+        with self.app.app_context():
+            conn = database.get_db()
+            self.assertEqual(
+                conn.execute("SELECT COUNT(*) FROM csic_project_entries").fetchone()[0],
+                0,
+            )
+            conn.close()
+
     def test_success_reopens_form_with_confirmation_and_add_another(self):
         data = self._slot_data()
         data["days"] = "3"

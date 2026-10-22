@@ -23,10 +23,10 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed, amount_received)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed, amount_received)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 ("Payment User", "PI Payment", "payment@example.com", "academic",
                  "Sample Payment", "2026-09-02", "1200.00", "200.00"),
             )
@@ -47,10 +47,10 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
                  "Sample Freeze", "2026-09-04", "700.00", "Payment Pending"),
             )
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed, payment_status)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed, payment_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 ("Paid User", "PI Paid", "paid@example.com", "academic",
                  "Sample Paid", "2026-09-05", "500.00", "Payment Verified"),
             )
@@ -69,18 +69,17 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
 
-    def test_dashboard_tracks_history_pending_statuses_and_omits_updated_statuses(self):
+    def test_dashboard_tracks_billable_pending_statuses_and_omits_non_billable_services(self):
         response = self.client.get("/admin/panel")
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Pending payment tracking", response.data)
         self.assertIn(b"2 records", response.data)
         self.assertIn(b"Payment balance outstanding", response.data)
-        self.assertIn(b"Internal debit head pending", response.data)
-        self.assertIn(b"Payment User", response.data)
         self.assertIn(b"Freezing User", response.data)
-        self.assertIn(b"Internal User", response.data)
-        self.assertIn(b"1,000.00", response.data)
+        self.assertIn(b"Payment User", response.data)
+        self.assertNotIn(b"Internal User", response.data)
+        self.assertIn(b"1,700.00", response.data)
         self.assertNotIn(b"Paid User", response.data)
         self.assertNotIn(b"Proof User", response.data)
 
@@ -118,7 +117,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
-            cur.execute("SELECT id FROM bookings WHERE email=?", ["payment@example.com"])
+            cur.execute("SELECT id FROM completed_freezing WHERE email=?", ["payment@example.com"])
             booking_id = cur.fetchone()["id"]
             cur.close()
             conn.close()
@@ -126,7 +125,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         with patch("blueprints.admin.send_email_sync", return_value=True) as send_email:
             for reminder_number in (1, 2):
                 response = self.client.post(
-                    f"/admin/payment-reminder/imaging/{booking_id}",
+                    f"/admin/payment-reminder/freezing/{booking_id}",
                     data={"_csrf_token": csrf_token},
                 )
                 self.assertEqual(response.status_code, 302)
@@ -141,7 +140,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertIn(b"2 sent", response.data)
         self.assertNotIn(b"Reminder 3", response.data)
 
-    def test_internal_payment_reminder_requests_pi_signed_debit_head_and_charge_sheet(self):
+    def test_screening_payment_reminder_is_rejected_as_non_billable(self):
         response = self.client.get("/admin/panel")
         self.assertEqual(response.status_code, 200)
         with self.client.session_transaction() as session:
@@ -165,11 +164,9 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(send_email.call_args.args[0], "internal@example.com")
-        self.assertIn("duly signed by your PI", send_email.call_args.args[2])
-        self.assertIn("debit-head document", send_email.call_args.args[2])
-        self.assertIn("charge sheet", send_email.call_args.args[2])
-        self.assertIn("Reminder 1:", send_email.call_args.args[1])
+        send_email.assert_not_called()
+        response = self.client.get("/admin/panel", follow_redirects=True)
+        self.assertIn(b"non-billable and does not require a payment reminder", response.data)
 
     def test_payment_reminder_does_not_send_for_no_longer_pending_booking(self):
         response = self.client.get("/admin/panel")
@@ -180,17 +177,14 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
-            cur.execute(
-                "SELECT id FROM bookings WHERE email=?",
-                ["paid@example.com"],
-            )
+            cur.execute("SELECT id FROM completed_freezing WHERE email=?", ["paid@example.com"])
             booking_id = cur.fetchone()["id"]
             cur.close()
             conn.close()
 
         with patch("blueprints.admin.send_email_sync") as send_email:
             response = self.client.post(
-                f"/admin/payment-reminder/imaging/{booking_id}",
+                f"/admin/payment-reminder/freezing/{booking_id}",
                 data={"_csrf_token": csrf_token},
             )
 
@@ -206,14 +200,14 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
-            cur.execute("SELECT id FROM bookings WHERE email=?", ["payment@example.com"])
+            cur.execute("SELECT id FROM completed_freezing WHERE email=?", ["payment@example.com"])
             booking_id = cur.fetchone()["id"]
             cur.close()
             conn.close()
 
         with patch("blueprints.admin.send_email_sync", return_value=False):
             response = self.client.post(
-                f"/admin/payment-reminder/imaging/{booking_id}",
+                f"/admin/payment-reminder/freezing/{booking_id}",
                 data={"_csrf_token": csrf_token},
                 follow_redirects=True,
             )
@@ -228,10 +222,10 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed, debit_head_status)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed, debit_head_status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 ("Internal Verified", "PI Internal", "internal-verified@example.com",
                  "internal", "Sample Internal Verified", "2026-09-07", "74250.00",
                  "Debit Head Verified"),
@@ -246,17 +240,17 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Amount received</span><strong>\xe2\x82\xb974,950.00", response.data)
-        self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb93,400.00", response.data)
+        self.assertIn(b"Outstanding</span><strong>\xe2\x82\xb91,700.00", response.data)
 
     def test_dashboard_bar_chart_uses_the_selected_period_and_date_range(self):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Comparison User", "PI Comparison", "comparison@example.com",
                  "academic", "Sample Comparison", "2024-01-15", "37000.00"),
             )
@@ -305,26 +299,26 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Current Period", "PI Compare", "current-period@example.com",
                  "academic", "Current sample", "2026-09-20", "3000.00"),
             )
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Previous Period", "PI Compare", "previous-period@example.com",
                  "academic", "Previous sample", "2025-09-20", "1000.00"),
             )
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Outside Period", "PI Compare", "outside-period@example.com",
                  "academic", "Outside sample", "2026-08-20", "500000.00"),
             )
@@ -337,7 +331,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Sep: 610.0% increase", response.data)
+        self.assertIn(b"Sep: 440.0% increase", response.data)
         self.assertIn(b"vs 2025", response.data)
 
     def test_dashboard_uses_supplied_2026_monthly_revenue_and_zeroes(self):
@@ -358,18 +352,18 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Future Year User", "PI Future", "future@example.com",
                  "academic", "Future sample", "2027-09-15", "8200.00"),
             )
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("After Cutoff User", "PI Future", "after-cutoff@example.com",
                  "academic", "After cutoff sample", "2027-09-30", "500000.00"),
             )
@@ -385,23 +379,23 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
         self.assertIn(b"Annual net revenue bar chart", response.data)
         self.assertIn(b'title="FY 2027-28: \xe2\x82\xb98,200.00"', response.data)
 
-    def test_selected_year_bar_chart_uses_completed_booking_revenue(self):
+    def test_selected_year_bar_chart_uses_completed_billable_revenue(self):
         with self.app.app_context():
             conn = database.get_db()
             cur = conn.cursor()
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Detailed Prior User", "PI Detailed", "detailed-prior@example.com",
                  "academic", "Detailed prior sample", "2025-09-10", "1000.00"),
             )
             cur.execute(
-                """INSERT INTO bookings
-                   (user_name, pi_name, email, origin, sample_name, status,
-                    completion_date, total_billed)
-                   VALUES (?, ?, ?, ?, ?, 'completed', ?, ?)""",
+                """INSERT INTO completed_freezing
+                   (user_name, pi_name, email, origin, sample_name,
+                    completed_at, total_billed)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 ("Detailed Current User", "PI Detailed", "detailed-current@example.com",
                  "academic", "Detailed current sample", "2026-09-10", "2000.00"),
             )
@@ -415,7 +409,7 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Monthly net revenue bar chart", response.data)
-        self.assertIn(b'title="2026-09: \xe2\x82\xb96,100.00"', response.data)
+        self.assertIn(b'title="2026-09: \xe2\x82\xb94,400.00"', response.data)
 
 
 if __name__ == "__main__":

@@ -127,6 +127,7 @@
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-datacollecting" aria-pressed="false" data-slot-type="datacollecting">Data collecting</button>
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-screening" aria-pressed="false" data-slot-type="screening">Screening</button>
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-freezing" aria-pressed="false" data-slot-type="freezing">Freezing</button>
+        <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-csic-project" aria-pressed="false" data-slot-type="csic_project">CSIC project entry</button>
       </div>
       <p class="admin-slot-selection-status" role="status" aria-live="polite"></p>
       {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}<p class="admin-slot-save-error" role="status">{{ slot_form_state.get('message') or 'The slot was not saved. Your entries are preserved below so you can review and try again.' }}</p>{% endif %}
@@ -189,7 +190,27 @@
           <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
           <button class="button" type="submit">Add freezing slot</button>
         </form>
+        <form class="admin-slot-form" id="admin-slot-form-csic-project" method="post" action="{{ url_for('admin.add_slot', slot_type='csic_project') }}">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+          <h3>CSIC project entry</h3>
+          <p class="form-hint">Record project and sample details only. This does not create a service booking, invoice, revenue, GST, or slot credit.</p>
+          <label>Username<input name="user_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('user_name', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
+          <label>Company name<input name="company_name" maxlength="180" value="{{ slot_form_state.get('values', {}).get('company_name', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
+          <label>Sample count<input name="sample_count" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('sample_count', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
+          <label>Sample details<textarea name="sample_details" rows="4" maxlength="10000" required>{{ slot_form_state.get('values', {}).get('sample_details', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}</textarea></label>
+          <button class="button" type="submit">Save CSIC project entry</button>
+        </form>
       </div>
+      <section class="data-panel" aria-labelledby="csic-project-entry-list-title">
+        <h3 id="csic-project-entry-list-title">Recent CSIC project entries</h3>
+        {% if csic_project_entries %}
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Username</th><th>Company</th><th>Samples</th><th>Sample details</th><th>Entered</th></tr></thead><tbody>
+          {% for entry in csic_project_entries %}
+          <tr><td>{{ entry.username }}</td><td>{{ entry.company_name }}</td><td>{{ entry.sample_count }}</td><td>{{ entry.sample_details }}</td><td>{{ entry.created_at }}</td></tr>
+          {% endfor %}
+        </tbody></table></div>
+        {% else %}<p class="empty-message">No CSIC project entries have been recorded.</p>{% endif %}
+      </section>
     </div>
   </details>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}

@@ -28,8 +28,8 @@ from database import get_db
 from database import _is_sqlite_url
 from extensions import send_email, send_email_sync
 from revenue import (
-    calculate_booking_revenue, calculate_charge_sheet, is_non_billable_booking,
-    parse_number_of_grids,
+    calculate_charge_sheet, is_non_billable_booking,
+    is_non_billable_service, parse_number_of_grids,
 )
 from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing
 from blueprints.imaging import register_imaging
@@ -257,6 +257,9 @@ def billing_preview():
     """Return an authoritative preview for the admin billing form."""
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
+    service_stage = request.values.get("service_stage", "").strip()
+    if is_non_billable_service(service_stage):
+        return jsonify({"error": "Screening and data collection are not billed here."}), 400
     try:
         charges = calculate_charge_sheet(
             request.values.get("user_category", ""),
@@ -297,6 +300,11 @@ def panel():
     freezing_active = cur.fetchone()["count"]
     pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
+    cur.execute(
+        "SELECT id, username, company_name, sample_count, sample_details, created_at "
+        "FROM csic_project_entries ORDER BY created_at DESC, id DESC LIMIT 20"
+    )
+    csic_project_entries = cur.fetchall()
     cur.close()
     conn.close()
     pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd"]
@@ -330,6 +338,7 @@ def panel():
         today=datetime.date.today().isoformat(),
         freezing_grid_limit=GRID_LIMIT_PER_DAY,
         slot_form_state=slot_form_state,
+        csic_project_entries=csic_project_entries,
     )
 
 
@@ -392,7 +401,8 @@ def known_slot_user():
 def _slot_form_redirect(slot_type, message, category="registration", saved=False):
     field_names = (
         "user_name", "pi_name", "email", "origin", "esm", "sample_name",
-        "grids", "days", "freezing_date",
+        "grids", "days", "freezing_date", "company_name", "sample_count",
+        "sample_details",
     )
     session["_admin_slot_form_state"] = {
         "slot_type": slot_type,
@@ -410,12 +420,58 @@ def _slot_form_redirect(slot_type, message, category="registration", saved=False
     return redirect(url_for("admin.panel", _anchor="create-slot"))
 
 
-@admin_bp.route("/panel/slots/<any(datacollecting,screening,freezing):slot_type>", methods=["POST"])
+@admin_bp.route("/panel/slots/<any(datacollecting,screening,freezing,csic_project):slot_type>", methods=["POST"])
 def add_slot(slot_type):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
     user_name = request.form.get("user_name", "").strip()
+    if slot_type == "csic_project":
+        company_name = request.form.get("company_name", "").strip()
+        sample_count_text = request.form.get("sample_count", "").strip()
+        sample_details = request.form.get("sample_details", "").strip()
+        errors = []
+        if not user_name or len(user_name) > 100:
+            errors.append("Enter a username up to 100 characters.")
+        if not company_name or len(company_name) > 180:
+            errors.append("Enter a company name up to 180 characters.")
+        try:
+            sample_count = int(sample_count_text)
+            if sample_count < 1:
+                raise ValueError
+        except ValueError:
+            errors.append("Sample count must be a whole number greater than zero.")
+            sample_count = 0
+        if not sample_details or len(sample_details) > 10000:
+            errors.append("Enter sample details up to 10,000 characters.")
+        if errors:
+            return _slot_form_redirect(slot_type, " ".join(errors))
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """INSERT INTO csic_project_entries
+                   (username, company_name, sample_count, sample_details, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    user_name, company_name, sample_count, sample_details,
+                    datetime.datetime.now().replace(microsecond=0),
+                ),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            cur.close()
+            conn.close()
+        return _slot_form_redirect(
+            slot_type,
+            "CSIC project entry saved. No booking or billing calculation was created.",
+            "success",
+            saved=True,
+        )
+
     pi_name = request.form.get("pi_name", "").strip()
     email = request.form.get("email", "").strip()
     origin = request.form.get("origin", "").strip()
@@ -1534,17 +1590,17 @@ def _dashboard_pending_payments(cur):
         for row in cur.fetchall()
     }
     sources = (
-        ("bookings", "Data collection", "completion_date", "completed"),
-        ("screening_bookings", "Screening", "completion_date", "completed"),
-        ("completed_freezing", "Freezing", "completed_at", None),
+        ("bookings", "Data collection", "completion_date", "completed", "imaging"),
+        ("screening_bookings", "Screening", "completion_date", "completed", "screening"),
+        ("completed_freezing", "Freezing", "completed_at", None, "freezing"),
     )
-    for table, service, completion_column, booking_status in sources:
+    for table, service, completion_column, booking_status, service_key in sources:
         where = " WHERE status='completed'" if booking_status else ""
         cur.execute(
             f"SELECT * FROM {table}{where} ORDER BY {completion_column} DESC"
         )
         for row in _history_rows(cur.fetchall()):
-            if is_non_billable_booking(row):
+            if is_non_billable_booking(row, service_key):
                 continue
             internal = (row["origin"] or "").strip().casefold() == "internal"
             tracking_status = (
@@ -1559,19 +1615,13 @@ def _dashboard_pending_payments(cur):
             pending_rows.append({
                 **row,
                 "service_label": service,
-                "service_key": (
-                    "imaging" if table == "bookings"
-                    else "screening" if table == "screening_bookings"
-                    else "freezing"
-                ),
+                "service_key": service_key,
                 "completion_value": row.get(completion_column),
                 "tracking_label": "Debit head pending" if internal else "Payment pending",
                 "pending_amount": max(Decimal("0.00"), billed - received),
                 "reminder_count": reminder_counts.get(
                     (
-                        "imaging" if table == "bookings"
-                        else "screening" if table == "screening_bookings"
-                        else "freezing",
+                        service_key,
                         row["id"],
                     ),
                     0,
@@ -1622,8 +1672,8 @@ def send_payment_reminder(service_key, booking_id):
         flash("That booking could not be found.")
         return redirect(url_for("admin.panel"))
     booking = _history_rows([booking_row])[0]
-    if is_non_billable_booking(booking):
-        flash("This booking does not require a payment reminder.")
+    if is_non_billable_booking(booking, service_key):
+        flash("This booking is non-billable and does not require a payment reminder.")
         return redirect(url_for("admin.panel"))
 
     internal = (booking.get("origin") or "").strip().casefold() == "internal"
@@ -2226,7 +2276,10 @@ def _revenue_dashboard(cur, preset_override=None):
             month_start = month_start.replace(month=month_start.month + 1)
     rows = []
     detailed_revenue_years = set()
-    for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
+    for table, service, service_key in (
+        ("bookings", "Data Collection", "imaging"),
+        ("screening_bookings", "Screening", "screening"),
+    ):
         cur.execute(
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
@@ -2237,7 +2290,7 @@ def _revenue_dashboard(cur, preset_override=None):
                 WHERE status='completed'"""
         )
         for row in cur.fetchall():
-            if is_non_billable_booking(row):
+            if is_non_billable_booking(row, service_key):
                 continue
             completion_date = _parse_date(str(row["completion_date"])[:10])
             if not completion_date:
@@ -2264,7 +2317,7 @@ def _revenue_dashboard(cur, preset_override=None):
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
-        if is_non_billable_booking(row):
+        if is_non_billable_booking(row, "freezing"):
             continue
         completion_date = _parse_date(str(row["completion_date"])[:10])
         if not completion_date:
@@ -2626,30 +2679,15 @@ def complete_dc(booking_id):
 
     actual_slots = request.form.get("actual_slots", "").strip()
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
-    grid_source = request.form.get("grid_source", "").strip()
-    grid_type = request.form.get("grid_type", "").strip()
-    normal_grids = request.form.get("normal_grids", "").strip() or None
-    gold_grids = request.form.get("gold_grids", "").strip() or None
-    processing_requested = request.form.get("processing_requested") == "1"
-    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
-    if not grid_source:
-        flash("Please select the grid source before generating the bill.")
-        return redirect(url_for("admin.datacollecting"))
-    if not grid_type and not (normal_grids or gold_grids) and grid_source.casefold() in {"facility", "facility provided"}:
-        flash("Please select the grid type for facility-provided grids.")
-        return redirect(url_for("admin.datacollecting"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.datacollecting"))
-    user_category = request.form.get("user_category", "").strip() or None
-    service_stage = request.form.get("service_stage", "").strip() or "Data Collection"
-    if service_stage != "Data Collection":
-        flash("This booking can only be completed as Data Collection.")
-        return redirect(url_for("admin.datacollecting"))
     try:
         actual_slots_value = Decimal(actual_slots)
-        if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
-                ):
+        if (
+            actual_slots_value <= 0
+            or actual_slots_value != actual_slots_value.to_integral_value()
+        ):
             raise ValueError
     except (InvalidOperation, ValueError):
         flash("Actual slots must be positive and grids must be a positive integer.")
@@ -2658,13 +2696,6 @@ def complete_dc(booking_id):
         actual_grids_value = parse_number_of_grids(actual_grids)
     except ValueError:
         flash("Number of grids must be at least 1.")
-        return redirect(url_for("admin.datacollecting"))
-    try:
-        clipped_grids_value = int(clipped_grids)
-        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
-            raise ValueError
-    except ValueError:
-        flash("Clipped grids must be zero or no more than the actual grids.")
         return redirect(url_for("admin.datacollecting"))
 
     conn = get_db()
@@ -2680,18 +2711,6 @@ def complete_dc(booking_id):
         cur.close()
         conn.close()
         flash("That data collection booking is no longer ongoing.")
-        return redirect(url_for("admin.datacollecting"))
-    try:
-        charges = calculate_booking_revenue(
-            booking, actual_slots_value, actual_grids_value, processing_requested,
-            grid_source, grid_type, "Data Collection", user_category,
-            clipped_grids_value,
-        )
-    except ValueError as exc:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        flash(str(exc))
         return redirect(url_for("admin.datacollecting"))
     try:
         complete_booking_grid_moves(
@@ -2710,21 +2729,17 @@ def complete_dc(booking_id):
         raise
     cur.execute(
         """UPDATE bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
-           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
-           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
-           clipped_grids=?,
-           total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
+           actual_slots=?, actual_grids=?, number_of_grids=?,
+           service_stage='Data Collection', grid_source=NULL, grid_type=NULL,
+           grid_charge=0, handling_charge=0, clip_base_charge=0, slot_charge=0,
+           freezing_charge=0, clipping_charge=0, processing_charge=0, subtotal=0,
+           gst_amount=0, grand_total=0, clipped_grids=0, total_billed=0,
+           processing_requested=0, bill_generated_at=NULL
            WHERE id=?""",
-        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
-         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
-         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
-         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
-         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
-         str(charges["total_billed"]),
-         int(processing_requested), booking_id),
+        (
+            datetime.date.today(), str(actual_slots_value), actual_grids_value,
+            actual_grids_value, booking_id,
+        ),
     )
     cur.execute("SELECT * FROM bookings WHERE id=?", [booking_id])
     reg = cur.fetchone()
@@ -2956,28 +2971,15 @@ def complete_sc(booking_id):
 
     actual_slots = request.form.get("actual_slots", "").strip()
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
-    grid_source = request.form.get("grid_source", "").strip()
-    grid_type = request.form.get("grid_type", "").strip()
-    user_category = request.form.get("user_category", "").strip() or None
-    service_stage = request.form.get("service_stage", "").strip() or "Screening / Clipping"
-    if service_stage != "Screening / Clipping":
-        flash("This booking can only be completed as Screening / Clipping.")
-        return redirect(url_for("admin.screening_admin"))
-    processing_requested = request.form.get("processing_requested") == "1"
-    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
-    if not grid_source:
-        flash("Please select the grid source before generating the bill.")
-        return redirect(url_for("admin.screening_admin"))
-    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
-        flash("Please select the grid type for facility-provided grids.")
-        return redirect(url_for("admin.screening_admin"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.screening_admin"))
     try:
         actual_slots_value = Decimal(actual_slots)
-        if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
-                ):
+        if (
+            actual_slots_value <= 0
+            or actual_slots_value != actual_slots_value.to_integral_value()
+        ):
             raise ValueError
     except (InvalidOperation, ValueError):
         flash("Actual slots must be positive and grids must be a positive integer.")
@@ -2986,13 +2988,6 @@ def complete_sc(booking_id):
         actual_grids_value = parse_number_of_grids(actual_grids)
     except ValueError:
         flash("Number of grids must be at least 1.")
-        return redirect(url_for("admin.screening_admin"))
-    try:
-        clipped_grids_value = int(clipped_grids)
-        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
-            raise ValueError
-    except ValueError:
-        flash("Clipped grids must be zero or no more than the actual grids.")
         return redirect(url_for("admin.screening_admin"))
 
     conn = get_db()
@@ -3008,18 +3003,6 @@ def complete_sc(booking_id):
         cur.close()
         conn.close()
         flash("That screening booking is no longer ongoing.")
-        return redirect(url_for("admin.screening_admin"))
-    try:
-        charges = calculate_booking_revenue(
-            booking, actual_slots_value, actual_grids_value, processing_requested,
-            grid_source, grid_type, "Screening / Clipping", user_category,
-            clipped_grids_value,
-        )
-    except ValueError as exc:
-        conn.rollback()
-        cur.close()
-        conn.close()
-        flash(str(exc))
         return redirect(url_for("admin.screening_admin"))
     try:
         complete_booking_grid_moves(
@@ -3038,21 +3021,17 @@ def complete_sc(booking_id):
         raise
     cur.execute(
         """UPDATE screening_bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
-           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
-           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
-           clipped_grids=?,
-           total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
+           actual_slots=?, actual_grids=?, number_of_grids=?,
+           service_stage='Screening / Clipping', grid_source=NULL, grid_type=NULL,
+           grid_charge=0, handling_charge=0, clip_base_charge=0, slot_charge=0,
+           freezing_charge=0, clipping_charge=0, processing_charge=0, subtotal=0,
+           gst_amount=0, grand_total=0, clipped_grids=0, total_billed=0,
+           processing_requested=0, bill_generated_at=NULL
            WHERE id=?""",
-        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
-         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
-         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
-         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
-         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
-         str(charges["total_billed"]),
-         int(processing_requested), booking_id),
+        (
+            datetime.date.today(), str(actual_slots_value), actual_grids_value,
+            actual_grids_value, booking_id,
+        ),
     )
     cur.execute("SELECT * FROM screening_bookings WHERE id=?", [booking_id])
     reg = cur.fetchone()
@@ -3466,6 +3445,11 @@ def edit_completed_booking(service_key, booking_id):
         conn.close()
         flash("That completed booking could not be found.")
         return redirect(url_for("admin.history"))
+    if is_non_billable_booking(row, service_key):
+        cur.close()
+        conn.close()
+        flash("Non-billable bookings cannot be edited from billing history.")
+        return redirect(url_for("admin.history"))
     if row["charge_sheet_sent_at"]:
         cur.close()
         conn.close()
@@ -3697,8 +3681,8 @@ def send_charge_sheet(service_key, booking_id):
 
 
     row = dict(row)
-    if is_non_billable_booking(row):
-        flash("Charge sheets are not applicable for this PI.")
+    if is_non_billable_booking(row, service_key):
+        flash("Charge sheets are not applicable for this non-billable booking.")
         return redirect(url_for("admin.history"))
     # Recalculate immediately before rendering/sending.  Stored totals and
     # browser values are never treated as the financial source of truth.
@@ -3816,8 +3800,8 @@ def preview_charge_sheet(service_key, booking_id):
         flash("That completed booking could not be found.")
         return redirect(url_for("admin.history"))
     row = dict(row)
-    if is_non_billable_booking(row):
-        flash("Charge sheets are not applicable for this PI.")
+    if is_non_billable_booking(row, service_key):
+        flash("Charge sheets are not applicable for this non-billable booking.")
         return redirect(url_for("admin.history"))
     grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
     grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
@@ -3878,7 +3862,7 @@ def send_combined_charge_sheet():
             if not row or (service_key != "freezing" and row["status"] != "completed"):
                 raise ValueError("One of the selected slots is no longer completed.")
             row = dict(row)
-            if is_non_billable_booking(row):
+            if is_non_billable_booking(row, service_key):
                 raise ValueError("Only billable slots can be combined.")
             grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
             grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
@@ -3953,12 +3937,12 @@ def update_payment(service_key, booking_id):
     table = table_info[0]
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(f"SELECT pi_name FROM {table} WHERE id=?", [booking_id])
+    cur.execute(f"SELECT * FROM {table} WHERE id=?", [booking_id])
     booking = cur.fetchone()
-    if booking and is_non_billable_booking(booking):
+    if booking and is_non_billable_booking(booking, service_key):
         cur.close()
         conn.close()
-        flash("Non-billable bookings are automatically marked completed.")
+        flash("Payment tracking is not available for non-billable bookings.")
         return redirect(url_for("admin.history"))
     cur.close()
     conn.close()
@@ -4028,10 +4012,13 @@ def download_payment_proof(service_key, booking_id):
         return redirect(url_for("admin.history"))
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(f"SELECT payment_proof_path, payment_proof_original_name FROM {table_info[0]} WHERE id=?", [booking_id])
+    cur.execute(f"SELECT * FROM {table_info[0]} WHERE id=?", [booking_id])
     row = cur.fetchone()
     cur.close()
     conn.close()
+    if row and is_non_billable_booking(row, service_key):
+        flash("Payment proof is not applicable for non-billable bookings.")
+        return redirect(url_for("admin.history"))
     if not row or not row["payment_proof_path"]:
         flash("No payment proof is stored for this booking.")
         return redirect(url_for("admin.history"))

@@ -1,8 +1,9 @@
 """Authoritative billing rules for Cryo-EM services.
 
-All amounts in this module are base prices (before GST).  The admin UI and
-charge-sheet generator consume the result of :func:`calculate_charge_sheet`;
-they must not reimplement these formulas.
+All amounts in this module are base prices (before GST). Screening and data
+collection are not billed in this system. The admin UI and charge-sheet
+generator consume :func:`calculate_charge_sheet`; they must not reimplement
+these formulas.
 """
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -44,6 +45,15 @@ PROCESSING_RATE = Decimal("20000")
 SLOT_RATES = {key: value["slot"] for key, value in CHARGE_CONFIG.items()}
 
 NON_BILLABLE_PI_PATTERN = re.compile(r"som(?:nath|anth)", re.IGNORECASE)
+NON_BILLABLE_SERVICE_KEYS = frozenset({
+    "screening", "screening / clipping", "clipping", "imaging",
+    "data collection", "data collecting", "datacollecting",
+})
+
+
+def is_non_billable_service(service_key):
+    normalized = str(service_key or "").strip().casefold().replace("_", " ")
+    return normalized in NON_BILLABLE_SERVICE_KEYS
 
 
 def _money(value):
@@ -126,6 +136,8 @@ def calculate_charge_sheet(
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
+    if is_non_billable_service(stage):
+        raise ValueError("Screening and data collection are not billed here.")
     grids = parse_number_of_grids(number_of_grids)
     clipped_text = str(clipped_grids or "").strip()
     if clipped_text and not clipped_text.isdigit():
@@ -209,7 +221,9 @@ def calculate_charge_sheet(
     return result
 
 
-def is_non_billable_booking(booking):
+def is_non_billable_booking(booking, service_key=None):
+    if is_non_billable_service(service_key):
+        return True
     return bool(NON_BILLABLE_PI_PATTERN.search((booking["pi_name"] or "").strip()))
 
 

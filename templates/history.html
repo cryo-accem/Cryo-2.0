@@ -2,7 +2,7 @@
 {% block title %}ACCEM | History{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>History, charge sheets and payment tracking.</p></div></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>Charge sheets and payment tracking apply only to billable freezing bookings. Screening and data collection are recorded as non-billable services.</p></div></header>
 
   <div class="history-summary" aria-label="Booking history summary">
     <div class="history-summary__item">
@@ -45,14 +45,14 @@
       <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Payment tracking</th></tr></thead>
       <tbody>{% for slot in rows %}
         <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}">
-          <td>{% if not is_non_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
+          <td>{% if not is_non_billable_booking(slot, service_key) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
           <td>{{ slot.sample_name }}{% if has_days %}<br><small>{{ slot.days }} requested days / {{ slot.grids }} requested grids</small>{% else %}<br><small>{{ slot.grids }} requested grids</small>{% endif %}</td>
           <td>{{ slot.actual_slots or 0 }} slots<br>{{ slot.actual_grids or 0 }} grids</td>
           <td>{{ slot.completion_date if service_key != 'freezing' else slot.completed_at }}</td>
           <td>
-            {% if is_non_billable_booking(slot) %}<span class="status-badge completed">Non-billable</span>
+            {% if is_non_billable_booking(slot, service_key) %}<span class="status-badge completed">Non-billable</span>
             {% else %}
             {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
             <form method="post" action="{{ url_for('admin.send_charge_sheet', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
@@ -64,7 +64,7 @@
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
-            {% if not slot.charge_sheet_sent_at %}
+            {% if not slot.charge_sheet_sent_at and not is_non_billable_booking(slot, service_key) %}
             <details class="history-edit">
               <summary>Edit booking before sending</summary>
               <form method="post" action="{{ url_for('admin.edit_completed_booking', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
@@ -116,7 +116,7 @@
             </form>
           </td>
           <td>
-            {% if is_non_billable_booking(slot) %}
+            {% if is_non_billable_booking(slot, service_key) %}
               <span class="status-badge completed">Completed — non-billable</span>
             {% elif slot.origin|lower == 'internal' %}
               <strong>{{ slot.debit_head_status or 'Debit Head Pending' }}</strong>

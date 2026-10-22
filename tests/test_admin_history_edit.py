@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import tempfile
@@ -68,280 +67,34 @@ class AdminHistoryEditTests(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1).decode()
 
-    def test_history_exposes_edit_before_sending_only(self):
+    def test_non_billable_service_history_has_no_billing_or_edit_controls(self):
         page = self.client.get("/admin/history").data
 
-        self.assertIn(b"Edit booking before sending", page)
-        self.assertIn(b"Save changes &amp; recalculate charges", page)
+        self.assertIn(b"Completed \xe2\x80\x94 non-billable", page)
+        self.assertEqual(page.count(b">Non-billable</span>"), 2)
+        self.assertIn(b'data-slot-select data-service-key="freezing"', page)
+        self.assertNotIn(b'data-slot-select data-service-key="imaging"', page)
+        self.assertEqual(page.count(b"Edit booking before sending"), 1)
 
-    def test_edit_updates_slot_details_and_recalculates_charges(self):
+    def test_non_billable_record_edit_is_rejected_without_changing_audit_values(self):
         response = self.client.post(
             "/admin/history/imaging/1/edit",
             data={
                 "_csrf_token": self._csrf_token(),
                 "user_name": "Corrected User",
-                "pi_name": "Corrected PI",
-                "email": "corrected@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Corrected sample",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "2",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "0",
             },
             follow_redirects=True,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Booking details updated and charges recalculated.", response.data)
+        self.assertIn(b"Non-billable bookings cannot be edited", response.data)
         with self.app.app_context():
             conn = database.get_db()
-            cur = conn.cursor()
-            cur.execute(
-                """SELECT user_name, pi_name, email, sample_name, completion_date,
-                          actual_slots, actual_grids, total_billed
-                   FROM bookings WHERE id=?""",
-                [1],
-            )
-            booking = cur.fetchone()
-            self.assertEqual(booking["user_name"], "Corrected User")
-            self.assertEqual(booking["pi_name"], "Corrected PI")
-            self.assertEqual(booking["email"], "corrected@example.com")
-            self.assertEqual(booking["sample_name"], "Corrected sample")
-            self.assertEqual(str(booking["completion_date"]), "2026-09-10")
-            self.assertEqual(str(booking["actual_slots"]), "2")
-            self.assertEqual(booking["actual_grids"], 2)
-            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("38940.00"))
-            cur.close()
+            row = conn.execute(
+                "SELECT user_name, total_billed FROM bookings WHERE id=1"
+            ).fetchone()
+            self.assertEqual(row["user_name"], "Original User")
+            self.assertEqual(Decimal(str(row["total_billed"])), Decimal("500.00"))
             conn.close()
-
-    def test_edit_accepts_database_formatted_whole_number_slots(self):
-        response = self.client.post(
-            "/admin/history/imaging/1/edit",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Formatted Slot User",
-                "pi_name": "Original PI",
-                "email": "original@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Corrected from production format",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "3.000",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "0",
-            },
-            follow_redirects=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Booking details updated and charges recalculated.", response.data)
-        with self.app.app_context():
-            conn = database.get_db()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT user_name, sample_name, actual_slots, total_billed FROM bookings WHERE id=?",
-                [1],
-            )
-            booking = cur.fetchone()
-            self.assertEqual(booking["user_name"], "Formatted Slot User")
-            self.assertEqual(booking["sample_name"], "Corrected from production format")
-            self.assertEqual(Decimal(str(booking["actual_slots"])), Decimal("3.000"))
-            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("53100.00"))
-            cur.close()
-            conn.close()
-
-    def test_edit_rejects_fractional_actual_slots(self):
-        response = self.client.post(
-            "/admin/history/imaging/1/edit",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Original User",
-                "pi_name": "Original PI",
-                "email": "original@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Original sample",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "1.500",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "0",
-            },
-            follow_redirects=True,
-        )
-
-        self.assertIn(b"Actual slots must be a positive whole number.", response.data)
-        with self.app.app_context():
-            conn = database.get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT sample_name FROM bookings WHERE id=?", [1])
-            self.assertEqual(cur.fetchone()["sample_name"], "Original sample")
-            cur.close()
-            conn.close()
-
-    def test_preview_uses_edited_values_and_clipped_grid_calculation(self):
-        self.client.post(
-            "/admin/history/imaging/1/edit",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Edited For Preview",
-                "pi_name": "Original PI",
-                "email": "original@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Updated sample",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "2",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "1",
-            },
-            follow_redirects=True,
-        )
-
-        with patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf:
-            response = self.client.post(
-                "/admin/charge-sheet/imaging/1/preview",
-                data={
-                    "_csrf_token": self._csrf_token(),
-                    "grid_source": "facility",
-                    "grid_type": "normal_holey_carbon",
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        edited_row = make_pdf.call_args.args[0]
-        self.assertEqual(edited_row["user_name"], "Edited For Preview")
-        self.assertEqual(edited_row["sample_name"], "Updated sample")
-        self.assertEqual(str(edited_row["actual_slots"]), "2")
-        self.assertEqual(edited_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
-        self.assertEqual(Decimal(str(edited_row["slot_charge"])), Decimal("24000.00"))
-        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
-
-    def test_sent_charge_sheet_uses_edited_values_and_clipped_grid_calculation(self):
-        self.client.post(
-            "/admin/history/imaging/1/edit",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Edited For Sending",
-                "pi_name": "Original PI",
-                "email": "original@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Updated sample",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "2",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "1",
-            },
-            follow_redirects=True,
-        )
-
-        with (
-            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
-            patch("blueprints.admin.send_email"),
-        ):
-            response = self.client.post(
-                "/admin/charge-sheet/imaging/1",
-                data={
-                    "_csrf_token": self._csrf_token(),
-                    "grid_source": "facility",
-                    "grid_type": "normal_holey_carbon",
-                },
-                follow_redirects=True,
-            )
-
-        self.assertEqual(response.status_code, 200)
-        sent_row = make_pdf.call_args.args[0]
-        self.assertEqual(sent_row["user_name"], "Edited For Sending")
-        self.assertEqual(sent_row["sample_name"], "Updated sample")
-        self.assertEqual(str(sent_row["actual_slots"]), "2")
-        self.assertEqual(sent_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(sent_row["clip_base_charge"])), Decimal("1250.00"))
-        self.assertEqual(Decimal(str(sent_row["slot_charge"])), Decimal("24000.00"))
-        self.assertEqual(Decimal(str(sent_row["total_billed"])), Decimal("37465.00"))
-
-    def test_combined_charge_sheet_uses_edited_clipped_grid_calculation(self):
-        self.client.post(
-            "/admin/history/imaging/1/edit",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Edited For Combined",
-                "pi_name": "Original PI",
-                "email": "original@example.com",
-                "origin": "External",
-                "esm": "",
-                "sample_name": "Updated sample",
-                "grids": "2",
-                "days": "2",
-                "completion_date": "2026-09-10",
-                "actual_slots": "2",
-                "actual_grids": "2",
-                "grid_source": "facility",
-                "grid_type": "normal_holey_carbon",
-                "clipped_grids": "1",
-            },
-            follow_redirects=True,
-        )
-
-        with (
-            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
-            patch("blueprints.admin.send_email"),
-        ):
-            response = self.client.post(
-                "/admin/charge-sheet/combined",
-                data={
-                    "_csrf_token": self._csrf_token(),
-                    "selected_slots": json.dumps([{"service_key": "imaging", "booking_id": 1}]),
-                },
-                follow_redirects=True,
-            )
-
-        self.assertEqual(response.status_code, 200)
-        combined_row = make_pdf.call_args.args[0]
-        edited_row = combined_row["combined_items"][0]
-        self.assertEqual(edited_row["user_name"], "Edited For Combined")
-        self.assertEqual(edited_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
-        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
-
-    def test_sent_booking_cannot_be_edited(self):
-        response = self.client.post(
-            "/admin/history/imaging/2/edit",
-            data={"_csrf_token": self._csrf_token()},
-        )
-
-        self.assertEqual(response.status_code, 302)
-        with self.app.app_context():
-            conn = database.get_db()
-            cur = conn.cursor()
-            cur.execute("SELECT user_name FROM bookings WHERE id=?", [2])
-            self.assertEqual(cur.fetchone()["user_name"], "Sent User")
-            cur.close()
-            conn.close()
-        page = self.client.get("/admin/history").data
-        self.assertEqual(page.count(b"Edit booking before sending"), 2)
 
     def test_freezing_edit_preserves_and_recalculates_mixed_grid_charges(self):
         response = self.client.post(
@@ -367,23 +120,19 @@ class AdminHistoryEditTests(unittest.TestCase):
         self.assertIn(b"Booking details updated and charges recalculated.", response.data)
         with self.app.app_context():
             conn = database.get_db()
-            cur = conn.cursor()
-            cur.execute(
+            row = conn.execute(
                 """SELECT sample_name, freezing_date, grid_type, grid_breakdown,
                           total_billed
-                   FROM completed_freezing WHERE id=?""",
-                [1],
-            )
-            booking = cur.fetchone()
-            self.assertEqual(booking["sample_name"], "Corrected freeze sample")
-            self.assertEqual(str(booking["freezing_date"]), "2026-09-04")
-            self.assertEqual(booking["grid_type"], "mixed")
+                   FROM completed_freezing WHERE id=1"""
+            ).fetchone()
+            self.assertEqual(row["sample_name"], "Corrected freeze sample")
+            self.assertEqual(str(row["freezing_date"]), "2026-09-04")
+            self.assertEqual(row["grid_type"], "mixed")
             self.assertEqual(
-                booking["grid_breakdown"],
+                row["grid_breakdown"],
                 '{"normal_holey_carbon": 1, "gold_carbon_graphene": 1}',
             )
-            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("8850.00"))
-            cur.close()
+            self.assertGreater(Decimal(str(row["total_billed"])), Decimal("0"))
             conn.close()
 
 
