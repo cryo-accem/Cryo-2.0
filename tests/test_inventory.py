@@ -1327,6 +1327,66 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(collection["grids"], 6)
         self.assertEqual(collection_link_count, 6)
 
+    def test_admin_can_add_selected_grids_to_existing_screening_booking(self):
+        grid_codes = self.create_batch(6)
+        csrf_token = self.csrf_token()
+        booking_data = {
+            "_csrf_token": csrf_token,
+            "user_name": "Researcher",
+            "pi_name": "Admin PI",
+            "email": "admin-extend-screening@example.test",
+            "origin": "Internal",
+            "esm": "",
+            "sample_name": "Admin screening sample",
+        }
+
+        with patch("blueprints.screening.send_email"):
+            initial_response = self.client.post(
+                "/admin/panel/slots/screening",
+                data={
+                    **booking_data,
+                    "grids": "4",
+                    "inventory_grid_codes": grid_codes[:4],
+                },
+            )
+        self.assertEqual(initial_response.status_code, 302)
+
+        with patch("blueprints.screening.send_email") as send_email:
+            update_response = self.client.post(
+                "/admin/panel/slots/screening",
+                data={
+                    **booking_data,
+                    "grids": "2",
+                    "inventory_grid_codes": grid_codes[4:],
+                },
+            )
+        self.assertEqual(update_response.status_code, 302)
+        send_email.assert_called_once()
+        self.assertEqual(
+            send_email.call_args.args[1],
+            "Cryo-EM Screening Slot Updated",
+        )
+        self.assertIn("Total grids: 6", send_email.call_args.args[2])
+
+        conn = database.get_db()
+        bookings = conn.execute(
+            "SELECT id, grids FROM screening_bookings "
+            "WHERE email='admin-extend-screening@example.test'"
+        ).fetchall()
+        link_codes = conn.execute(
+            """SELECT g.grid_code FROM screening_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.screening_booking_id=? ORDER BY g.grid_code""",
+            [bookings[0]["id"]],
+        ).fetchall()
+        conn.close()
+        self.assertEqual(len(bookings), 1)
+        self.assertEqual(bookings[0]["grids"], 6)
+        self.assertEqual(
+            {row["grid_code"] for row in link_codes},
+            set(grid_codes),
+        )
+
     def test_admin_quick_slots_link_selected_inventory_grids_and_use_selected_count(self):
         screening_grid, collection_grid = self.create_batch(
             2, researcher_name="Researcher", sample_name="Admin selected sample"

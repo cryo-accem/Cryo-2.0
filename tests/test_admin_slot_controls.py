@@ -132,7 +132,7 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
         self.assertIn('data-slot-type="datacollecting" data-slot-saved="false" open', html)
-        self.assertIn("The slot was not saved. Your entries are preserved below", html)
+        self.assertIn("Choose a valid user origin.", html)
         self.assertIn('name="user_name" maxlength="100" value="Admin Added User"', html)
         self.assertIn('name="email" type="email" maxlength="150" value="admin-added@example.test"', html)
         self.assertIn('name="origin" required><option value="">Select origin</option>', html)

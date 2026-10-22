@@ -129,7 +129,7 @@
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-freezing" aria-pressed="false" data-slot-type="freezing">Freezing</button>
       </div>
       <p class="admin-slot-selection-status" role="status" aria-live="polite"></p>
-      {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}<p class="admin-slot-save-error" role="status">The slot was not saved. Your entries are preserved below so you can review and try again.</p>{% endif %}
+      {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}<p class="admin-slot-save-error" role="status">{{ slot_form_state.get('message') or 'The slot was not saved. Your entries are preserved below so you can review and try again.' }}</p>{% endif %}
       <div class="admin-slot-save-feedback" role="status" aria-live="polite" {% if not slot_form_state.get('saved') %}hidden{% endif %}>
         <span>Slot saved successfully.</span>
         <button class="button small secondary" type="button" data-add-another>Add another</button>

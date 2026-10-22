@@ -397,6 +397,7 @@ def _slot_form_redirect(slot_type, message, category="registration", saved=False
     session["_admin_slot_form_state"] = {
         "slot_type": slot_type,
         "saved": saved,
+        "message": message,
         "values": {
             field: request.form.get(field, "")
             for field in field_names
@@ -478,7 +479,7 @@ def add_slot(slot_type):
                     raise ValueError("Choose at least 1 grid.")
             success, message = register_screening(
                 user_name, pi_name, email, origin, esm, sample_name, grids, 1,
-                grid_codes=grid_codes,
+                grid_codes=grid_codes, allow_existing=True,
             )
         else:
             try:
