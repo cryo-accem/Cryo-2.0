@@ -68,6 +68,8 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_activity_report",
     "admin.change_password",
     "admin.logout",
+    "public.grid_inventory",
+    "public.search_public_inventory",
     "admin.datacollecting",
     "admin.load_dc",
     "admin.complete_dc",

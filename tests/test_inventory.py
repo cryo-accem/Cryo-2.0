@@ -1254,8 +1254,18 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(collection_count, 0)
 
     def test_admin_can_book_more_than_four_inventory_grids_for_screening_and_collection(self):
-        grid_codes = self.create_batch(10)
+        grid_codes = self.create_batch(12)
         csrf_token = self.csrf_token()
+        inventory_selector = self.client.get(
+            "/inventory?username=Researcher&select=1&slot_type=screening&admin_selection=1"
+        )
+        self.assertEqual(inventory_selector.status_code, 200)
+        inventory_search = self.client.get(
+            "/inventory/search?user_name=Researcher"
+        )
+        self.assertEqual(inventory_search.status_code, 200)
+        self.assertEqual(len(inventory_search.get_json()["grids"]), 12)
+        self.assertEqual(self.client.get("/admin/panel").status_code, 200)
 
         with patch("blueprints.screening.send_email"):
             screening_response = self.client.post(
@@ -1268,8 +1278,8 @@ class GridInventoryTests(unittest.TestCase):
                     "origin": "Internal",
                     "esm": "",
                     "sample_name": "Admin screening sample",
-                    "grids": "5",
-                    "inventory_grid_codes": grid_codes[:5],
+                    "grids": "6",
+                    "inventory_grid_codes": grid_codes[:6],
                 },
             )
         with patch("blueprints.imaging.send_email"):
@@ -1283,9 +1293,9 @@ class GridInventoryTests(unittest.TestCase):
                     "origin": "Internal",
                     "esm": "",
                     "sample_name": "Admin collection sample",
-                    "grids": "5",
+                    "grids": "6",
                     "days": "2",
-                    "inventory_grid_codes": grid_codes[5:],
+                    "inventory_grid_codes": grid_codes[6:],
                 },
             )
 
@@ -1311,10 +1321,10 @@ class GridInventoryTests(unittest.TestCase):
             [collection["id"]],
         ).fetchone()["count"]
         conn.close()
-        self.assertEqual(screening["grids"], 5)
-        self.assertEqual(screening_link_count, 5)
-        self.assertEqual(collection["grids"], 5)
-        self.assertEqual(collection_link_count, 5)
+        self.assertEqual(screening["grids"], 6)
+        self.assertEqual(screening_link_count, 6)
+        self.assertEqual(collection["grids"], 6)
+        self.assertEqual(collection_link_count, 6)
 
     def test_admin_quick_slots_link_selected_inventory_grids_and_use_selected_count(self):
         screening_grid, collection_grid = self.create_batch(
