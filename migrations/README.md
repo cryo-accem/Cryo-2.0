@@ -13,6 +13,10 @@ Quantifoil Gold Grids, and Graphene-coated grids.
 Migration `006_existing_stored_grids_frozen` corrects existing grids that have
 an active storage location but still carry the legacy `Stored` status to
 `Frozen`; their storage-location records are retained.
+Migration `007_unlimited_admin_screening` removes the legacy MySQL check
+constraint that capped screening bookings at four grids. Public screening and
+data-collection forms continue to enforce their four-grid limit in application
+validation; admin bookings are not capped.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link

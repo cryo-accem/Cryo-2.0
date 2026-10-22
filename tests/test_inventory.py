@@ -116,7 +116,8 @@ class GridInventoryTests(unittest.TestCase):
             "SELECT COUNT(*) AS count FROM inventory_schema_migrations "
             "WHERE version IN ('001_grid_inventory', '002_freezing_inventory_link', "
             "'004_booking_grid_links', '005_grid_types', "
-            "'006_existing_stored_grids_frozen')"
+            "'006_existing_stored_grids_frozen', "
+            "'007_unlimited_admin_screening')"
         ).fetchone()["count"]
         link_table = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
@@ -130,7 +131,7 @@ class GridInventoryTests(unittest.TestCase):
         }
         conn.close()
         self.assertEqual(row["sample_name"], "Existing sample")
-        self.assertEqual(version_count, 5)
+        self.assertEqual(version_count, 6)
         self.assertIsNotNone(link_table)
         self.assertEqual(
             active_types,
