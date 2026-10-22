@@ -667,12 +667,17 @@ def _current_location(cursor, grid_id, lock=False):
 
 
 def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
-                session_id=None, operation_reference=None, mark_stored=False):
+                session_id=None, operation_reference=None, mark_stored=False,
+                allow_microscope_return=False):
     if grid["current_status"] == "Discarded":
         raise InventoryError(f"{grid['grid_code']} is discarded and cannot be stored.")
     if session_id and grid["current_status"] != "In Data Collection":
         raise InventoryError(f"{grid['grid_code']} is not currently in data collection.")
-    if not session_id and grid["current_status"] == "In Data Collection":
+    if (
+        not session_id
+        and not allow_microscope_return
+        and grid["current_status"] == "In Data Collection"
+    ):
         raise InventoryError(
             "Complete the active data collection session before returning this grid to storage."
         )
@@ -720,6 +725,8 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
         )
     if session_id:
         event_type = "returned_to_storage"
+    elif allow_microscope_return:
+        event_type = "screening_returned_to_storage"
     elif old_location:
         event_type = "storage_relocation"
     elif grid["current_status"] == "Stored":
@@ -732,12 +739,15 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
            event_time=event_time)
 
 
-def _discard_grid(cursor, grid, actor_id, notes, event_time, operation_reference=None):
+def _discard_grid(
+    cursor, grid, actor_id, notes, event_time, operation_reference=None,
+    allow_microscope_return=False,
+):
     if grid["current_status"] == "Discarded":
         raise InventoryError(f"{grid['grid_code']} is already discarded.")
-    if grid["current_status"] == "In Data Collection":
+    if grid["current_status"] == "In Data Collection" and not allow_microscope_return:
         raise InventoryError(
-            f"Complete the active data-collection session before discarding {grid['grid_code']}."
+            f"Complete the active microscope session before discarding {grid['grid_code']}."
         )
     cursor.execute(
         """SELECT 1 FROM grid_session_links
@@ -941,8 +951,6 @@ def link_selected_grids_to_booking(
         raise InventoryError("Choose a valid booking type.")
     link_table, booking_column, operation_prefix = link_targets[service_type]
     codes = [str(code).strip() for code in grid_codes if str(code).strip()]
-    if len(codes) > 4:
-        raise InventoryError("Select no more than four inventory grids.")
     if len(codes) != len(set(codes)):
         raise InventoryError("A grid can only be selected once.")
     for code in codes:
@@ -1077,6 +1085,91 @@ def grid_booking_links(grid_code):
         connection.close()
 
 
+def load_screening_booking(booking_id, actor_id):
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        cursor.execute(
+            "SELECT id, status FROM screening_bookings WHERE id=?" + _lock_clause(),
+            [booking_id],
+        )
+        booking = cursor.fetchone()
+        if not booking or booking["status"] != "waiting":
+            raise InventoryError("That screening booking is no longer waiting.")
+
+        cursor.execute(
+            """SELECT g.grid_id, g.grid_code, g.current_status
+               FROM screening_booking_grids l
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE l.screening_booking_id=? ORDER BY g.grid_id""" + _lock_clause(),
+            [booking_id],
+        )
+        grids = cursor.fetchall()
+        event_time = now_utc()
+        for grid in grids:
+            if grid["current_status"] not in {"Frozen", "Clipped", "Stored"}:
+                raise InventoryError(
+                    f"{grid['grid_code']} cannot be loaded for screening from "
+                    f"status {grid['current_status']}."
+                )
+            cursor.execute(
+                """SELECT 1 FROM grid_session_links
+                   WHERE grid_id=? AND outcome='in_progress' LIMIT 1""",
+                [grid["grid_id"]],
+            )
+            if cursor.fetchone():
+                raise InventoryError(
+                    f"{grid['grid_code']} is already in an active microscope session."
+                )
+            previous = _current_location(cursor, grid["grid_id"], lock=True)
+            previous_label = _location_label(previous)
+            if previous:
+                cursor.execute(
+                    "UPDATE storage_locations SET removed_at=?, removed_by=? "
+                    "WHERE storage_location_id=? AND removed_at IS NULL",
+                    (event_time, actor_id, previous["storage_location_id"]),
+                )
+                _event(
+                    cursor, grid["grid_id"], "storage_removal", actor_id,
+                    old_value=previous_label,
+                    notes="Retrieved from storage for screening.",
+                    operation_reference=f"SCREENING-{booking_id}",
+                    event_time=event_time,
+                )
+            cursor.execute(
+                "UPDATE inventory_grids SET current_status='In Data Collection' "
+                "WHERE grid_id=?",
+                [grid["grid_id"]],
+            )
+            _event(
+                cursor, grid["grid_id"], "screening_started", actor_id,
+                old_value=grid["current_status"], new_value="In Data Collection",
+                notes=f"Loaded for screening booking #{booking_id}; "
+                      f"previous location: {previous_label or 'not stored'}.",
+                operation_reference=f"SCREENING-{booking_id}",
+                event_time=event_time,
+            )
+
+        cursor.execute(
+            "UPDATE screening_bookings SET status='ongoing' WHERE id=?",
+            [booking_id],
+        )
+        cursor.execute(
+            "SELECT * FROM screening_bookings WHERE id=?",
+            [booking_id],
+        )
+        loaded_booking = cursor.fetchone()
+        connection.commit()
+        return loaded_booking
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_id):
     link_targets = {
         "screening": ("screening_booking_grids", "screening_booking_id", "SCREENING"),
@@ -1117,6 +1210,21 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
         )
     event_time = now_utc()
     for index, grid in enumerate(grids):
+        allow_microscope_return = (
+            service_type == "screening"
+            and grid["current_status"] == "In Data Collection"
+        )
+        if allow_microscope_return:
+            cursor.execute(
+                """SELECT 1 FROM grid_session_links
+                   WHERE grid_id=? AND outcome='in_progress' LIMIT 1""",
+                [grid["grid_id"]],
+            )
+            if cursor.fetchone():
+                raise InventoryError(
+                    f"Complete the active data-collection session before returning "
+                    f"{grid['grid_code']} through screening."
+                )
         if outcomes[index] == "discard":
             _discard_grid(
                 cursor,
@@ -1125,11 +1233,18 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
                 discard_notes[index],
                 event_time,
                 operation_reference=f"{operation_prefix}-{booking_id}",
+                allow_microscope_return=allow_microscope_return,
             )
             continue
         if outcomes[index] != "store":
             raise InventoryError(f"Choose Store or Discard for {grid['grid_code']}.")
-        if grid["current_status"] in {"Discarded", "In Data Collection"}:
+        if (
+            grid["current_status"] == "Discarded"
+            or (
+                grid["current_status"] == "In Data Collection"
+                and not allow_microscope_return
+            )
+        ):
             raise InventoryError(
                 f"{grid['grid_code']} is currently {grid['current_status']} and cannot be returned through this booking."
             )
@@ -1146,6 +1261,7 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
             event_time,
             operation_reference=f"{operation_prefix}-{booking_id}",
             mark_stored=True,
+            allow_microscope_return=allow_microscope_return,
         )
     return count
 

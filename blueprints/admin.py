@@ -43,7 +43,8 @@ from historical_revenue import (
 )
 from inventory_service import (
     InventoryError, booking_grid_links_for_bookings, complete_booking_grid_moves,
-    list_grid_types, register_completed_freezing, _begin, _lock_clause,
+    list_grid_types, load_screening_booking, register_completed_freezing,
+    _begin, _lock_clause,
 )
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -449,8 +450,6 @@ def add_slot(slot_type):
             grid_codes = request.form.getlist("inventory_grid_codes")
             if len(set(grid_codes)) != len(grid_codes):
                 raise ValueError("Select each inventory grid only once.")
-            if len(grid_codes) > 4:
-                raise ValueError("Select no more than four inventory grids.")
         if slot_type == "freezing":
             try:
                 grids = int(request.form.get("grids", ""))
@@ -2930,21 +2929,17 @@ def load_sc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
-    conn = get_db()
-    cur  = conn.cursor()
-    cur.execute("UPDATE screening_bookings SET status='ongoing' WHERE id=?", [booking_id])
-    cur.execute("SELECT * FROM screening_bookings WHERE id=?", [booking_id])
-    reg = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        reg = load_screening_booking(booking_id, session.get("admin_user_id"))
+    except InventoryError as exc:
+        flash(str(exc))
+        return redirect(url_for("admin.screening_admin"))
 
-    if reg:
-        send_email(
-            reg["email"],
-            "Cryo-EM Screening Slot Loaded",
-            f"Dear {reg['user_name']},\n\nYour screening grids are loaded today.\n\nCryo-EM Team",
-        )
+    send_email(
+        reg["email"],
+        "Cryo-EM Screening Slot Loaded",
+        f"Dear {reg['user_name']},\n\nYour screening grids are loaded today.\n\nCryo-EM Team",
+    )
     return redirect(url_for("admin.screening_admin"))
 
 
@@ -3508,8 +3503,8 @@ def edit_completed_booking(service_key, booking_id):
         updated["grids"] = requested_grids
         if service_key != "freezing":
             days = parse_number_of_grids(request.form.get("days"))
-            if days > 4 or requested_grids > 4:
-                raise ValueError("Requested days and grids must not exceed 4.")
+            if days > 4:
+                raise ValueError("Requested data-collection days must not exceed 4.")
             try:
                 actual_slots = Decimal(request.form.get("actual_slots", "").strip())
                 if (

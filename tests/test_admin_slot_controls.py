@@ -56,6 +56,10 @@ class AdminSlotControlsTests(unittest.TestCase):
         )
         self.assertEqual(html.count("/inventory/search"), 2)
         self.assertEqual(html.count('target="_blank" rel="opener">Search full inventory by username</a>'), 2)
+        self.assertEqual(html.count('url.searchParams.set("admin_selection", "1")'), 1)
+        self.assertEqual(html.count("Optional · no grid limit"), 2)
+        self.assertNotIn(".slice(0, 4)", html)
+        self.assertNotIn("slotsRemaining", html)
         self.assertNotRegex(html, r'<input name="(?:grids|days)"[^>]*\bmax=')
         self.assertNotIn("Grids (maximum", html)
 

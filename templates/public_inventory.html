@@ -7,7 +7,7 @@
     {% if selection_mode %}<div class="inventory-selection-intro"><strong>Select grids for the booking</strong><span>Only currently available grids can be selected. Your quick-slot form stays open in the other tab.</span></div>{% endif %}
     <form class="public-inventory-search" action="{{ url_for('public.grid_inventory') }}" method="get">
       <label>Username<input type="text" name="username" value="{{ username }}" maxlength="150" required autocomplete="username"></label>
-      {% if selection_mode %}<input type="hidden" name="select" value="1"><input type="hidden" name="slot_type" value="{{ slot_type }}">{% endif %}
+      {% if selection_mode %}<input type="hidden" name="select" value="1"><input type="hidden" name="slot_type" value="{{ slot_type }}">{% if admin_selection %}<input type="hidden" name="admin_selection" value="1">{% endif %}{% endif %}
       <button class="button" type="submit">Search my grids</button>
     </form>
     {% if search_error %}
@@ -41,6 +41,7 @@
 (() => {
   const username = {{ username|tojson }};
   const slotType = {{ slot_type|tojson }};
+  const selectionLimit = {{ selection_limit|tojson }};
   const checkboxes = [...document.querySelectorAll("[data-inventory-grid]")];
   const count = document.querySelector("[data-inventory-selection-count]");
   const useButton = document.querySelector("[data-use-selected-grids]");
@@ -50,11 +51,15 @@
   const update = () => {
     const selected = checkboxes.filter((checkbox) => checkbox.checked);
     count.textContent = selected.length
-      ? `${selected.length} of 4 grids selected.`
+      ? selectionLimit === null
+        ? `${selected.length} grids selected.`
+        : `${selected.length} of ${selectionLimit} grids selected.`
       : "No grids selected.";
     useButton.disabled = selected.length === 0;
     checkboxes.forEach((checkbox) => {
-      checkbox.disabled = !checkbox.checked && selected.length >= 4;
+      checkbox.disabled = !checkbox.checked
+        && selectionLimit !== null
+        && selected.length >= selectionLimit;
     });
   };
 

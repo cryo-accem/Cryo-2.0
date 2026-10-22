@@ -63,6 +63,7 @@ def grid_inventory():
     if slot_type not in {"screening", "datacollecting"}:
         slot_type = ""
     selection_mode = request.args.get("select") == "1" and bool(slot_type)
+    admin_selection = selection_mode and request.args.get("admin_selection") == "1"
     grids = []
     search_error = ""
     searched = bool(username)
@@ -78,6 +79,8 @@ def grid_inventory():
         searched=searched,
         search_error=search_error,
         selection_mode=selection_mode,
+        selection_limit=None if admin_selection else 4,
+        admin_selection=admin_selection,
         slot_type=slot_type,
     )
 

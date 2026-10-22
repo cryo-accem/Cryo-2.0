@@ -46,7 +46,8 @@
             <div class="public-grid-selection" id="public-grid-results" role="group" aria-label="Matching available inventory grids" aria-live="polite">
               <p class="empty-message">Enter your name above to check for matching grids.</p>
             </div>
-            <p class="public-grid-inventory-link">Looking for a grid that is not available to book? <a id="full-inventory-link" href="{{ url_for('public.grid_inventory') }}">Search the full inventory by username</a>.</p>
+            <p class="form-hint" id="inventory-selection-status" role="status" aria-live="polite"></p>
+            <p class="public-grid-inventory-link">Looking for a grid that is not available to book? <a id="full-inventory-link" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search the full inventory by username</a>.</p>
           </section>
           <div id="datacollecting_fields" class="form-grid full">
             <div class="form-field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4"></div>
@@ -128,15 +129,30 @@ function toggleRegType() {
   days.required = dataCollecting;
   document.getElementById('freezing_date').required = type === 'freezing';
   document.getElementById('grids_freezing').required = type === 'freezing';
+  updateFullInventoryLink(userNameInput.value.trim());
 }
 const inventoryGridCount = document.getElementById('grids');
 const inventoryGridPicker = document.getElementById('inventory-grid-picker');
 const inventoryGridResults = document.getElementById('public-grid-results');
 const userNameInput = document.getElementById('user_name');
-const sampleNameInput = document.getElementById('sample_name');
 const fullInventoryLink = document.getElementById('full-inventory-link');
+const inventorySelectionStatus = document.getElementById('inventory-selection-status');
 let gridSearchTimer;
 let gridSearchRequest;
+function updateFullInventoryLink(name) {
+  const url = new URL(inventoryGridPicker.dataset.inventoryUrl, window.location.origin);
+  if (name) url.searchParams.set('username', name);
+  else url.searchParams.delete('username');
+  const slotType = document.getElementById('reg_type').value;
+  if (slotType === 'screening' || slotType === 'datacollecting') {
+    url.searchParams.set('select', '1');
+    url.searchParams.set('slot_type', slotType);
+  } else {
+    url.searchParams.delete('select');
+    url.searchParams.delete('slot_type');
+  }
+  fullInventoryLink.href = url.toString();
+}
 function updateGridCount() {
   const selected = [...inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]:checked')];
   inventoryGridCount.readOnly = selected.length > 0;
@@ -190,12 +206,10 @@ function renderAvailableGrids(grids) {
 }
 async function searchMatchingGrids() {
   const name = userNameInput.value.trim();
-  const fullInventoryUrl = new URL(inventoryGridPicker.dataset.inventoryUrl, window.location.origin);
-  fullInventoryUrl.searchParams.set('username', name);
-  fullInventoryLink.href = fullInventoryUrl.toString();
+  updateFullInventoryLink(name);
   if (!name) {
     showGridSearchMessage('Enter your name above to check for matching grids.');
-    return;
+    return [];
   }
   if (gridSearchRequest) gridSearchRequest.abort();
   gridSearchRequest = new AbortController();
@@ -206,23 +220,67 @@ async function searchMatchingGrids() {
     const response = await fetch(searchUrl, { signal: gridSearchRequest.signal });
     if (!response.ok) throw new Error(`Grid search failed with status ${response.status}.`);
     const result = await response.json();
+    if (!Array.isArray(result.grids)) throw new Error('Grid search returned an invalid response.');
     renderAvailableGrids(result.grids);
     inventoryGridCount.readOnly = false;
     inventoryGridCount.value = '';
+    return result.grids;
   } catch (error) {
-    if (error.name === 'AbortError') return;
+    if (error.name === 'AbortError') return [];
     showGridSearchMessage('Could not check inventory right now. Please try again.');
     console.error(error);
+    return [];
   }
 }
-[userNameInput, sampleNameInput].forEach(input => input.addEventListener('input', () => {
+window.addEventListener('message', async event => {
+  const slotType = document.getElementById('reg_type').value;
+  if (event.origin !== window.location.origin
+      || event.data?.type !== 'inventory-grid-selection'
+      || event.data.slot_type !== slotType
+      || typeof event.data.username !== 'string'
+      || event.data.username.trim().toLocaleLowerCase() !== userNameInput.value.trim().toLocaleLowerCase()
+      || !Array.isArray(event.data.grid_codes)
+      || (slotType !== 'screening' && slotType !== 'datacollecting')) return;
+
+  const requestedCodes = [...new Set(event.data.grid_codes.filter(code => typeof code === 'string'))].slice(0, 4);
+  const previouslySelected = [
+    ...inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]:checked'),
+  ].map(checkbox => checkbox.value);
+  const availableGrids = await searchMatchingGrids();
+  if (event.data.username.trim().toLocaleLowerCase() !== userNameInput.value.trim().toLocaleLowerCase()) return;
+
+  const availableCodes = new Set(availableGrids.map(grid => grid.grid_code));
+  const retainedCodes = previouslySelected.filter(code => availableCodes.has(code));
+  const importedCodes = requestedCodes.filter(
+    code => availableCodes.has(code) && !retainedCodes.includes(code),
+  ).slice(0, 4 - retainedCodes.length);
+  const selectedCodes = [...new Set([...retainedCodes, ...importedCodes])];
+  if (!selectedCodes.length) {
+    showGridSearchMessage('None of the selected grids are currently available for this username.');
+    return;
+  }
+  const checkboxes = new Map(
+    [...inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]')]
+      .map(checkbox => [checkbox.value, checkbox]),
+  );
+  selectedCodes.forEach(code => {
+    const checkbox = checkboxes.get(code);
+    if (checkbox) checkbox.checked = true;
+  });
+  updateGridCount();
+  inventorySelectionStatus.textContent = importedCodes.length
+    ? `${importedCodes.length} grid${importedCodes.length === 1 ? '' : 's'} selected from inventory.`
+    : 'Existing selected grids were kept; no additional grids were added.';
+});
+userNameInput.addEventListener('input', () => {
   clearTimeout(gridSearchTimer);
   if (gridSearchRequest) gridSearchRequest.abort();
+  inventorySelectionStatus.textContent = '';
   inventoryGridCount.readOnly = false;
   inventoryGridCount.value = '';
   showGridSearchMessage('Checking for matching grids…');
   gridSearchTimer = setTimeout(searchMatchingGrids, 300);
-}));
+});
 const freezingDate = document.getElementById('freezing_date');
 freezingDate.addEventListener('change', () => {
   const selectedDate = freezingDate.value ? new Date(`${freezingDate.value}T00:00:00`) : null;

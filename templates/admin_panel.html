@@ -149,7 +149,7 @@
           <section class="full" data-admin-inventory-picker
                    data-search-url="{{ url_for('public.search_public_inventory') }}"
                    data-selected-grid-codes="{{ (slot_form_state.get('grid_codes', []) if slot_form_state.get('slot_type') == 'datacollecting' else [])|tojson|forceescape }}">
-            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · up to four</span><p class="form-hint">Available grids associated with this username appear below. Selecting grids sets the booking count automatically.</p></div>
+            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · no grid limit</span><p class="form-hint">Available grids associated with this username appear below. Select as many as needed; the booking count updates automatically.</p></div>
             <div class="inventory-grid-picker" data-grid-results role="group" aria-label="Available inventory grids for data collection" aria-live="polite"><p class="empty-message">Enter a username to find available grids.</p></div>
             <div class="admin-inventory-picker__footer"><p class="form-hint" data-grid-status role="status" aria-live="polite"></p><a data-full-inventory-link data-inventory-url="{{ url_for('public.grid_inventory') }}" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search full inventory by username</a></div>
           </section>
@@ -170,7 +170,7 @@
           <section class="full" data-admin-inventory-picker
                    data-search-url="{{ url_for('public.search_public_inventory') }}"
                    data-selected-grid-codes="{{ (slot_form_state.get('grid_codes', []) if slot_form_state.get('slot_type') == 'screening' else [])|tojson|forceescape }}">
-            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · up to four</span><p class="form-hint">Available grids associated with this username appear below. Selecting grids sets the booking count automatically.</p></div>
+            <div><strong>Choose grids from inventory</strong> <span class="form-hint">Optional · no grid limit</span><p class="form-hint">Available grids associated with this username appear below. Select as many as needed; the booking count updates automatically.</p></div>
             <div class="inventory-grid-picker" data-grid-results role="group" aria-label="Available inventory grids for screening" aria-live="polite"><p class="empty-message">Enter a username to find available grids.</p></div>
             <div class="admin-inventory-picker__footer"><p class="form-hint" data-grid-status role="status" aria-live="polite"></p><a data-full-inventory-link data-inventory-url="{{ url_for('public.grid_inventory') }}" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search full inventory by username</a></div>
           </section>
@@ -364,10 +364,12 @@
         url.searchParams.set("username", username);
         url.searchParams.set("select", "1");
         url.searchParams.set("slot_type", slotType);
+        url.searchParams.set("admin_selection", "1");
       } else {
         url.searchParams.delete("username");
         url.searchParams.delete("select");
         url.searchParams.delete("slot_type");
+        url.searchParams.delete("admin_selection");
       }
       inventoryLink.href = url.toString();
     };
@@ -378,9 +380,6 @@
       checked.forEach((input) => selectedCodes.add(input.value));
       gridCount.readOnly = checked.length > 0;
       gridCount.value = checked.length ? String(checked.length) : manualGridCount;
-      picker.querySelectorAll('input[name="inventory_grid_codes"]').forEach((input) => {
-        input.disabled = !input.checked && checked.length >= 4;
-      });
       status.textContent = checked.length
         ? `${checked.length} inventory grid${checked.length === 1 ? "" : "s"} selected.`
         : "";
@@ -499,7 +498,7 @@
 
       const requestedCodes = [...new Set(event.data.grid_codes.filter(
         (code) => typeof code === "string",
-      ))].slice(0, 4);
+      ))];
       await search();
       if (event.data.username.trim().toLocaleLowerCase()
           !== userName.value.trim().toLocaleLowerCase()) return;
@@ -507,17 +506,13 @@
         [...picker.querySelectorAll('input[name="inventory_grid_codes"]')]
           .map((input) => [input.value, input]),
       );
-      const alreadySelected = [...availableInputs.values()]
-        .filter((input) => input.checked).length;
-      const slotsRemaining = Math.max(0, 4 - alreadySelected);
       const matchingCodes = requestedCodes.filter((code) => availableInputs.has(code));
       if (matchingCodes.length === 0) {
         status.textContent = "None of the selected grids are currently available for this username.";
         return;
       }
       const importedCodes = matchingCodes
-        .filter((code) => !availableInputs.get(code).checked)
-        .slice(0, slotsRemaining);
+        .filter((code) => !availableInputs.get(code).checked);
       importedCodes.forEach((code) => {
         const input = availableInputs.get(code);
         if (input) input.checked = true;
