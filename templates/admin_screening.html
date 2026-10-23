@@ -6,26 +6,87 @@
   <div class="data-stack">
     <div class="table-tools" data-admin-filter><label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI, email or sample"></label><select data-origin-filter aria-label="Filter by origin"><option value="">All origins</option><option value="Internal">Internal / Academic</option><option value="External">External</option><option value="Industry">Industrial</option></select></div>
     <section class="data-panel"><h2>Waiting <span class="status-badge status-badge--pending">Pending</span></h2>{% if waiting_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in waiting_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><a href="{{ url_for('admin.load_sc', booking_id=reg.id) }}" class="btn btn-load">Load</a>    <form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}" onsubmit="return confirm('Delete this screening slot? This cannot be undone.');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No waiting registrations.</div>{% endif %}</section>
-    <section class="data-panel"><h2>Ongoing <span class="status-badge status-badge--confirmed">Confirmed</span></h2>{% if ongoing_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in ongoing_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><button type="button" class="btn btn-complete completion-trigger" data-action="{{ url_for('admin.complete_sc', booking_id=reg.id) }}" data-origin="{{ reg.origin }}" data-grid-links="{{ linked_grids.get(reg.id, [])|tojson|forceescape }}">Complete</button><form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No ongoing registrations.</div>{% endif %}</section>
+    <section class="data-panel"><h2>Ongoing <span class="status-badge status-badge--confirmed">Confirmed</span></h2>{% if ongoing_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in ongoing_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><button type="button" class="btn btn-complete completion-trigger" data-action="{{ url_for('admin.complete_sc', booking_id=reg.id) }}" data-origin="{{ reg.origin }}" data-pi-name="{{ reg.pi_name }}" data-grid-links="{{ linked_grids.get(reg.id, [])|tojson|forceescape }}">Complete</button><form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No ongoing registrations.</div>{% endif %}</section>
   </div>
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a></div>
 </section></main>
-<div class="completion-modal" id="completion-modal" hidden><div class="completion-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="completion-title"><button type="button" class="completion-modal__close" data-close-completion aria-label="Close">×</button><div class="completion-modal__header"><div class="completion-modal__icon"><i class="fa-solid fa-check" aria-hidden="true"></i></div><div><span class="completion-modal__eyebrow">Final review</span><h2 id="completion-title">Complete screening</h2><p>Record actual usage and return or discard any linked inventory grids. Screening is not billed here.</p></div></div><form id="completion-form" method="post"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><label>Actual 24-hour slots<input name="actual_slots" type="number" min="1" step="1" required></label><label>Actual grids<input name="actual_grids" type="number" min="1" step="1" required></label><section id="mapped-grid-storage" class="completion-mapped-grids" hidden></section><div class="completion-modal__actions"><button type="submit" class="button" data-confirm-completion><i class="fa-solid fa-check" aria-hidden="true"></i> Complete screening</button></div></form></div></div>
+<div class="completion-modal" id="completion-modal" hidden>
+  <div class="completion-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="completion-title">
+    <button type="button" class="completion-modal__close" data-close-completion aria-label="Close">×</button>
+    <div class="completion-modal__header">
+      <div class="completion-modal__icon"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i></div>
+      <div><span class="completion-modal__eyebrow">Final review</span><h2 id="completion-title">Complete booking</h2><p>Complete storage and billing details before finalizing this booking.</p></div>
+    </div>
+    <form id="completion-form" method="post">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <div class="completion-columns">
+        <section class="completion-pane completion-pane--storage">
+          <h3>Grid storage</h3>
+          <p>Choose per grid. Marking a grid discarded keeps its history but makes it unavailable for future booking.</p>
+          <section id="mapped-grid-storage" class="completion-mapped-grids"></section>
+        </section>
+        <section class="completion-pane completion-pane--billing">
+          <h3>Billing and revenue</h3>
+          <div class="completion-billing-grid">
+            <label>User category<select name="user_category" required><option value="internal">Internal</option><option value="academic">External Academic</option><option value="industry">External Industry</option></select></label>
+            <label>Service stage<select name="service_stage" required><option value="Screening / Clipping">Screening / Clipping</option></select></label>
+            <label>Actual 24-hour slots<input name="actual_slots" type="number" min="1" step="1" required></label>
+            <label>Actual grids<input name="actual_grids" type="number" min="1" max="12" step="1" required></label>
+            <label>Grid source<select name="grid_source" required><option value="">Select source</option><option value="facility">Facility Provided</option><option value="self_owned">Self Owned / User Provided</option></select></label>
+            <label id="grid-type-label">Grid type<select name="grid_type"><option value="">Select type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select></label>
+            <label class="completion-checkbox"><input name="clipped_enabled" type="checkbox"> Some grids are already clipped</label>
+            <label id="clipped-grids-label" hidden>Clipped grids<input name="clipped_grids" type="number" min="1" step="1" value="0"></label>
+            <label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested</label>
+            <div class="completion-csic" id="csic-choice" hidden>
+              <label class="completion-checkbox"><input name="is_csic" type="checkbox" value="1"> Switch this bill to CSIC revenue</label>
+              <label id="csic-final-amount-label" hidden>Final CSIC invoice amount (including GST)<input name="csic_final_amount" type="number" min="0.01" step="0.01" inputmode="decimal"></label>
+              <label id="csic-discount-reason-label" hidden>Reason for discount<input name="csic_discount_reason" type="text" maxlength="500" disabled></label>
+            </div>
+          </div>
+          <div class="completion-summary" id="completion-summary" hidden aria-live="polite"></div>
+          <div class="completion-error" id="completion-error" hidden role="alert"></div>
+        </section>
+      </div>
+      <div class="completion-modal__actions"><button type="submit" class="button" data-confirm-completion disabled><i class="fa-solid fa-check" aria-hidden="true"></i> Confirm &amp; complete</button></div>
+    </form>
+  </div>
+</div>
 <script>
 (() => {
   const modal = document.getElementById("completion-modal");
   const form = document.getElementById("completion-form");
+  const summary = document.getElementById("completion-summary");
+  const confirmButton = document.querySelector("[data-confirm-completion]");
+  const csicChoice = document.getElementById("csic-choice");
+  const csicToggle = form.querySelector("[name=is_csic]");
+  const csicAmountLabel = document.getElementById("csic-final-amount-label");
+  const csicAmount = form.querySelector("[name=csic_final_amount]");
+  const csicDiscountReasonLabel = document.getElementById("csic-discount-reason-label");
+  const csicDiscountReason = form.querySelector("[name=csic_discount_reason]");
+  const errorMessage = document.getElementById("completion-error");
+  const clippedToggle = form.querySelector("[name=clipped_enabled]");
+  const clippedGrids = form.querySelector("[name=clipped_grids]");
+  const gridSource = form.querySelector("[name=grid_source]");
+  const gridType = form.querySelector("[name=grid_type]");
+  let nonBillablePi = false;
+  let previewRequest = 0;
+  const categoryFor = (value) => {
+    const normalized = (value || "").trim().toLowerCase();
+    if (normalized === "internal") return "internal";
+    return normalized.includes("industr") ? "industry" : "academic";
+  };
   const storageFields = document.getElementById("mapped-grid-storage");
   const renderMappedGrids = (grids) => {
     storageFields.replaceChildren();
-    storageFields.hidden = grids.length === 0;
-    if (!grids.length) return;
+    if (!grids.length) {
+      const empty = document.createElement("p");
+      empty.textContent = "No linked grids need storage details for this booking.";
+      storageFields.append(empty);
+      return;
+    }
     const heading = document.createElement("h3");
-    heading.textContent = "Return linked grids to storage";
+    heading.textContent = `${grids.length} linked grid${grids.length === 1 ? "" : "s"}`;
     storageFields.append(heading);
-    const description = document.createElement("p");
-    description.textContent = "For each grid, choose whether it returns to storage or is discarded. Discarded grids are permanently marked and cannot be booked again.";
-    storageFields.append(description);
     grids.forEach((grid) => {
       const card = document.createElement("fieldset");
       card.className = "completion-mapped-grid";
@@ -42,14 +103,14 @@
       const outcome = document.createElement("select");
       outcome.name = "inventory_outcome";
       outcome.required = true;
-      outcome.add(new Option("Return to storage", "store"));
-      outcome.add(new Option("Discard this grid", "discard"));
+      outcome.add(new Option("Store this grid", "store"));
+      outcome.add(new Option("Mark discarded — unavailable for reuse", "discard"));
       outcomeLabel.append(outcome);
       card.append(outcomeLabel);
       const returnFields = document.createElement("div");
       returnFields.className = "completion-grid-return-fields";
       for (const [name, label, value, maxLength] of [
-        ["inventory_falcon", "Falcon / storage file name", grid.falcon_container_id, 100],
+        ["inventory_falcon", "Falcon", grid.falcon_container_id, 100],
         ["inventory_box", "Grid box", grid.grid_box_name, 100],
         ["inventory_position", "Grid position", grid.grid_position, 40],
       ]) {
@@ -64,7 +125,7 @@
         returnFields.append(wrapper);
       }
       const notesLabel = document.createElement("label");
-      notesLabel.textContent = "Discard note (optional)";
+      notesLabel.textContent = "Not-stored note (optional)";
       const notes = document.createElement("input");
       notes.name = "inventory_discard_notes";
       notes.maxLength = 2000;
@@ -77,19 +138,124 @@
           input.required = returning;
         });
         notesLabel.hidden = returning;
+        let consequence = card.querySelector("[data-discard-consequence]");
+        if (!returning) {
+          if (!consequence) {
+            consequence = document.createElement("p");
+            consequence.dataset.discardConsequence = "";
+            consequence.className = "completion-grid-discard-note";
+            consequence.setAttribute("role", "note");
+            consequence.textContent = "This marks the grid discarded and prevents future booking. Its inventory history is retained; no data is deleted.";
+            card.append(consequence);
+          }
+        } else {
+          consequence?.remove();
+        }
       };
       outcome.addEventListener("change", syncOutcome);
       syncOutcome();
       storageFields.append(card);
     });
   };
+  const updateFields = () => {
+    clippedGrids.disabled = !clippedToggle.checked;
+    document.getElementById("clipped-grids-label").hidden = !clippedToggle.checked;
+    if (!clippedToggle.checked) clippedGrids.value = "0";
+    document.getElementById("grid-type-label").hidden = gridSource.value === "self_owned";
+    gridType.disabled = gridSource.value === "self_owned";
+    if (gridType.disabled) gridType.value = "";
+    gridType.required = gridSource.value === "facility";
+    csicChoice.hidden = form.user_category.value === "internal" || nonBillablePi;
+    if (csicChoice.hidden) csicToggle.checked = false;
+    csicAmountLabel.hidden = !csicToggle.checked;
+    csicAmount.required = csicToggle.checked;
+    csicAmount.disabled = !csicToggle.checked;
+    if (!csicToggle.checked) {
+      csicDiscountReasonLabel.hidden = true;
+      csicDiscountReason.required = false;
+      csicDiscountReason.disabled = true;
+    }
+  };
+  const updatePreview = async () => {
+    updateFields();
+    const requestId = ++previewRequest;
+    confirmButton.disabled = true;
+    if (!form.reportValidity()) {
+      summary.hidden = true;
+      return;
+    }
+    summary.textContent = "Calculating the bill…";
+    summary.hidden = false;
+    try {
+      const response = await fetch("{{ url_for('admin.billing_preview') }}", {
+        method: "POST",
+        body: new URLSearchParams(new FormData(form)),
+      });
+      const data = await response.json();
+      if (requestId !== previewRequest) return;
+      if (!response.ok) throw new Error(data.error || "Billing preview could not be calculated.");
+      const finalAmount = csicToggle.checked ? Number(csicAmount.value) : Number(data.grand_total);
+      if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+        throw new Error("Enter a valid final CSIC invoice amount.");
+      }
+      const discount = csicToggle.checked && finalAmount < Number(data.grand_total) - 0.005;
+      csicDiscountReasonLabel.hidden = !discount;
+      csicDiscountReason.required = discount;
+      csicDiscountReason.disabled = !discount;
+      const adjustment = finalAmount - Number(data.grand_total);
+      summary.innerHTML = `Grid charge: ₹${Number(data.grid_charge).toFixed(2)}<br>Handling: ₹${Number(data.handling_charge).toFixed(2)}<br>C-clip + base ring: ₹${Number(data.clip_base_charge).toFixed(2)}<br>Slots: ₹${Number(data.slot_charge).toFixed(2)}<br>Calculated total: ₹${Number(data.grand_total).toFixed(2)}${csicToggle.checked ? `<br>CSIC adjustment: ₹${adjustment.toFixed(2)}<br><strong>Final CSIC invoice amount: ₹${finalAmount.toFixed(2)}</strong>` : ""}`;
+      errorMessage.hidden = true;
+      confirmButton.disabled = discount && !csicDiscountReason.value.trim();
+    } catch (error) {
+      if (requestId !== previewRequest) return;
+      summary.textContent = error.message || "Billing preview is unavailable. Check the details and try again.";
+      confirmButton.disabled = true;
+    }
+  };
   document.querySelectorAll(".completion-trigger").forEach((button) => button.addEventListener("click", () => {
     form.action = button.dataset.action;
     form.reset();
+    form.user_category.value = categoryFor(button.dataset.origin);
+    nonBillablePi = /^(?:(?:professor|prof\.?|dr\.?)\s+)?somnath\s+dutta$/i.test((button.dataset.piName || "").trim().replace(/\s+/g, " "));
     renderMappedGrids(JSON.parse(button.dataset.gridLinks || "[]"));
+    summary.hidden = true;
+    confirmButton.disabled = true;
+    updateFields();
     modal.hidden = false;
   }));
   document.querySelector("[data-close-completion]").addEventListener("click", () => { modal.hidden = true; });
+  form.addEventListener("input", updatePreview);
+  form.addEventListener("change", updatePreview);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorMessage.hidden = true;
+    if (!form.reportValidity()) return;
+    confirmButton.disabled = true;
+    confirmButton.textContent = "Saving booking…";
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        body: new URLSearchParams(new FormData(form)),
+        headers: { Accept: "application/json" },
+      });
+      let data;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error("The server could not confirm the booking. Your entries are still here; review them and retry.");
+      }
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "The booking could not be saved. Your entries are still here; review them and retry.");
+      }
+      if (data.warning) window.alert(data.warning);
+      window.location.reload();
+    } catch (error) {
+      errorMessage.textContent = error.message || "The booking could not be saved. Your entries are still here; review them and retry.";
+      errorMessage.hidden = false;
+      confirmButton.disabled = false;
+      confirmButton.innerHTML = '<i class="fa-solid fa-check" aria-hidden="true"></i> Confirm &amp; complete';
+    }
+  });
 })();
 </script>
 {% endblock %}

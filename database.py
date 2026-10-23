@@ -669,6 +669,35 @@ def init_db():
         """)
     if _is_sqlite_url():
         cur.execute("""
+            CREATE TABLE IF NOT EXISTS csic_booking_audit (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_key TEXT NOT NULL,
+                booking_id INTEGER NOT NULL,
+                action TEXT NOT NULL,
+                calculated_amount NUMERIC,
+                final_amount NUMERIC,
+                discount_reason TEXT,
+                changed_by INTEGER,
+                changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS csic_booking_audit (
+                audit_id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                service_key VARCHAR(20) NOT NULL,
+                booking_id INT NOT NULL,
+                action VARCHAR(30) NOT NULL,
+                calculated_amount DECIMAL(12,2) NULL,
+                final_amount DECIMAL(12,2) NULL,
+                discount_reason TEXT,
+                changed_by INT NULL,
+                changed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_csic_booking_audit_booking (service_key, booking_id, changed_at)
+            ) ENGINE=InnoDB
+        """)
+    if _is_sqlite_url():
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS payment_reminder_history (
                 service_key     TEXT NOT NULL,
                 booking_id      INTEGER NOT NULL,
@@ -737,6 +766,11 @@ def _add_completion_columns(cur, table: str):
             "gst_amount": "NUMERIC",
             "grand_total": "NUMERIC",
             "total_billed": "NUMERIC",
+            "is_csic": "INTEGER NOT NULL DEFAULT 0",
+            "csic_final_amount": "NUMERIC",
+            "csic_original_amount": "NUMERIC",
+            "csic_discount_reason": "TEXT",
+            "csic_adjustment": "NUMERIC",
             "bill_generated_at": "TIMESTAMP",
             "generated_by": "INTEGER",
             "processing_requested": "INTEGER NOT NULL DEFAULT 0",
@@ -769,6 +803,11 @@ def _add_completion_columns(cur, table: str):
             "gst_amount": "DECIMAL(12,2)",
             "grand_total": "DECIMAL(12,2)",
             "total_billed": "DECIMAL(12,2)",
+            "is_csic": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "csic_final_amount": "DECIMAL(12,2) NULL",
+            "csic_original_amount": "DECIMAL(12,2) NULL",
+            "csic_discount_reason": "TEXT",
+            "csic_adjustment": "DECIMAL(12,2) NULL",
             "bill_generated_at": "TIMESTAMP NULL",
             "generated_by": "INT NULL",
             "processing_requested": "BOOLEAN NOT NULL DEFAULT FALSE",

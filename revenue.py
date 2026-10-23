@@ -1,9 +1,8 @@
 """Authoritative billing rules for Cryo-EM services.
 
-All amounts in this module are base prices (before GST). Screening and data
-collection are not billed in this system. The admin UI and charge-sheet
-generator consume :func:`calculate_charge_sheet`; they must not reimplement
-these formulas.
+All amounts in this module are base prices (before GST).  The admin UI and
+charge-sheet generator consume the result of :func:`calculate_charge_sheet`;
+they must not reimplement these formulas.
 """
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -44,20 +43,51 @@ CLIPPING_RATE = Decimal("125")
 PROCESSING_RATE = Decimal("20000")
 SLOT_RATES = {key: value["slot"] for key, value in CHARGE_CONFIG.items()}
 
-NON_BILLABLE_PI_PATTERN = re.compile(r"som(?:nath|anth)", re.IGNORECASE)
-NON_BILLABLE_SERVICE_KEYS = frozenset({
-    "screening", "screening / clipping", "clipping", "imaging",
-    "data collection", "data collecting", "datacollecting",
-})
-
-
-def is_non_billable_service(service_key):
-    normalized = str(service_key or "").strip().casefold().replace("_", " ")
-    return normalized in NON_BILLABLE_SERVICE_KEYS
+NON_BILLABLE_PI_PATTERN = re.compile(
+    r"(?:(?:professor|prof\.?|dr\.?)\s+)?somnath\s+dutta",
+    re.IGNORECASE,
+)
 
 
 def _money(value):
     return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def parse_csic_final_amount(value):
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError("Enter the final CSIC invoice amount.") from None
+    if not amount.is_finite() or amount <= 0:
+        raise ValueError("The final CSIC invoice amount must be greater than zero.")
+    if amount > Decimal("9999999999.99"):
+        raise ValueError("The final CSIC invoice amount is too large.")
+    rounded = _money(amount)
+    if amount != rounded:
+        raise ValueError("The final CSIC invoice amount can have at most two decimal places.")
+    return rounded
+
+
+def csic_amount_components(final_amount, user_category):
+    amount = parse_csic_final_amount(final_amount)
+    category = pricing_category(user_category)
+    if category == "internal":
+        raise ValueError("CSIC revenue is available only for external bookings.")
+    net = _money(amount / (Decimal("1") + CHARGE_CONFIG[category]["gst_rate"]))
+    return net, amount - net, amount
+
+
+def apply_csic_final_amount(charges, final_amount, user_category):
+    net, gst, gross = csic_amount_components(final_amount, user_category)
+    adjusted = dict(charges)
+    adjusted["csic_adjustment"] = _money(net - _money(charges["subtotal"]))
+    adjusted["csic_final_amount"] = gross
+    adjusted["subtotal"] = net
+    adjusted["gst"] = gst
+    adjusted["gst_amount"] = gst
+    adjusted["grand_total"] = gross
+    adjusted["total_billed"] = gross
+    return adjusted
 
 
 def pricing_category(origin):
@@ -136,8 +166,6 @@ def calculate_charge_sheet(
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
-    if is_non_billable_service(stage):
-        raise ValueError("Screening and data collection are not billed here.")
     grids = parse_number_of_grids(number_of_grids)
     clipped_text = str(clipped_grids or "").strip()
     if clipped_text and not clipped_text.isdigit():
@@ -221,10 +249,24 @@ def calculate_charge_sheet(
     return result
 
 
-def is_non_billable_booking(booking, service_key=None):
-    if is_non_billable_service(service_key):
-        return True
-    return bool(NON_BILLABLE_PI_PATTERN.search((booking["pi_name"] or "").strip()))
+def is_non_billable_booking(booking):
+    return bool(NON_BILLABLE_PI_PATTERN.fullmatch((booking["pi_name"] or "").strip()))
+
+
+def is_csic_booking(booking):
+    return "is_csic" in booking.keys() and bool(booking["is_csic"])
+
+
+def is_payment_received_booking(booking):
+    origin = (booking["origin"] or "").strip().casefold()
+    if origin == "internal":
+        status = (booking["debit_head_status"] or "").strip().casefold()
+        return status in {"debit head received", "debit head verified"}
+    return (booking["payment_status"] or "").strip().casefold() == "payment verified"
+
+
+def is_billable_booking(booking):
+    return not is_non_billable_booking(booking)
 
 
 def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_requested=False,

@@ -13,7 +13,7 @@
         <label>Microscope or instrument<input name="instrument" maxlength="120"></label>
         <label class="inventory-form-wide">Session notes<textarea name="notes" rows="2" maxlength="4000"></textarea></label>
       </div>
-      <fieldset class="inventory-select-grids"><legend>Select grids <small>Up to 200 eligible grids are shown; use grid search if a grid is not listed.</small></legend><div class="inventory-grid-picker">{% for grid in available_grids %}<label><input type="checkbox" name="grid_codes" value="{{ grid.grid_code }}"><span><strong>{{ grid.grid_code }}</strong><small>{{ grid.sample_name }} · {{ grid.current_status }}</small></span></label>{% endfor %}</div></fieldset>
+      <fieldset class="inventory-select-grids"><legend>Select grids <small>Up to 200 eligible grids are shown; use grid search if a grid is not listed.</small></legend><div class="inventory-grid-picker">{% for grid in available_grids %}<label><input type="checkbox" name="grid_codes" value="{{ grid.grid_code }}" aria-label="Select {{ grid.researcher_name }} — {{ grid.sample_name }}"><span><strong>{{ grid.researcher_name }}</strong><small>{{ grid.sample_name }}{% if grid.linked_username %} · {{ grid.linked_username }}{% endif %}</small><small>{{ grid.current_status }} · Grid ref: {{ grid.grid_code }}</small></span></label>{% endfor %}</div></fieldset>
       <div class="inventory-form-actions"><button class="button" type="submit">Start data collection</button></div>
     </form>{% else %}<p class="empty-message">There are no eligible grids. Register a batch or check the inventory.</p>{% endif %}
   </section>

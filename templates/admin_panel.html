@@ -30,14 +30,14 @@
     </section>
   </div>
   <section class="revenue-dashboard" id="revenue-dashboard" tabindex="-1">
-    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Dashboard net revenue excludes CSIC project income, which is tracked separately. CSIC GST is calculated at 18% of the entered net amount.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
+    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Regular booking revenue and CSIC revenue are tracked separately.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
     <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
     <div class="revenue-summary">
-      <article class="revenue-primary-stat"><span>Net revenue (except CSIC)</span><strong>₹{{ "{:,.2f}".format(revenue.totals.net - revenue.totals.csic_net) }}</strong><small>Completed bookings only · CSIC tracked separately</small></article>
+      <article class="revenue-primary-stat"><span>Net revenue (except CSIC)</span><strong>₹{{ "{:,.2f}".format(revenue.totals.net) }}</strong><small>Completed billable bookings · CSIC tracked separately</small></article>
       <details class="revenue-details">
         <summary>Billing &amp; usage details</summary>
         <div class="revenue-detail-grid">
-          {% for label, key in [('GST','gst'),('Gross billed','gross'),('Amount billed','billed'),('Amount received','received'),('Outstanding','outstanding'),('Completed bookings','bookings'),('24-hour slots used','slots'),('Actual grids','grids'),('CSIC net revenue','csic_net'),('CSIC GST (18%)','csic_gst'),('CSIC gross','csic_gross'),('CSIC project slots','csic_slots')] %}
+          {% for label, key in [('GST','gst'),('Gross billed','gross'),('Amount billed','billed'),('Bills marked received','received'),('Outstanding','outstanding'),('Completed bookings','bookings'),('24-hour slots used','slots'),('Actual grids','grids'),('CSIC net revenue','csic_net'),('CSIC GST (18%)','csic_gst'),('CSIC gross','csic_gross')] %}
           <div><span>{{ label }}</span><strong>{% if key in ['gst','gross','billed','received','outstanding','csic_net','csic_gst','csic_gross'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>
           {% endfor %}
         </div>
@@ -55,18 +55,18 @@
   </section>
   <section class="revenue-dashboard" aria-labelledby="pending-payments-title">
     <div class="revenue-heading">
-      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title">Pending payment tracking</h2><p>Completed billable records still marked pending in History. Internal accounts are listed separately as debit-head pending.</p></div>
+      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title">Bills awaiting receipt</h2><p>Sent bills not yet marked received in History. Internal debit-head bills are listed separately.</p></div>
       <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
     </div>
     <div class="revenue-cards">
-      <div class="revenue-card"><span>Payment pending</span><strong>{{ pending_payments.payment_count }} records</strong></div>
-      <div class="revenue-card"><span>Payment balance outstanding</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
-      <div class="revenue-card"><span>Internal debit head pending</span><strong>{{ pending_payments.debit_head_count }} records</strong></div>
+      <div class="revenue-card"><span>Bills awaiting payment</span><strong>{{ pending_payments.payment_count }} bills</strong></div>
+      <div class="revenue-card"><span>Unpaid bill total</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
+      <div class="revenue-card"><span>Debit-head bills awaiting confirmation</span><strong>{{ pending_payments.debit_head_count }} bills</strong></div>
     </div>
     {% if pending_payments.rows %}
     <div class="table-wrap">
       <table class="data-table">
-        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Tracking status</th><th>Billed</th><th>Received</th><th>Balance</th><th>Reminder</th></tr></thead>
+        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Status</th><th>Bill total</th><th>Reminder</th></tr></thead>
         <tbody>
           {% for item in pending_payments.rows %}
           <tr>
@@ -77,8 +77,6 @@
             <td>{{ item.charge_sheet_id or 'Not issued' }}</td>
             <td><span class="status-badge waiting">{{ item.tracking_label }}</span></td>
             <td>₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
-            <td>₹{{ "{:,.2f}".format(item.amount_received or 0) }}</td>
-            <td>₹{{ "{:,.2f}".format(item.pending_amount) }}</td>
             <td><form class="payment-reminder-form" method="post" action="{{ url_for('admin.send_payment_reminder', service_key=item.service_key, booking_id=item.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button small secondary payment-reminder-button" type="submit">Send reminder mail</button><small class="reminder-count">{{ item.reminder_count }} sent</small></form></td>
           </tr>
           {% endfor %}
@@ -86,48 +84,17 @@
       </table>
     </div>
     {% else %}
-    <p class="empty-message">No completed records are currently marked payment pending.</p>
+    <p class="empty-message">No sent bills are currently awaiting receipt.</p>
     {% endif %}
   </section>
-  <section class="csic-project-box" id="csic-projects">
-    <div class="csic-project-box__heading"><div><span class="chart-kicker">Industry proposals</span><h3>CSIC projects</h3><p>Enter the net amount before GST. GST is calculated automatically at 18%; each saved project contributes one 24-hour slot. Year-only amounts are included in full whenever the selected date range overlaps that calendar year; they are not prorated.</p></div></div>
-    <form class="csic-project-form" method="post" action="{{ url_for('admin.add_csic_project') }}">
-      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-      <div class="form-field"><label for="csic-company">Company name</label><input id="csic-company" name="company_name" maxlength="180" required></div>
-      <div class="form-field"><label for="csic-year">Year</label><input id="csic-year" name="year" type="number" min="1900" max="2100" value="{{ current_year }}" required></div>
-      <div class="form-field"><label for="csic-amount">Net amount (₹, before GST)</label><input id="csic-amount" name="net_amount" type="number" min="0.01" step="0.01" required></div>
-      <button class="button" type="submit">Add CSIC project</button>
-      <div class="csic-tax-preview" aria-live="polite"><span>GST (18%): <strong id="csic-gst-preview">₹0.00</strong></span><span>Gross total: <strong id="csic-gross-preview">₹0.00</strong></span></div>
-    </form>
-    {% if revenue.csic_projects %}
-    <div class="csic-project-table">
-      <div class="csic-project-labels" aria-hidden="true"><span>Company</span><span>Year</span><span>Net amount</span><span>GST (18%)</span><span>Gross total</span><span>Slots</span><span>Actions</span></div>
-      {% for project in revenue.csic_projects %}
-      <article class="csic-project-row">
-        <div class="csic-project-field"><label for="csic-company-{{ project.id }}">Company</label><input class="csic-edit-input" id="csic-company-{{ project.id }}" form="edit-csic-{{ project.id }}" name="company_name" value="{{ project.company_name }}" maxlength="180" required></div>
-        <div class="csic-project-field"><label for="csic-year-{{ project.id }}">Year</label><input class="csic-edit-input csic-edit-input--number" id="csic-year-{{ project.id }}" form="edit-csic-{{ project.id }}" name="year" type="number" min="1900" max="2100" value="{{ project.year }}" required></div>
-        <div class="csic-project-field"><label for="csic-net-{{ project.id }}">Net amount</label><input class="csic-edit-input csic-edit-input--amount" id="csic-net-{{ project.id }}" form="edit-csic-{{ project.id }}" name="net_amount" type="number" min="0.01" step="0.01" value="{{ project.net_amount }}" required></div>
-        <div class="csic-project-value"><span>GST (18%)</span><strong>₹{{ "{:,.2f}".format(project.gst_amount) }}</strong></div>
-        <div class="csic-project-value csic-project-value--gross"><span>Gross total</span><strong>₹{{ "{:,.2f}".format(project.gross_amount) }}</strong></div>
-        <div class="csic-project-slots"><strong>1</strong><span>24-hour slot</span></div>
-        <div class="csic-project-actions">
-          <form id="edit-csic-{{ project.id }}" method="post" action="{{ url_for('admin.edit_csic_project', project_id=project.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button button--secondary" type="submit">Save changes</button></form>
-          <form method="post" action="{{ url_for('admin.delete_csic_project', project_id=project.id) }}" onsubmit="return confirm('Remove this CSIC project from revenue and slot usage?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button button--secondary" type="submit">Remove</button></form>
-        </div>
-      </article>
-      {% endfor %}
-    </div>
-    {% else %}<p class="empty-message">No CSIC projects in this reporting period.</p>{% endif %}
-  </section>
-  <details class="admin-slot-panel" id="create-slot" data-known-user-url="{{ url_for('admin.known_slot_user') }}" data-slot-type="{{ slot_form_state.get('slot_type', '') }}" data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}" {% if slot_form_state.get('slot_type') %}open{% endif %}>
-    <summary class="admin-slot-panel__toggle"><span><span class="chart-kicker">Quick actions</span><span class="admin-slot-panel__title">Create a slot</span></span></summary>
+  <section class="admin-slot-panel" id="create-slot" data-known-user-url="{{ url_for('admin.known_slot_user') }}" data-slot-type="{{ slot_form_state.get('slot_type', '') }}" data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}">
+    <div class="admin-slot-panel__heading"><span class="chart-kicker">Quick actions</span><span class="admin-slot-panel__title">Create a slot</span></div>
     <div class="admin-slot-panel__content">
-      <p>Add a data collecting, screening, or freezing booking without leaving the dashboard. Choose a slot type to get started.</p>
-      <div class="admin-slot-type-controls" role="group" aria-label="Choose slot type" hidden>
+      <p>Add a data collecting, screening, or freezing booking without leaving the dashboard.</p>
+      <div class="admin-slot-type-controls" role="group" aria-label="Choose slot type">
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-datacollecting" aria-pressed="false" data-slot-type="datacollecting">Data collecting</button>
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-screening" aria-pressed="false" data-slot-type="screening">Screening</button>
         <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-freezing" aria-pressed="false" data-slot-type="freezing">Freezing</button>
-        <button class="admin-slot-type-button" type="button" aria-controls="admin-slot-form-csic-project" aria-pressed="false" data-slot-type="csic_project">CSIC project entry</button>
       </div>
       <p class="admin-slot-selection-status" role="status" aria-live="polite"></p>
       {% if slot_form_state.get('slot_type') and not slot_form_state.get('saved') %}<p class="admin-slot-save-error" role="status">{{ slot_form_state.get('message') or 'The slot was not saved. Your entries are preserved below so you can review and try again.' }}</p>{% endif %}
@@ -190,29 +157,9 @@
           <label>Grids<input name="grids" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('grids', '') if slot_form_state.get('slot_type') == 'freezing' else '' }}" required></label>
           <button class="button" type="submit">Add freezing slot</button>
         </form>
-        <form class="admin-slot-form" id="admin-slot-form-csic-project" method="post" action="{{ url_for('admin.add_slot', slot_type='csic_project') }}">
-          <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-          <h3>CSIC project entry</h3>
-          <p class="form-hint">Record project and sample details only. This does not create a service booking, invoice, revenue, GST, or slot credit.</p>
-          <label>Username<input name="user_name" maxlength="100" value="{{ slot_form_state.get('values', {}).get('user_name', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
-          <label>Company name<input name="company_name" maxlength="180" value="{{ slot_form_state.get('values', {}).get('company_name', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
-          <label>Sample count<input name="sample_count" type="number" min="1" step="1" value="{{ slot_form_state.get('values', {}).get('sample_count', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}" required></label>
-          <label>Sample details<textarea name="sample_details" rows="4" maxlength="10000" required>{{ slot_form_state.get('values', {}).get('sample_details', '') if slot_form_state.get('slot_type') == 'csic_project' else '' }}</textarea></label>
-          <button class="button" type="submit">Save CSIC project entry</button>
-        </form>
       </div>
-      <section class="data-panel" aria-labelledby="csic-project-entry-list-title">
-        <h3 id="csic-project-entry-list-title">Recent CSIC project entries</h3>
-        {% if csic_project_entries %}
-        <div class="table-wrap"><table class="data-table"><thead><tr><th>Username</th><th>Company</th><th>Samples</th><th>Sample details</th><th>Entered</th></tr></thead><tbody>
-          {% for entry in csic_project_entries %}
-          <tr><td>{{ entry.username }}</td><td>{{ entry.company_name }}</td><td>{{ entry.sample_count }}</td><td>{{ entry.sample_details }}</td><td>{{ entry.created_at }}</td></tr>
-          {% endfor %}
-        </tbody></table></div>
-        {% else %}<p class="empty-message">No CSIC project entries have been recorded.</p>{% endif %}
-      </section>
     </div>
-  </details>
+  </section>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
     <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -253,18 +200,13 @@
     if (!button) return;
     const selectedForm = panel.querySelector(`#${button.getAttribute("aria-controls")}`);
     if (!(selectedForm instanceof HTMLFormElement)) return;
-    panel.open = true;
     buttons.forEach((option) => option.setAttribute("aria-pressed", String(option === button)));
     forms.forEach((form) => { form.hidden = form !== selectedForm; });
     status.textContent = `Showing the ${button.textContent.trim()} slot form.`;
     if (focus) selectedForm.querySelector("input:not([type=hidden]), select")?.focus({ preventScroll: true });
   };
 
-  document.querySelector('.page-header--admin a[href="#create-slot"]')?.addEventListener("click", () => {
-    panel.open = true;
-  });
   forms.forEach((form) => { form.hidden = true; });
-  controls.hidden = false;
 
   buttons.forEach((button) => {
     button.addEventListener("click", () => chooseSlotType(button.dataset.slotType, true));

@@ -92,11 +92,10 @@ class MonthlyActivityReportTests(unittest.TestCase):
         self.assertIn("Completed data collection records", content)
         self.assertIn("Facility-provided grids used", content)
         self.assertIn("Outside/user-provided grids used", content)
-        self.assertIn("INR 123,220.00", content)
+        self.assertIn("INR 126,220.00", content)
         self.assertIn("Sample A", content)
         self.assertIn("Sample B", content)
         self.assertIn("Sample C", content)
-        self.assertIn("Non-billable", content)
         self.assertNotIn("Sample D", content)
 
     def test_report_requires_admin_session(self):
@@ -131,7 +130,86 @@ class MonthlyActivityReportTests(unittest.TestCase):
         self.assertIn("Sample B", content)
         self.assertNotIn("Sample A", content)
         self.assertNotIn("Sample C", content)
-        self.assertIn("INR 0.00", content)
+        self.assertIn("INR 2,000.00", content)
+
+    def test_csic_revenue_is_reported_separately_from_regular_revenue(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            conn.execute(
+                """INSERT INTO screening_bookings
+                   (user_name, pi_name, origin, sample_name, status, completion_date,
+                    actual_grids, number_of_grids, grid_source, subtotal, gst_amount,
+                    grand_total, total_billed, is_csic, csic_final_amount)
+                   VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                (
+                    "CSIC User", "PI CSIC", "industry", "CSIC Sample", "2024-04-17",
+                    2, 2, "self_owned", "55000.00", "9900.00",
+                    "70000.00", "70000.00", "70000.00",
+                ),
+            )
+            conn.commit()
+            conn.close()
+        with self.client.session_transaction() as session:
+            session["admin_logged_in"] = True
+
+        response = self.client.get(
+            "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"
+        )
+        self.assertEqual(response.status_code, 200)
+        document = Document(BytesIO(response.data))
+        content = "\n".join(
+            [paragraph.text for paragraph in document.paragraphs]
+            + [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+        )
+        self.assertIn("Regular billed revenue (incl. GST)", content)
+        self.assertIn("CSIC billed revenue (incl. GST)", content)
+        self.assertIn("INR 126,220.00", content)
+        self.assertIn("INR 70,000.00", content)
+        self.assertIn("CSIC Sample", content)
+
+    def test_report_uses_received_checkbox_not_partial_amount_fields(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            conn.execute(
+                """UPDATE bookings SET debit_head_status='Debit Head Pending'
+                   WHERE user_name='Data User'"""
+            )
+            conn.commit()
+            conn.close()
+        with self.client.session_transaction() as session:
+            session["admin_logged_in"] = True
+
+        pending_response = self.client.get(
+            "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"
+        )
+        self.assertEqual(pending_response.status_code, 200)
+        pending_document = Document(BytesIO(pending_response.data))
+        pending_metrics = {
+            row.cells[0].text: row.cells[1].text
+            for row in pending_document.tables[0].rows[1:]
+        }
+        self.assertEqual(pending_metrics["Regular bills marked received"], "INR 0.00")
+        self.assertEqual(pending_metrics["Regular bills awaiting receipt"], "INR 3,500.00")
+
+        with self.app.app_context():
+            conn = database.get_db()
+            conn.execute(
+                """UPDATE bookings SET debit_head_status='Debit Head Verified'
+                   WHERE user_name='Data User'"""
+            )
+            conn.commit()
+            conn.close()
+        response = self.client.get(
+            "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"
+        )
+        self.assertEqual(response.status_code, 200)
+        document = Document(BytesIO(response.data))
+        metrics = {
+            row.cells[0].text: row.cells[1].text
+            for row in document.tables[0].rows[1:]
+        }
+        self.assertEqual(metrics["Regular bills marked received"], "INR 1,000.00")
+        self.assertEqual(metrics["Regular bills awaiting receipt"], "INR 2,500.00")
 
 
 if __name__ == "__main__":

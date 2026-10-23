@@ -171,7 +171,7 @@ def _billing_lines(row, service):
     processing_amount = _value(row, "processing_charge", 0)
     lines = []
     # A self-owned grid is intentionally shown as a zero-valued line.
-    if stage == "Freezing / Grid Registration" or source == "self_owned":
+    if stage == "Freezing / Grid Registration" or source in {"facility", "self_owned"}:
         lines.append(("Grid Charge", f"{grids or 0} grid(s)", _decimal(grid_amount)))
     if stage in {"Freezing / Grid Registration", "Screening / Clipping", "Data Collection"}:
         lines.append(("Handling Charge", f"{grids or 0} grid(s)", _decimal(handling_amount)))
@@ -180,6 +180,10 @@ def _billing_lines(row, service):
         lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
     if _decimal(processing_amount):
         lines.append(("Data Processing / Image Analysis", "1 service", _decimal(processing_amount)))
+    adjustment = _value(row, "csic_adjustment")
+    if adjustment is not None and _decimal(adjustment):
+        label = "CSIC discount adjustment" if _decimal(adjustment) < 0 else "CSIC agreed amount adjustment"
+        lines.append((label, "1 adjustment", _decimal(adjustment)))
     return lines
 
 

@@ -17,9 +17,6 @@ Migration `007_unlimited_admin_screening` removes the legacy MySQL check
 constraint that capped screening bookings at four grids. Public screening and
 data-collection forms continue to enforce their four-grid limit in application
 validation; admin bookings are not capped.
-Migration `008_csic_project_entries` adds a separate, non-billed CSIC project
-record for username, company, sample count, and sample details. It does not
-create service bookings or calculate revenue, GST, or slot usage.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link

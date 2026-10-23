@@ -319,7 +319,7 @@ class AdminAssistantTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         answer = response.get_json()["answer"]
         self.assertIn("Revenue summary for this year to date", answer)
-        self.assertIn("CSIC project record(s)", answer)
+        self.assertIn("CSIC net revenue is ₹1,234.50", answer)
         self.assertIn("₹1,234.50", answer)
         self.assertEqual(
             response.get_json()["navigation"],
@@ -330,7 +330,7 @@ class AdminAssistantTests(unittest.TestCase):
         response = self.ask("How much revenue did we make today?")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("don't track every source at daily granularity", response.get_json()["answer"])
+        self.assertIn("Older CSIC revenue records are stored by year", response.get_json()["answer"])
 
     def test_schedule_requests_navigate_to_the_matching_admin_queue(self):
         cases = {

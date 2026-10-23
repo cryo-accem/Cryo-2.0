@@ -1206,7 +1206,7 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
         or len(positions) != count
     ):
         raise InventoryError(
-            "The mapped grids changed. Reload the booking and choose Store or Discard for each linked grid."
+            "The mapped grids changed. Reload the booking and choose Store or Mark discarded for each linked grid."
         )
     event_time = now_utc()
     for index, grid in enumerate(grids):
@@ -1237,7 +1237,7 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
             )
             continue
         if outcomes[index] != "store":
-            raise InventoryError(f"Choose Store or Discard for {grid['grid_code']}.")
+            raise InventoryError(f"Choose Store or Mark discarded for {grid['grid_code']}.")
         if (
             grid["current_status"] == "Discarded"
             or (
@@ -1723,6 +1723,7 @@ def search_grids(args, page=1, page_size=25):
     page_size = max(1, min(100, int(page_size)))
     joins = """ FROM inventory_grids g
         JOIN inventory_samples s ON s.sample_id=g.sample_id
+        LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
         JOIN freezing_batches fb ON fb.batch_id=g.batch_id
         JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
         LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL """
@@ -1759,6 +1760,7 @@ def search_grid_box_groups(args, page=1, page_size=40):
     page_size = max(1, min(100, int(page_size)))
     joins = """ FROM inventory_grids g
         JOIN inventory_samples s ON s.sample_id=g.sample_id
+        LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
         JOIN freezing_batches fb ON fb.batch_id=g.batch_id
         JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
         LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL """
@@ -1812,7 +1814,8 @@ def search_grid_box_groups(args, page=1, page_size=40):
         cursor.execute(
             f"""SELECT g.grid_id, g.grid_code, g.current_status, g.clipped,
                        g.clipped_at, s.sample_code, s.sample_name,
-                       s.researcher_name, gt.grid_type_name, fb.batch_code,
+                       s.researcher_name, linked_user.username AS linked_username,
+                       gt.grid_type_name, fb.batch_code,
                        fb.frozen_at,
                        (SELECT COUNT(*) FROM inventory_grids batch_grid
                         WHERE batch_grid.batch_id=g.batch_id) AS batch_grid_count,
@@ -1865,8 +1868,12 @@ def dashboard_data():
         by_status = cursor.fetchall()
         cursor.execute(
             """SELECT e.event_type, e.event_time, e.notes, g.grid_code,
+                      s.sample_name, s.researcher_name,
+                      linked_user.username AS linked_username,
                       u.username AS operator_name
                FROM grid_events e JOIN inventory_grids g ON g.grid_id=e.grid_id
+               JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                LEFT JOIN users u ON u.id=e.operator_id
                ORDER BY e.event_time DESC, e.event_id DESC LIMIT 12"""
         )
@@ -1884,10 +1891,12 @@ def dashboard_storage():
         cursor.execute(
             """SELECT g.grid_code, g.current_status, g.clipped,
                       s.sample_code, s.sample_name, s.researcher_name,
+                      linked_user.username AS linked_username,
                       fb.batch_code, fb.frozen_at,
                       sl.falcon_container_id, sl.grid_box_name, sl.grid_position
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                JOIN freezing_batches fb ON fb.batch_id=g.batch_id
                LEFT JOIN storage_locations sl
                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
@@ -2067,15 +2076,26 @@ def grid_details(grid_code):
 def search_storage(args):
     where = ["sl.removed_at IS NULL"]
     values = []
+    query = (args.get("q") or "").strip()
+    if query:
+        if len(query) > 180:
+            raise InventoryError("Search text must be 180 characters or fewer.")
+        pattern = f"%{query}%"
+        where.append(
+            "(LOWER(g.grid_code) LIKE LOWER(?) OR LOWER(s.sample_code) LIKE LOWER(?) "
+            "OR LOWER(s.sample_name) LIKE LOWER(?) "
+            "OR LOWER(s.researcher_name) LIKE LOWER(?) "
+            "OR LOWER(linked_user.username) LIKE LOWER(?))"
+        )
+        values.extend([pattern] * 5)
     for key, column in (
         ("container", "sl.falcon_container_id"),
         ("box", "sl.grid_box_name"),
         ("position", "sl.grid_position"),
-        ("q", "g.grid_code"),
     ):
         value = (args.get(key) or "").strip()
         if value:
-            limits = {"container": 100, "box": 100, "position": 40, "q": 24}
+            limits = {"container": 100, "box": 100, "position": 40}
             if len(value) > limits[key]:
                 raise InventoryError(f"{key.title()} search is too long.")
             where.append(f"{column} LIKE ?")
@@ -2087,10 +2107,11 @@ def search_storage(args):
             """SELECT sl.storage_location_id, sl.falcon_container_id,
                       sl.grid_box_name, sl.grid_position, sl.stored_at, g.grid_code,
                       g.current_status, s.sample_code, s.sample_name,
-                      s.researcher_name
+                      s.researcher_name, linked_user.username AS linked_username
                FROM storage_locations sl
                JOIN inventory_grids g ON g.grid_id=sl.grid_id
                JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                WHERE """ + " AND ".join(where) +
             " ORDER BY sl.falcon_container_id, sl.grid_box_name, sl.grid_position",
             values,
@@ -2128,10 +2149,12 @@ def available_session_grids(limit=200):
     cursor = connection.cursor()
     try:
         cursor.execute(
-            """SELECT g.grid_code, g.current_status, s.sample_name
+            """SELECT g.grid_code, g.current_status, s.sample_name,
+                      s.researcher_name, linked_user.username AS linked_username
                FROM inventory_grids g JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                WHERE g.current_status NOT IN ('Discarded','In Data Collection')
-               ORDER BY g.grid_id DESC LIMIT ?""",
+               ORDER BY s.researcher_name, s.sample_name, g.grid_id DESC LIMIT ?""",
             [limit],
         )
         return cursor.fetchall()
@@ -2170,9 +2193,11 @@ def session_details(session_id):
             return None, []
         cursor.execute(
             """SELECT g.grid_code, g.current_status, l.outcome, l.notes,
-                      l.recorded_at, s.sample_name
+                      l.recorded_at, s.sample_name, s.researcher_name,
+                      linked_user.username AS linked_username
                FROM grid_session_links l JOIN inventory_grids g ON g.grid_id=l.grid_id
                JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                WHERE l.session_id=? ORDER BY g.grid_code""",
             [session_id],
         )
@@ -2191,8 +2216,12 @@ def activity_page(page=1, page_size=50):
         total = int(cursor.fetchone()["total"])
         page = min(page, max(1, (total + page_size - 1) // page_size))
         cursor.execute(
-            """SELECT e.*, g.grid_code, u.username AS operator_name, ds.session_code
+            """SELECT e.*, g.grid_code, s.sample_name, s.researcher_name,
+                      linked_user.username AS linked_username,
+                      u.username AS operator_name, ds.session_code
                FROM grid_events e JOIN inventory_grids g ON g.grid_id=e.grid_id
+               JOIN inventory_samples s ON s.sample_id=g.sample_id
+               LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
                LEFT JOIN users u ON u.id=e.operator_id
                LEFT JOIN data_sessions ds ON ds.session_id=e.related_session_id
                ORDER BY e.event_time DESC, e.event_id DESC LIMIT ? OFFSET ?""",

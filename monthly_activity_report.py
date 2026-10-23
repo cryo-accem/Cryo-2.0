@@ -12,7 +12,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.table import Table
 from docx.shared import Inches, Pt, RGBColor
 
-from revenue import is_non_billable_booking
+from revenue import is_payment_received_booking
 
 
 ZERO = Decimal("0")
@@ -57,11 +57,9 @@ def _format_date(value: object) -> str:
 
 
 def _row_revenue(row: Mapping[str, object]) -> Decimal:
+    if row.get("is_csic"):
+        return _decimal(row.get("csic_final_amount") or row.get("total_billed") or row.get("grand_total"))
     return _decimal(row.get("total_billed") or row.get("grand_total"))
-
-
-def _row_is_billable(row: Mapping[str, object], service: str) -> bool:
-    return service == "Freezing" and not is_non_billable_booking(row)
 
 
 def _add_table(
@@ -111,11 +109,12 @@ def _add_service_table(
             _grids(row),
             _grid_source(row),
             clipped if service != "Freezing" else "—",
-            _money(_row_revenue(row)) if _row_is_billable(row, service) else "Non-billable",
+            "CSIC" if row.get("is_csic") else "Regular",
+            _money(_row_revenue(row)),
         ))
     _add_table(
         document,
-        ("Date", "User", "PI", "Sample", "Grids", "Grid source", "Clipped", "Billed incl. GST"),
+        ("Date", "User", "PI", "Sample", "Grids", "Grid source", "Clipped", "Revenue class", "Billed incl. GST"),
         rows,
     )
 
@@ -155,24 +154,28 @@ def build_monthly_activity_report(
         if int(_decimal(row.get("clipped_grids"))) > 0
     ]
     all_events = [row for events in events_by_service.values() for row in events]
+    regular_events = [row for row in all_events if not row.get("is_csic")]
+    csic_events = [row for row in all_events if row.get("is_csic")]
     facility_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "facility")
     outside_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "outside")
     clipped_grids = sum(int(_decimal(row.get("clipped_grids"))) for _, row in clipped_events)
-    billable_events = [
-        (service, row)
-        for service, events in events_by_service.items()
-        for row in events
-        if _row_is_billable(row, service)
-    ]
-    current_billed = sum((_row_revenue(row) for _, row in billable_events), ZERO)
-    received = sum((_decimal(row.get("amount_received")) for _, row in billable_events), ZERO)
+    current_billed = sum((_row_revenue(row) for row in regular_events), ZERO)
+    csic_billed = sum((_row_revenue(row) for row in csic_events), ZERO)
+    received = sum(
+        (_row_revenue(row) for row in regular_events if is_payment_received_booking(row)),
+        ZERO,
+    )
+    csic_received = sum(
+        (_row_revenue(row) for row in csic_events if is_payment_received_booking(row)),
+        ZERO,
+    )
     historical_by_month = {
         month: _decimal(amount)
         for month, amount in historical_revenue
         if start.strftime("%Y-%m") <= month <= end.strftime("%Y-%m")
     }
     historical_total = sum(historical_by_month.values(), ZERO)
-    gross_revenue = current_billed + historical_total
+    gross_revenue = current_billed + csic_billed + historical_total
 
     document = create_document()
     section = document.sections[0]
@@ -202,11 +205,14 @@ def build_monthly_activity_report(
         ("Clipped grids", clipped_grids),
         ("Facility-provided grids used", facility_grids),
         ("Outside/user-provided grids used", outside_grids),
-        ("Completed-record billed revenue (incl. GST)", _money(current_billed)),
+        ("Regular billed revenue (incl. GST)", _money(current_billed)),
+        ("CSIC billed revenue (incl. GST)", _money(csic_billed)),
         ("Legacy historical revenue (pre-tax summary)", _money(historical_total)),
         ("Total revenue represented", _money(gross_revenue)),
-        ("Payments received on completed records", _money(received)),
-        ("Outstanding on completed records", _money(max(current_billed - received, ZERO))),
+        ("Regular bills marked received", _money(received)),
+        ("CSIC bills marked received", _money(csic_received)),
+        ("Regular bills awaiting receipt", _money(max(current_billed - received, ZERO))),
+        ("CSIC bills awaiting receipt", _money(max(csic_billed - csic_received, ZERO))),
     ))
 
     document.add_heading("Month-by-month summary", level=1)
@@ -217,12 +223,12 @@ def build_monthly_activity_report(
         month_start = max(start, month_cursor)
         effective_end = min(end, month_end)
         in_month = [
-            row for service, events in events_by_service.items()
-            for row in events
+            row for row in all_events
             if month_start <= row["_report_date"] <= effective_end
-            and _row_is_billable(row, service)
         ]
         month_history = historical_by_month.get(month_cursor.strftime("%Y-%m"), ZERO)
+        regular_month = [row for row in in_month if not row.get("is_csic")]
+        csic_month = [row for row in in_month if row.get("is_csic")]
         month_rows.append((
             month_cursor.strftime("%B %Y"),
             sum(1 for row in events_by_service["Freezing"] if month_start <= row["_report_date"] <= effective_end),
@@ -231,12 +237,13 @@ def build_monthly_activity_report(
             sum(1 for row in events_by_service["Data collection"] if month_start <= row["_report_date"] <= effective_end),
             sum(_grids(row) for row in in_month if _grid_source(row) == "facility"),
             sum(_grids(row) for row in in_month if _grid_source(row) == "outside"),
-            _money(sum((_row_revenue(row) for row in in_month), ZERO) + month_history),
+            _money(sum((_row_revenue(row) for row in regular_month), ZERO) + month_history),
+            _money(sum((_row_revenue(row) for row in csic_month), ZERO)),
         ))
         month_cursor = (month_cursor.replace(day=28) + datetime.timedelta(days=4)).replace(day=1)
     _add_table(
         document,
-        ("Month", "Freezing", "Clipping", "Screening", "Data collection", "Facility grids", "Outside grids", "Revenue"),
+        ("Month", "Freezing", "Clipping", "Screening", "Data collection", "Facility grids", "Outside grids", "Regular revenue", "CSIC revenue"),
         month_rows,
     )
 
@@ -255,8 +262,7 @@ def build_monthly_activity_report(
                 row.get("pi_name") or "-",
                 row.get("sample_name") or "-",
                 int(_decimal(row.get("clipped_grids"))),
-                _money(_decimal(row.get("clipping_charge")))
-                if _row_is_billable(row, service) else "Non-billable",
+                _money(_decimal(row.get("clipping_charge"))),
             )
             for service, row in clipped_events
         ]
@@ -276,7 +282,6 @@ def build_monthly_activity_report(
             "and are therefore not included in the activity lists above."
         )
     document.add_paragraph(
-        "Screening and data collection are recorded as activity only and are not billed here. "
         "Grid counts represent completed service uses recorded by the facility; the same grids "
         "may appear in more than one service event. Outside grids include user-provided or "
         "unclassified legacy grid sources."

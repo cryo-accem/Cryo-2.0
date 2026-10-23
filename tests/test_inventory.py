@@ -270,13 +270,19 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         content = dashboard.data.decode()
         self.assertIn(
-            "/static/css/site.css?v=20261016-muted-inventory-palette",
+            "/static/css/site.css?v=20261023-grid-identity-first-v1",
             content,
         )
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
-        self.assertIn(f'aria-label="Position 1, {stored}, Researcher, Stored"', content)
-        self.assertIn(f'aria-label="Position 2, {clipped}, Researcher, Clipped"', content)
+        self.assertIn(
+            f'aria-label="Researcher, no linked username, Test sample, position 1, {stored}, Stored"',
+            content,
+        )
+        self.assertIn(
+            f'aria-label="Researcher, no linked username, Test sample, position 2, {clipped}, Clipped"',
+            content,
+        )
         self.assertIn(f'class="inventory-storage-code inventory-storage-code--s">S</span>', content)
         self.assertIn(f'class="inventory-storage-code inventory-storage-code--c">C</span>', content)
         self.assertRegex(
@@ -327,6 +333,26 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn("Researcher", content)
         self.assertIn(first, content)
         self.assertIn(second, content)
+        self.assertLess(content.index("<th>Researcher</th>"), content.index("<th>Grid reference</th>"))
+        self.assertIn(
+            first.encode(),
+            self.client.get("/admin/inventory/storage?q=Test+sample").data,
+        )
+
+    def test_inventory_search_shows_sample_identity_before_grid_reference(self):
+        grid_code = self.create_batch(1, "Dr Example", "Sample Alpha")[0]
+        self.post_storage(grid_code, "Falcon-A", "GridBox-1", "A1")
+
+        response = self.client.get("/admin/inventory/grids?q=Sample+Alpha")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.data.decode()
+        self.assertIn("<th>Researcher</th><th>Username</th><th>Sample</th>", content)
+        self.assertIn("<th>Grid reference</th>", content)
+        self.assertIn("Dr Example", content)
+        self.assertIn("Sample Alpha", content)
+        self.assertIn(grid_code, content)
+        self.assertLess(content.index("<th>Researcher</th>"), content.index("<th>Grid reference</th>"))
 
     def test_grid_storage_positions_sort_numerically(self):
         codes = self.create_batch(10)
@@ -1701,6 +1727,42 @@ class GridInventoryTests(unittest.TestCase):
             (location["falcon_container_id"], location["grid_box_name"], location["grid_position"]),
             ("Falcon-D", "Box-D", "4"),
         )
+
+    def test_admin_screening_completion_rejects_more_than_twelve_actual_grids(self):
+        conn = database.get_db()
+        conn.execute(
+            """INSERT INTO screening_bookings
+               (user_name, pi_name, email, origin, sample_name, grids, days, status)
+               VALUES ('Grid User', 'Grid PI', 'limit@example.test', 'Industry',
+                       'Test sample', 12, 1, 'ongoing')"""
+        )
+        booking_id = conn.execute(
+            "SELECT id FROM screening_bookings WHERE email='limit@example.test'"
+        ).fetchone()["id"]
+        conn.commit()
+        conn.close()
+
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/screening/complete/{booking_id}",
+                data={
+                    "_csrf_token": self.csrf_token(),
+                    "actual_slots": "1",
+                    "actual_grids": "13",
+                    "grid_source": "user provided",
+                    "grid_type": "",
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        conn = database.get_db()
+        booking = conn.execute(
+            "SELECT status, total_billed FROM screening_bookings WHERE id=?",
+            [booking_id],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(booking["status"], "ongoing")
+        self.assertIsNone(booking["total_billed"])
 
     def test_public_screening_grid_moves_to_microscope_then_returns_to_storage(self):
         grid_code = self.create_batch(

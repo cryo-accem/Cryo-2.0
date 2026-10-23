@@ -41,18 +41,17 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertEqual(public_page.status_code, 200)
         self.assertEqual(admin_page.status_code, 200)
 
-    def test_create_slot_options_are_collapsed_below_csic_projects(self):
+    def test_create_slot_buttons_are_visible_without_a_separate_csic_booking(self):
         response = self.client.get("/admin/panel")
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        csic_projects_position = html.index('id="csic-projects"')
-        create_slot_position = html.index('<details class="admin-slot-panel" id="create-slot"')
-
-        self.assertGreater(create_slot_position, csic_projects_position)
-        self.assertNotIn('<details class="admin-slot-panel" id="create-slot" data-known-user-url="/admin/panel/known-user" data-slot-type="" data-slot-saved="false" open', html)
-        self.assertIn('<summary class="admin-slot-panel__toggle">', html)
+        self.assertNotIn('id="csic-projects"', html)
+        self.assertNotIn("Add CSIC project", html)
+        self.assertIn('<section class="admin-slot-panel" id="create-slot"', html)
+        self.assertNotIn('<details class="admin-slot-panel" id="create-slot"', html)
+        self.assertIn('<div class="admin-slot-panel__heading">', html)
         self.assertIn('href="#create-slot"', html)
-        self.assertIn('role="group" aria-label="Choose slot type" hidden', html)
+        self.assertIn('role="group" aria-label="Choose slot type">', html)
         self.assertIn('data-slot-type="datacollecting"', html)
         self.assertIn('data-slot-type="screening"', html)
         self.assertIn('data-slot-type="freezing"', html)
@@ -102,64 +101,6 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.assertEqual(booking["days"], 3)
         self.assertEqual(booking["status"], "waiting")
 
-    def test_csic_project_entry_saves_only_record_details_without_booking_or_revenue(self):
-        response = self.client.post(
-            "/admin/panel/slots/csic_project",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Project Contact",
-                "company_name": "Example Cryo Company",
-                "sample_count": "5",
-                "sample_details": "Five samples for the CSIC project.",
-            },
-            follow_redirects=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"CSIC project entry saved.", response.data)
-        self.assertIn(b"No booking or billing calculation was created.", response.data)
-        self.assertIn(b"Example Cryo Company", response.data)
-        with self.app.app_context():
-            conn = database.get_db()
-            entry = conn.execute(
-                """SELECT username, company_name, sample_count, sample_details
-                   FROM csic_project_entries"""
-            ).fetchone()
-            self.assertEqual(entry["username"], "Project Contact")
-            self.assertEqual(entry["company_name"], "Example Cryo Company")
-            self.assertEqual(entry["sample_count"], 5)
-            self.assertEqual(entry["sample_details"], "Five samples for the CSIC project.")
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM bookings").fetchone()[0], 0)
-            self.assertEqual(
-                conn.execute("SELECT COUNT(*) FROM screening_bookings").fetchone()[0],
-                0,
-            )
-            self.assertEqual(conn.execute("SELECT COUNT(*) FROM csic_projects").fetchone()[0], 0)
-            conn.close()
-
-    def test_csic_project_entry_requires_positive_whole_sample_count(self):
-        response = self.client.post(
-            "/admin/panel/slots/csic_project",
-            data={
-                "_csrf_token": self._csrf_token(),
-                "user_name": "Project Contact",
-                "company_name": "Example Cryo Company",
-                "sample_count": "0",
-                "sample_details": "Sample details",
-            },
-            follow_redirects=True,
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(b"Sample count must be a whole number greater than zero.", response.data)
-        with self.app.app_context():
-            conn = database.get_db()
-            self.assertEqual(
-                conn.execute("SELECT COUNT(*) FROM csic_project_entries").fetchone()[0],
-                0,
-            )
-            conn.close()
-
     def test_success_reopens_form_with_confirmation_and_add_another(self):
         data = self._slot_data()
         data["days"] = "3"
@@ -172,7 +113,7 @@ class AdminSlotControlsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn('id="create-slot" data-known-user-url="/admin/panel/known-user" data-slot-type="datacollecting" data-slot-saved="true" open', html)
+        self.assertIn('id="create-slot" data-known-user-url="/admin/panel/known-user" data-slot-type="datacollecting" data-slot-saved="true"', html)
         self.assertIn("Slot saved successfully.", html)
         self.assertIn("Add another", html)
         self.assertIn('id="admin-slot-form-datacollecting" method="post"', html)
@@ -189,7 +130,7 @@ class AdminSlotControlsTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         html = response.get_data(as_text=True)
-        self.assertIn('data-slot-type="datacollecting" data-slot-saved="false" open', html)
+        self.assertIn('data-slot-type="datacollecting" data-slot-saved="false"', html)
         self.assertIn("Choose a valid user origin.", html)
         self.assertIn('name="user_name" maxlength="100" value="Admin Added User"', html)
         self.assertIn('name="email" type="email" maxlength="150" value="admin-added@example.test"', html)

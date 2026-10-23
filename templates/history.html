@@ -2,7 +2,7 @@
 {% block title %}ACCEM | History{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>Charge sheets and payment tracking apply only to billable freezing bookings. Screening and data collection are recorded as non-billable services.</p></div></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Completed slots</h1><p>History, charge sheets and a simple received checkmark.</p></div></header>
 
   <div class="history-summary" aria-label="Booking history summary">
     <div class="history-summary__item">
@@ -42,19 +42,36 @@
     <h2>{{ title }}</h2>
     {% if rows %}
     <div class="table-wrap"><table class="data-table">
-      <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Payment tracking</th></tr></thead>
+      <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Receipt status</th></tr></thead>
       <tbody>{% for slot in rows %}
         <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}">
-          <td>{% if not is_non_billable_booking(slot, service_key) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
+          <td>{% if is_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
           <td>{{ slot.sample_name }}{% if has_days %}<br><small>{{ slot.days }} requested days / {{ slot.grids }} requested grids</small>{% else %}<br><small>{{ slot.grids }} requested grids</small>{% endif %}</td>
           <td>{{ slot.actual_slots or 0 }} slots<br>{{ slot.actual_grids or 0 }} grids</td>
           <td>{{ slot.completion_date if service_key != 'freezing' else slot.completed_at }}</td>
           <td>
-            {% if is_non_billable_booking(slot, service_key) %}<span class="status-badge completed">Non-billable</span>
+            {% if slot.origin|lower in ['external', 'academic', 'external academic', 'industry', 'industrial', 'external industry'] and not is_non_billable_booking(slot) %}
+            <form method="post" action="{{ url_for('admin.set_csic_booking', service_key=service_key, booking_id=slot.id) }}" class="csic-booking-toggle">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="csic_final_amount" value="{{ slot.csic_final_amount or slot.total_billed or slot.grand_total or '' }}">
+              <input type="hidden" name="csic_discount_reason" value="{{ slot.csic_discount_reason or '' }}">
+              <label class="csic-toggle" title="{{ 'Charge sheet already sent; status is locked.' if slot.charge_sheet_sent_at else 'Switch this external booking between regular and CSIC revenue.' }}">
+                <input type="checkbox" name="is_csic" value="1" data-csic-toggle data-default-amount="{{ slot.csic_final_amount or slot.total_billed or slot.grand_total or '' }}" data-calculated-amount="{{ slot.csic_original_amount or slot.total_billed or slot.grand_total or '' }}" aria-label="Switch {{ slot.user_name }} booking to CSIC revenue" {{ 'checked' if is_csic_booking(slot) else '' }} {{ 'disabled' if slot.charge_sheet_sent_at else '' }}>
+                <span class="csic-toggle__track" aria-hidden="true"></span>
+                <span>{{ 'CSIC revenue' if is_csic_booking(slot) else 'Switch to CSIC' }}</span>
+              </label>
+            </form>
+            {% endif %}
+            {% if is_non_billable_booking(slot) %}<span class="status-badge completed">Non-billable</span>
+            {% else %}
+            {% if is_csic_booking(slot) %}<span class="status-badge completed">CSIC revenue · billable</span>{% if slot.csic_final_amount %}<small>Final invoice: ₹{{ "{:,.2f}".format(slot.csic_final_amount) }} incl. GST</small>{% endif %}
+            {% if slot.csic_discount_reason %}<small>Discount reason: {{ slot.csic_discount_reason }}</small>{% endif %}
+            {% if slot.csic_audit %}<details class="csic-audit"><summary>CSIC change history</summary><ol>{% for event in slot.csic_audit[:5] %}<li><strong>{{ event.action|replace('_', ' ')|title }}</strong>{% if event.calculated_amount %}<br>Calculated: ₹{{ "{:,.2f}".format(event.calculated_amount) }}{% endif %}{% if event.final_amount %} · Final: ₹{{ "{:,.2f}".format(event.final_amount) }}{% endif %}{% if event.discount_reason %}<br>{{ event.discount_reason }}{% endif %}<br><small>{{ event.changed_at }}{% if event.username %} · {{ event.username }}{% endif %}</small></li>{% endfor %}</ol></details>{% endif %}
             {% else %}
             {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
+            {% endif %}
             <form method="post" action="{{ url_for('admin.send_charge_sheet', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility" {{ 'selected' if slot.grid_source == 'facility' else '' }}>Facility Provided</option><option value="self_owned" {{ 'selected' if slot.grid_source == 'self_owned' else '' }}>Self Owned / User Provided</option></select>
@@ -64,7 +81,7 @@
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
-            {% if not slot.charge_sheet_sent_at and not is_non_billable_booking(slot, service_key) %}
+            {% if not slot.charge_sheet_sent_at %}
             <details class="history-edit">
               <summary>Edit booking before sending</summary>
               <form method="post" action="{{ url_for('admin.edit_completed_booking', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
@@ -116,38 +133,39 @@
             </form>
           </td>
           <td>
-            {% if is_non_billable_booking(slot, service_key) %}
+            {% if is_non_billable_booking(slot) %}
               <span class="status-badge completed">Completed — non-billable</span>
             {% elif slot.origin|lower == 'internal' %}
-              <strong>{{ slot.debit_head_status or 'Debit Head Pending' }}</strong>
-              <form method="post" action="{{ url_for('admin.update_payment', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="origin" value="{{ slot.origin }}">
-                <select name="status" aria-label="Debit head status">
-                  {% for status in ['Debit Head Pending', 'Debit Head Received', 'Debit Head Verified'] %}<option {{ 'selected' if (slot.debit_head_status or 'Debit Head Pending') == status }}>{{ status }}</option>{% endfor %}
-                </select>
-                <input name="debit_head_details" value="{{ slot.debit_head_details or '' }}" placeholder="Debit head details">
-                <textarea name="admin_remarks" placeholder="Admin remarks">{{ slot.admin_remarks or '' }}</textarea>
-                <button class="button small secondary" type="submit">Save</button>
-              </form>
+              {% if slot.charge_sheet_sent_at %}
+                {% if slot.payment_received %}
+                  <span class="status-badge completed">Debit head received</span>
+                {% else %}
+                  <strong>Bill sent — awaiting debit head</strong>
+                  <form method="post" action="{{ url_for('admin.update_payment', service_key=service_key, booking_id=slot.id) }}" class="stacked-form payment-received-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <label class="payment-received-check"><input type="checkbox" name="payment_received" value="1"> Debit head received</label>
+                    <button class="button small secondary" type="submit">Save</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                <strong>Bill not sent</strong><br><small>Send the charge sheet before marking receipt.</small>
+              {% endif %}
             {% else %}
-              <strong>{{ slot.payment_status or 'Payment Pending' }}</strong>
-              <form method="post" enctype="multipart/form-data" action="{{ url_for('admin.update_payment', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
-                <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="origin" value="{{ slot.origin }}">
-                <select name="status" aria-label="Payment status">
-                  {% for status in ['Payment Pending', 'Payment Proof Received', 'Payment Verified', 'Payment Rejected'] %}<option {{ 'selected' if (slot.payment_status or 'Payment Pending') == status }}>{{ status }}</option>{% endfor %}
-                </select>
-                <input name="transaction_reference" value="{{ slot.transaction_reference or '' }}" placeholder="Transaction/reference">
-                <input type="date" name="transaction_date" value="{{ slot.transaction_date or '' }}" aria-label="Transaction date">
-                <input type="number" step="0.01" name="amount_received" value="{{ slot.amount_received or '' }}" placeholder="Amount received">
-                <input name="payment_mode" value="{{ slot.payment_mode or '' }}" placeholder="Payment mode">
-                <input type="date" name="proof_received_date" value="{{ slot.proof_received_date or '' }}" aria-label="Proof received date">
-                <input type="file" name="payment_proof" accept=".pdf,.png,.jpg,.jpeg" aria-label="Payment proof">
-                {% if slot.payment_proof_path %}<a href="{{ url_for('admin.download_payment_proof', service_key=service_key, booking_id=slot.id) }}">Download {{ slot.payment_proof_original_name or 'proof' }}</a>{% endif %}
-                <textarea name="admin_remarks" placeholder="Admin remarks">{{ slot.admin_remarks or '' }}</textarea>
-                <button class="button small secondary" type="submit">Save</button>
-              </form>
+              {% if is_csic_booking(slot) %}<span class="status-badge completed">CSIC revenue · ₹{{ "{:,.2f}".format(slot.csic_final_amount or slot.total_billed or slot.grand_total or 0) }} incl. GST</span>{% endif %}
+              {% if slot.charge_sheet_sent_at %}
+                {% if slot.payment_received %}
+                  <span class="status-badge completed">Payment received</span>
+                {% else %}
+                  <strong>Bill sent — awaiting payment</strong>
+                  <form method="post" action="{{ url_for('admin.update_payment', service_key=service_key, booking_id=slot.id) }}" class="stacked-form payment-received-form">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+                    <label class="payment-received-check"><input type="checkbox" name="payment_received" value="1"> Payment received</label>
+                    <button class="button small secondary" type="submit">Save</button>
+                  </form>
+                {% endif %}
+              {% else %}
+                <strong>Bill not sent</strong><br><small>Send the charge sheet before marking receipt.</small>
+              {% endif %}
             {% endif %}
           </td>
         </tr>
@@ -179,6 +197,20 @@
   </div>
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a>  </div>
 </section>
+<dialog class="csic-confirmation" id="csic-confirmation">
+  <form method="dialog">
+    <h2>Confirm CSIC invoice</h2>
+    <p>Review the calculated amount and enter the final invoice value, including GST.</p>
+    <label>Calculated amount<input type="text" data-csic-calculated readonly></label>
+    <label>Final CSIC invoice amount<input type="number" min="0.01" step="0.01" inputmode="decimal" data-csic-final required></label>
+    <label data-csic-reason-label hidden>Reason for discount<input type="text" maxlength="500" data-csic-reason></label>
+    <p class="csic-confirmation__error" data-csic-error hidden role="alert"></p>
+    <div class="csic-confirmation__actions">
+      <button type="button" class="button secondary" data-csic-cancel>Cancel</button>
+      <button type="button" class="button" data-csic-apply>Apply CSIC</button>
+    </div>
+  </form>
+</dialog>
 <script>
 (() => {
   const userFilter = document.querySelector("[data-user-filter]");
@@ -242,6 +274,72 @@ document.querySelectorAll(".history-edit [name=grid_source]").forEach((source) =
   };
   source.addEventListener("change", update);
   update();
+});
+const csicDialog = document.getElementById("csic-confirmation");
+const csicFinalInput = csicDialog.querySelector("[data-csic-final]");
+const csicCalculatedInput = csicDialog.querySelector("[data-csic-calculated]");
+const csicReasonInput = csicDialog.querySelector("[data-csic-reason]");
+const csicReasonLabel = csicDialog.querySelector("[data-csic-reason-label]");
+let activeCsicToggle = null;
+let previousCsicState = false;
+const updateDiscountReason = () => {
+  const calculated = Number(csicCalculatedInput.value.replace(/[^\d.]/g, ""));
+  const finalAmount = Number(csicFinalInput.value);
+  const discounted = Number.isFinite(calculated) && Number.isFinite(finalAmount) && finalAmount < calculated - 0.005;
+  csicReasonLabel.hidden = !discounted;
+  csicReasonInput.required = discounted;
+  return discounted;
+};
+document.querySelector("[data-csic-cancel]").addEventListener("click", () => {
+  if (activeCsicToggle) activeCsicToggle.checked = previousCsicState;
+  csicDialog.close("cancel");
+});
+csicDialog.addEventListener("cancel", () => {
+  if (activeCsicToggle) activeCsicToggle.checked = previousCsicState;
+});
+csicDialog.addEventListener("close", () => {
+  if (csicDialog.returnValue !== "apply" && activeCsicToggle) {
+    activeCsicToggle.checked = previousCsicState;
+  }
+  activeCsicToggle = null;
+});
+csicFinalInput.addEventListener("input", updateDiscountReason);
+document.querySelector("[data-csic-apply]").addEventListener("click", () => {
+  const discounted = updateDiscountReason();
+  if (!csicFinalInput.value || !csicFinalInput.reportValidity()) return;
+  if (discounted && !csicReasonInput.value.trim()) {
+    csicReasonInput.setCustomValidity("Enter a reason for the discount.");
+    csicReasonInput.reportValidity();
+    csicReasonInput.setCustomValidity("");
+    return;
+  }
+  if (!activeCsicToggle) return;
+  const form = activeCsicToggle.form;
+  form.querySelector("[name=csic_final_amount]").value = csicFinalInput.value;
+  form.querySelector("[name=csic_discount_reason]").value = csicReasonInput.value.trim();
+  csicDialog.close("apply");
+  form.requestSubmit();
+});
+document.querySelectorAll("[data-csic-toggle]").forEach((toggle) => {
+  toggle.addEventListener("change", () => {
+    const form = toggle.form;
+    const amountInput = form.querySelector("[name=csic_final_amount]");
+    if (toggle.checked) {
+      activeCsicToggle = toggle;
+      previousCsicState = false;
+      const calculated = Number(toggle.dataset.calculatedAmount || toggle.dataset.defaultAmount || 0);
+      csicDialog.returnValue = "";
+      csicCalculatedInput.value = `₹${calculated.toFixed(2)}`;
+      csicFinalInput.value = toggle.dataset.defaultAmount || "";
+      csicReasonInput.value = "";
+      updateDiscountReason();
+      csicDialog.showModal();
+    } else {
+      amountInput.value = "";
+      form.querySelector("[name=csic_discount_reason]").value = "";
+      form.requestSubmit();
+    }
+  });
 });
 </script></main>
 {% endblock %}

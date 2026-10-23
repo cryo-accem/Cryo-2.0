@@ -28,8 +28,10 @@ from database import get_db
 from database import _is_sqlite_url
 from extensions import send_email, send_email_sync
 from revenue import (
-    calculate_charge_sheet, is_non_billable_booking,
-    is_non_billable_service, parse_number_of_grids,
+    apply_csic_final_amount, calculate_booking_revenue, calculate_charge_sheet,
+    csic_amount_components, is_billable_booking, is_csic_booking,
+    is_non_billable_booking, is_payment_received_booking, parse_csic_final_amount,
+    parse_number_of_grids, pricing_category,
 )
 from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing
 from blueprints.imaging import register_imaging
@@ -94,9 +96,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
     "admin.billing_preview",
-    "admin.add_csic_project",
-    "admin.edit_csic_project",
-    "admin.delete_csic_project",
+    "admin.set_csic_booking",
     "admin.maintenance",
     "admin.save_publication",
     "admin.delete_publication",
@@ -257,9 +257,6 @@ def billing_preview():
     """Return an authoritative preview for the admin billing form."""
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
-    service_stage = request.values.get("service_stage", "").strip()
-    if is_non_billable_service(service_stage):
-        return jsonify({"error": "Screening and data collection are not billed here."}), 400
     try:
         charges = calculate_charge_sheet(
             request.values.get("user_category", ""),
@@ -300,11 +297,6 @@ def panel():
     freezing_active = cur.fetchone()["count"]
     pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
-    cur.execute(
-        "SELECT id, username, company_name, sample_count, sample_details, created_at "
-        "FROM csic_project_entries ORDER BY created_at DESC, id DESC LIMIT 20"
-    )
-    csic_project_entries = cur.fetchall()
     cur.close()
     conn.close()
     pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd"]
@@ -338,7 +330,6 @@ def panel():
         today=datetime.date.today().isoformat(),
         freezing_grid_limit=GRID_LIMIT_PER_DAY,
         slot_form_state=slot_form_state,
-        csic_project_entries=csic_project_entries,
     )
 
 
@@ -401,8 +392,7 @@ def known_slot_user():
 def _slot_form_redirect(slot_type, message, category="registration", saved=False):
     field_names = (
         "user_name", "pi_name", "email", "origin", "esm", "sample_name",
-        "grids", "days", "freezing_date", "company_name", "sample_count",
-        "sample_details",
+        "grids", "days", "freezing_date",
     )
     session["_admin_slot_form_state"] = {
         "slot_type": slot_type,
@@ -420,58 +410,12 @@ def _slot_form_redirect(slot_type, message, category="registration", saved=False
     return redirect(url_for("admin.panel", _anchor="create-slot"))
 
 
-@admin_bp.route("/panel/slots/<any(datacollecting,screening,freezing,csic_project):slot_type>", methods=["POST"])
+@admin_bp.route("/panel/slots/<any(datacollecting,screening,freezing):slot_type>", methods=["POST"])
 def add_slot(slot_type):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
     user_name = request.form.get("user_name", "").strip()
-    if slot_type == "csic_project":
-        company_name = request.form.get("company_name", "").strip()
-        sample_count_text = request.form.get("sample_count", "").strip()
-        sample_details = request.form.get("sample_details", "").strip()
-        errors = []
-        if not user_name or len(user_name) > 100:
-            errors.append("Enter a username up to 100 characters.")
-        if not company_name or len(company_name) > 180:
-            errors.append("Enter a company name up to 180 characters.")
-        try:
-            sample_count = int(sample_count_text)
-            if sample_count < 1:
-                raise ValueError
-        except ValueError:
-            errors.append("Sample count must be a whole number greater than zero.")
-            sample_count = 0
-        if not sample_details or len(sample_details) > 10000:
-            errors.append("Enter sample details up to 10,000 characters.")
-        if errors:
-            return _slot_form_redirect(slot_type, " ".join(errors))
-        conn = get_db()
-        cur = conn.cursor()
-        try:
-            cur.execute(
-                """INSERT INTO csic_project_entries
-                   (username, company_name, sample_count, sample_details, created_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (
-                    user_name, company_name, sample_count, sample_details,
-                    datetime.datetime.now().replace(microsecond=0),
-                ),
-            )
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            cur.close()
-            conn.close()
-        return _slot_form_redirect(
-            slot_type,
-            "CSIC project entry saved. No booking or billing calculation was created.",
-            "success",
-            saved=True,
-        )
-
     pi_name = request.form.get("pi_name", "").strip()
     email = request.form.get("email", "").strip()
     origin = request.form.get("origin", "").strip()
@@ -1453,8 +1397,8 @@ def _admin_assistant_revenue(question):
         period_label = "this month to date"
     elif re.search(r"\btoday\b", question):
         return (
-            "The revenue records don't track every source at daily granularity: CSIC projects "
-            "are recorded by year. I can summarize this month to date or this year to date."
+            "Older CSIC revenue records are stored by year rather than by day. I can summarize "
+            "this month to date or this year to date."
         )
     elif re.search(r"\bthis year\b|\byear to date\b", question):
         preset = "this_year"
@@ -1473,13 +1417,12 @@ def _admin_assistant_revenue(question):
 
     totals = revenue["totals"]
     completed = revenue["completed_bookings"]
-    csic_count = int(totals["csic_slots"])
     return (
         f"Revenue summary for {period_label}: net revenue "
         f"₹{totals['net']:,.2f}; gross billed ₹{totals['gross']:,.2f}; "
         f"received ₹{totals['received']:,.2f}; outstanding ₹{totals['outstanding']:,.2f}. "
-        f"There are {completed} completed billable bookings and {csic_count} CSIC project "
-        f"record(s), whose net revenue is ₹{totals['csic_net']:,.2f}. "
+        f"There are {completed} completed regular billable bookings. "
+        f"CSIC net revenue is ₹{totals['csic_net']:,.2f}. "
         "These figures are calculated from the admin revenue records."
     )
 
@@ -1590,38 +1533,39 @@ def _dashboard_pending_payments(cur):
         for row in cur.fetchall()
     }
     sources = (
-        ("bookings", "Data collection", "completion_date", "completed", "imaging"),
-        ("screening_bookings", "Screening", "completion_date", "completed", "screening"),
-        ("completed_freezing", "Freezing", "completed_at", None, "freezing"),
+        ("bookings", "Data collection", "completion_date", "completed"),
+        ("screening_bookings", "Screening", "completion_date", "completed"),
+        ("completed_freezing", "Freezing", "completed_at", None),
     )
-    for table, service, completion_column, booking_status, service_key in sources:
+    for table, service, completion_column, booking_status in sources:
         where = " WHERE status='completed'" if booking_status else ""
         cur.execute(
             f"SELECT * FROM {table}{where} ORDER BY {completion_column} DESC"
         )
         for row in _history_rows(cur.fetchall()):
-            if is_non_billable_booking(row, service_key):
+            if not is_billable_booking(row):
                 continue
             internal = (row["origin"] or "").strip().casefold() == "internal"
-            tracking_status = (
-                row["debit_head_status"] if internal else row["payment_status"]
-            )
-            expected_status = "Debit Head Pending" if internal else "Payment Pending"
-            if tracking_status != expected_status:
+            if not row.get("charge_sheet_sent_at") or is_payment_received_booking(row):
                 continue
 
             billed = _money(row.get("total_billed") or row.get("grand_total"))
-            received = _money(row.get("amount_received"))
             pending_rows.append({
                 **row,
                 "service_label": service,
-                "service_key": service_key,
+                "service_key": (
+                    "imaging" if table == "bookings"
+                    else "screening" if table == "screening_bookings"
+                    else "freezing"
+                ),
                 "completion_value": row.get(completion_column),
-                "tracking_label": "Debit head pending" if internal else "Payment pending",
-                "pending_amount": max(Decimal("0.00"), billed - received),
+                "tracking_label": "Debit head awaiting confirmation" if internal else "Payment awaiting receipt",
+                "pending_amount": billed,
                 "reminder_count": reminder_counts.get(
                     (
-                        service_key,
+                        "imaging" if table == "bookings"
+                        else "screening" if table == "screening_bookings"
+                        else "freezing",
                         row["id"],
                     ),
                     0,
@@ -1634,18 +1578,18 @@ def _dashboard_pending_payments(cur):
     return {
         "rows": pending_rows,
         "payment_count": sum(
-            item["tracking_label"] == "Payment pending" for item in pending_rows
+            item["tracking_label"] == "Payment awaiting receipt" for item in pending_rows
         ),
         "payment_amount": sum(
             (
                 item["pending_amount"]
                 for item in pending_rows
-                if item["tracking_label"] == "Payment pending"
+                if item["tracking_label"] == "Payment awaiting receipt"
             ),
             Decimal("0.00"),
         ),
         "debit_head_count": sum(
-            item["tracking_label"] == "Debit head pending" for item in pending_rows
+            item["tracking_label"] == "Debit head awaiting confirmation" for item in pending_rows
         ),
     }
 
@@ -1672,18 +1616,13 @@ def send_payment_reminder(service_key, booking_id):
         flash("That booking could not be found.")
         return redirect(url_for("admin.panel"))
     booking = _history_rows([booking_row])[0]
-    if is_non_billable_booking(booking, service_key):
-        flash("This booking is non-billable and does not require a payment reminder.")
+    if not is_billable_booking(booking):
+        flash("This booking does not require a payment reminder.")
         return redirect(url_for("admin.panel"))
 
     internal = (booking.get("origin") or "").strip().casefold() == "internal"
-    tracking_status = (
-        booking.get("debit_head_status") if internal
-        else booking.get("payment_status")
-    )
-    expected_status = "Debit Head Pending" if internal else "Payment Pending"
-    if tracking_status != expected_status:
-        flash("This booking is no longer marked as pending.")
+    if not booking.get("charge_sheet_sent_at") or is_payment_received_booking(booking):
+        flash("A reminder is available only for a sent bill that is not marked received.")
         return redirect(url_for("admin.panel"))
 
     recipient = (booking.get("email") or "").strip()
@@ -1704,30 +1643,24 @@ def send_payment_reminder(service_key, booking_id):
     conn.close()
 
     billed = _money(booking.get("total_billed") or booking.get("grand_total"))
-    received = _money(booking.get("amount_received"))
-    balance = max(Decimal("0.00"), billed - received)
     charge_sheet_id = booking.get("charge_sheet_id") or "not yet issued"
     service_label = table_info[1]
     completion_date = booking.get(table_info[2]) or "not available"
     greeting_name = booking.get("user_name") or "there"
 
     if internal:
-        subject = f"Reminder {reminder_number}: debit-head documents for {charge_sheet_id}"
+        subject = f"Reminder {reminder_number}: debit-head settlement for {charge_sheet_id}"
         message = (
             f"Dear {greeting_name},\n\n"
-            "I hope you are doing well. This is a gentle reminder regarding the "
-            "completed service below. When convenient, could you please share the "
-            "debit-head document, duly signed by your PI, along with the charge "
-            "sheet at your earliest convenience?\n\n"
+            "This is a gentle reminder that the bill below is awaiting debit-head "
+            "settlement. Please let us know once it has been processed.\n\n"
         )
     else:
-        subject = f"Reminder {reminder_number}: payment details for {charge_sheet_id}"
+        subject = f"Reminder {reminder_number}: payment due for {charge_sheet_id}"
         message = (
             f"Dear {greeting_name},\n\n"
-            "I hope you are doing well. This is a gentle reminder regarding the "
-            "completed service below. When convenient, could you please share the "
-            "payment details or proof of payment (for example, the transaction "
-            "reference or receipt) against the charge sheet?\n\n"
+            "This is a gentle reminder that the bill below is awaiting payment. "
+            "Please let us know once the payment has been made.\n\n"
         )
 
     message += (
@@ -1735,11 +1668,9 @@ def send_payment_reminder(service_key, booking_id):
         f"Sample: {booking.get('sample_name') or 'Not provided'}\n"
         f"Completed: {completion_date}\n"
         f"Charge sheet: {charge_sheet_id}\n"
-        f"Amount billed: ₹{billed:,.2f}\n"
-        f"Amount received: ₹{received:,.2f}\n"
-        f"Balance pending: ₹{balance:,.2f}\n\n"
-        "Please let us know if you have already shared these details or need any "
-        "assistance. Thank you for your kind cooperation.\n\n"
+        f"Bill total: ₹{billed:,.2f}\n\n"
+        "If this has already been settled, please disregard this reminder. "
+        "Thank you for your cooperation.\n\n"
         "Warm regards,\n"
         "Cryo-EM Team"
     )
@@ -1815,92 +1746,6 @@ def download_pi_users_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment; filename=users-by-pi.csv"},
     )
-
-
-def _validated_csic_project_form():
-    company_name = request.form.get("company_name", "").strip()
-    year_text = request.form.get("year", "").strip()
-    amount_text = request.form.get("net_amount", "").strip()
-    if not company_name or len(company_name) > 180:
-        flash("Enter a company name of 1 to 180 characters.", "error")
-        return None
-    if not re.fullmatch(r"\d{4}", year_text) or not 1900 <= int(year_text) <= 2100:
-        flash("Enter a valid four-digit year between 1900 and 2100.", "error")
-        return None
-    if not re.fullmatch(r"\d{1,10}(?:\.\d{1,2})?", amount_text):
-        flash("Enter a positive net amount with up to two decimal places.", "error")
-        return None
-
-    amount = Decimal(amount_text)
-    if amount <= 0 or amount > Decimal("9999999999.99"):
-        flash("Net amount must be greater than zero and no more than ₹9,999,999,999.99.", "error")
-        return None
-    return company_name, int(year_text), str(amount.quantize(Decimal("0.01")))
-
-
-@admin_bp.route("/csic-projects", methods=["POST"])
-def add_csic_project():
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
-
-    project = _validated_csic_project_form()
-    if project is None:
-        return redirect(url_for("admin.panel"))
-
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO csic_projects (company_name, year, net_amount) VALUES (?, ?, ?)",
-        project,
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("CSIC project added to revenue and slot usage.", "success")
-    return redirect(url_for("admin.panel"))
-
-
-@admin_bp.route("/csic-projects/<int:project_id>/edit", methods=["POST"])
-def edit_csic_project(project_id):
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
-
-    project = _validated_csic_project_form()
-    if project is None:
-        return redirect(url_for("admin.panel"))
-
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT id FROM csic_projects WHERE id=?", [project_id])
-    if not cur.fetchone():
-        cur.close()
-        conn.close()
-        flash("CSIC project not found.", "error")
-        return redirect(url_for("admin.panel"))
-    cur.execute(
-        "UPDATE csic_projects SET company_name=?, year=?, net_amount=? WHERE id=?",
-        [*project, project_id],
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("CSIC project updated.", "success")
-    return redirect(url_for("admin.panel"))
-
-
-@admin_bp.route("/csic-projects/<int:project_id>/delete", methods=["POST"])
-def delete_csic_project(project_id):
-    if not session.get("admin_logged_in"):
-        return redirect(url_for("admin.login"))
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM csic_projects WHERE id=?", [project_id])
-    deleted = cur.rowcount
-    conn.commit()
-    cur.close()
-    conn.close()
-    flash("CSIC project removed." if deleted else "CSIC project not found.", "success" if deleted else "error")
-    return redirect(url_for("admin.panel"))
 
 
 def _content_url_is_safe(value):
@@ -2151,6 +1996,13 @@ def _parse_date(value):
 
 
 def _revenue_components(row):
+    if (
+        "is_csic" in row.keys()
+        and row["is_csic"]
+        and "csic_final_amount" in row.keys()
+        and row["csic_final_amount"] is not None
+    ):
+        return csic_amount_components(row["csic_final_amount"], row["origin"])
     gst = _money(row["gst_amount"])
     subtotal = _money(row["subtotal"])
     if not subtotal:
@@ -2275,27 +2127,30 @@ def _revenue_dashboard(cur, preset_override=None):
         else:
             month_start = month_start.replace(month=month_start.month + 1)
     rows = []
+    csic_rows = []
     detailed_revenue_years = set()
-    for table, service, service_key in (
-        ("bookings", "Data Collection", "imaging"),
-        ("screening_bookings", "Screening", "screening"),
-    ):
+    for table, service in (("bookings", "Data Collection"), ("screening_bookings", "Screening")):
         cur.execute(
             f"""            SELECT pi_name, origin, completion_date, actual_slots, actual_grids,
                        number_of_grids, slot_charge, freezing_charge, clipping_charge,
                        handling_charge, subtotal, processing_charge, gst_amount,
-                       grand_total, total_billed, amount_received, payment_status,
+                       grand_total, total_billed, payment_status, is_csic,
+                       csic_final_amount,
                        debit_head_status
                 FROM {table}
                 WHERE status='completed'"""
         )
         for row in cur.fetchall():
-            if is_non_billable_booking(row, service_key):
+            if is_non_billable_booking(row):
                 continue
             completion_date = _parse_date(str(row["completion_date"])[:10])
             if not completion_date:
                 continue
             detailed_revenue_years.add(completion_date.year)
+            if is_csic_booking(row):
+                if not ((start and completion_date < start) or (end and completion_date > end)):
+                    csic_rows.append((row, completion_date))
+                continue
             net_revenue = _revenue_components(row)[0]
             if comparison_start <= completion_date <= comparison_end:
                 key = completion_date.strftime("%Y-%m")
@@ -2312,17 +2167,21 @@ def _revenue_dashboard(cur, preset_override=None):
         """SELECT pi_name, origin, completed_at AS completion_date, NULL AS actual_slots,
                   actual_grids, number_of_grids, slot_charge, freezing_charge, clipping_charge,
                   handling_charge, subtotal, processing_charge, gst_amount,
-                  grand_total, total_billed, amount_received, payment_status,
-                  debit_head_status
+                  grand_total, total_billed, payment_status, is_csic,
+                  csic_final_amount, debit_head_status
            FROM completed_freezing"""
     )
     for row in cur.fetchall():
-        if is_non_billable_booking(row, "freezing"):
+        if is_non_billable_booking(row):
             continue
         completion_date = _parse_date(str(row["completion_date"])[:10])
         if not completion_date:
             continue
         detailed_revenue_years.add(completion_date.year)
+        if is_csic_booking(row):
+            if not ((start and completion_date < start) or (end and completion_date > end)):
+                csic_rows.append((row, completion_date))
+            continue
         net_revenue = _revenue_components(row)[0]
         if comparison_start <= completion_date <= comparison_end:
             key = completion_date.strftime("%Y-%m")
@@ -2337,7 +2196,6 @@ def _revenue_dashboard(cur, preset_override=None):
         rows.append((row, "Freezing", completion_date))
 
     cur.execute("SELECT id, company_name, year, net_amount FROM csic_projects ORDER BY year DESC, company_name, id")
-    csic_projects = []
     report_csic_projects = []
     for project in cur.fetchall():
         project_year = int(project["year"])
@@ -2347,7 +2205,6 @@ def _revenue_dashboard(cur, preset_override=None):
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         project["gross_amount"] = project["net_amount"] + project["gst_amount"]
-        csic_projects.append(project)
         if (start and project_year < start.year) or (end and project_year > end.year):
             continue
         report_csic_projects.append(project)
@@ -2357,13 +2214,13 @@ def _revenue_dashboard(cur, preset_override=None):
         "billed": Decimal("0"), "received": Decimal("0"), "outstanding": Decimal("0"),
         "slots": Decimal("0"), "grids": Decimal("0"),
         "csic_net": Decimal("0"), "csic_gst": Decimal("0"),
-        "csic_gross": Decimal("0"), "csic_slots": Decimal("0"),
+        "csic_gross": Decimal("0"),
     }
     by_category = {"Internal": Decimal("0"), "External/Academic": Decimal("0"), "Industrial": Decimal("0")}
     by_service = {"Data Collection": Decimal("0"), "Screening": Decimal("0"),
                   "Freezing": Decimal("0"), "Clipping": Decimal("0"),
                   "Handling Charge": Decimal("0"), "Data Processing": Decimal("0"),
-                  "CSIC Projects": Decimal("0")}
+                  "CSIC Revenue": Decimal("0")}
     monthly = {}
     for row, service, completion_date in rows:
         slot = _money(row["slot_charge"])
@@ -2376,20 +2233,7 @@ def _revenue_dashboard(cur, preset_override=None):
         totals["gst"] += gst
         totals["gross"] += gross
         billed = _money(row["total_billed"] or gross)
-        recorded_received = row["amount_received"]
-        payment_status = (row["payment_status"] or "").strip().casefold()
-        debit_head_status = (row["debit_head_status"] or "").strip().casefold()
-        internal_verified = (
-            (row["origin"] or "").strip().casefold() == "internal"
-            and debit_head_status == "debit head verified"
-        )
-        received = _money(
-            recorded_received
-            if recorded_received is not None
-            else billed
-            if payment_status == "payment verified" or internal_verified
-            else 0
-        )
+        received = billed if is_payment_received_booking(row) else Decimal("0.00")
         totals["billed"] += billed
         totals["received"] += received
         totals["outstanding"] += max(billed - received, Decimal("0"))
@@ -2412,6 +2256,18 @@ def _revenue_dashboard(cur, preset_override=None):
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += net
         monthly[period_key]["slots"] += Decimal(str(row["actual_slots"] or 0))
+
+    for row, completion_date in csic_rows:
+        net, gst, gross = _revenue_components(row)
+        totals["csic_net"] += net
+        totals["csic_gst"] += gst
+        totals["csic_gross"] += gross
+        slots = Decimal(str(row["actual_slots"] or 1))
+        totals["slots"] += slots
+        totals["grids"] += Decimal(
+            str(row["number_of_grids"] or row["actual_grids"] or 0)
+        )
+        by_service["CSIC Revenue"] += net
 
     for month, amount in HISTORICAL_REVENUE:
         historical_year = int(month[:4])
@@ -2456,16 +2312,10 @@ def _revenue_dashboard(cur, preset_override=None):
     for project in report_csic_projects:
         net = _money(project["net_amount"])
         gst = project["gst_amount"]
-        totals["net"] += net
-        totals["gst"] += gst
-        totals["gross"] += net + gst
         totals["csic_net"] += net
         totals["csic_gst"] += gst
         totals["csic_gross"] += net + gst
-        totals["slots"] += Decimal("1")
-        totals["csic_slots"] += Decimal("1")
-        by_category["Industrial"] += net
-        by_service["CSIC Projects"] += net
+        by_service["CSIC Revenue"] += net
 
     monthly_items = [
         {"label": key, "value": values["net"].quantize(Decimal("0.01")),
@@ -2546,7 +2396,6 @@ def _revenue_dashboard(cur, preset_override=None):
         "by_category": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_category.items()],
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
-        "csic_projects": csic_projects,
         "year_comparison": {
             "current_year": current_period_label,
             "previous_year": previous_period_label,
@@ -2679,15 +2528,30 @@ def complete_dc(booking_id):
 
     actual_slots = request.form.get("actual_slots", "").strip()
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_source = request.form.get("grid_source", "").strip()
+    grid_type = request.form.get("grid_type", "").strip()
+    normal_grids = request.form.get("normal_grids", "").strip() or None
+    gold_grids = request.form.get("gold_grids", "").strip() or None
+    processing_requested = request.form.get("processing_requested") == "1"
+    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
+    if not grid_source:
+        flash("Please select the grid source before generating the bill.")
+        return redirect(url_for("admin.datacollecting"))
+    if not grid_type and not (normal_grids or gold_grids) and grid_source.casefold() in {"facility", "facility provided"}:
+        flash("Please select the grid type for facility-provided grids.")
+        return redirect(url_for("admin.datacollecting"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.datacollecting"))
+    user_category = request.form.get("user_category", "").strip() or None
+    service_stage = request.form.get("service_stage", "").strip() or "Data Collection"
+    if service_stage != "Data Collection":
+        flash("This booking can only be completed as Data Collection.")
+        return redirect(url_for("admin.datacollecting"))
     try:
         actual_slots_value = Decimal(actual_slots)
-        if (
-            actual_slots_value <= 0
-            or actual_slots_value != actual_slots_value.to_integral_value()
-        ):
+        if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
+                ):
             raise ValueError
     except (InvalidOperation, ValueError):
         flash("Actual slots must be positive and grids must be a positive integer.")
@@ -2696,6 +2560,13 @@ def complete_dc(booking_id):
         actual_grids_value = parse_number_of_grids(actual_grids)
     except ValueError:
         flash("Number of grids must be at least 1.")
+        return redirect(url_for("admin.datacollecting"))
+    try:
+        clipped_grids_value = int(clipped_grids)
+        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
+            raise ValueError
+    except ValueError:
+        flash("Clipped grids must be zero or no more than the actual grids.")
         return redirect(url_for("admin.datacollecting"))
 
     conn = get_db()
@@ -2711,6 +2582,18 @@ def complete_dc(booking_id):
         cur.close()
         conn.close()
         flash("That data collection booking is no longer ongoing.")
+        return redirect(url_for("admin.datacollecting"))
+    try:
+        charges = calculate_booking_revenue(
+            booking, actual_slots_value, actual_grids_value, processing_requested,
+            grid_source, grid_type, "Data Collection", user_category,
+            clipped_grids_value,
+        )
+    except ValueError as exc:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash(str(exc))
         return redirect(url_for("admin.datacollecting"))
     try:
         complete_booking_grid_moves(
@@ -2729,17 +2612,21 @@ def complete_dc(booking_id):
         raise
     cur.execute(
         """UPDATE bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, number_of_grids=?,
-           service_stage='Data Collection', grid_source=NULL, grid_type=NULL,
-           grid_charge=0, handling_charge=0, clip_base_charge=0, slot_charge=0,
-           freezing_charge=0, clipping_charge=0, processing_charge=0, subtotal=0,
-           gst_amount=0, grand_total=0, clipped_grids=0, total_billed=0,
-           processing_requested=0, bill_generated_at=NULL
+           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
+           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
+           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           clipped_grids=?,
+           total_billed=?, processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
            WHERE id=?""",
-        (
-            datetime.date.today(), str(actual_slots_value), actual_grids_value,
-            actual_grids_value, booking_id,
-        ),
+        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
+         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
+         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
+         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
+         str(charges["total_billed"]),
+         int(processing_requested), booking_id),
     )
     cur.execute("SELECT * FROM bookings WHERE id=?", [booking_id])
     reg = cur.fetchone()
@@ -2966,29 +2853,58 @@ def load_sc(booking_id):
 
 @admin_bp.route("/screening/complete/<int:booking_id>", methods=["POST"])
 def complete_sc(booking_id):
+    expects_json = request.accept_mimetypes.best == "application/json"
+
+    def fail(message):
+        if expects_json:
+            return jsonify({"error": message}), 400
+        flash(message)
+        return redirect(url_for("admin.screening_admin"))
+
     if not session.get("admin_logged_in"):
+        if expects_json:
+            return jsonify({"error": "Your admin session has expired. Please sign in again."}), 401
         return redirect(url_for("admin.login"))
 
     actual_slots = request.form.get("actual_slots", "").strip()
     actual_grids = (request.form.get("actual_grids") or request.form.get("number_of_grids", "")).strip()
+    grid_source = request.form.get("grid_source", "").strip()
+    grid_type = request.form.get("grid_type", "").strip()
+    user_category = request.form.get("user_category", "").strip() or None
+    service_stage = request.form.get("service_stage", "").strip() or "Screening / Clipping"
+    is_csic_value = request.form.get("is_csic")
+    if is_csic_value not in {None, "", "1"}:
+        return fail("Invalid CSIC selection.")
+    is_csic = is_csic_value == "1"
+    if service_stage != "Screening / Clipping":
+        return fail("This booking can only be completed as Screening / Clipping.")
+    processing_requested = request.form.get("processing_requested") == "1"
+    clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
+    if not grid_source:
+        return fail("Please select the grid source before generating the bill.")
+    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
+        return fail("Please select the grid type for facility-provided grids.")
     if not actual_slots or not actual_grids:
-        flash("Actual slots and grids are required.")
-        return redirect(url_for("admin.screening_admin"))
+        return fail("Actual slots and grids are required.")
     try:
         actual_slots_value = Decimal(actual_slots)
-        if (
-            actual_slots_value <= 0
-            or actual_slots_value != actual_slots_value.to_integral_value()
-        ):
+        if (actual_slots_value <= 0 or actual_slots_value != actual_slots_value.to_integral_value()
+                ):
             raise ValueError
     except (InvalidOperation, ValueError):
-        flash("Actual slots must be positive and grids must be a positive integer.")
-        return redirect(url_for("admin.screening_admin"))
+        return fail("Actual slots must be a positive integer.")
     try:
         actual_grids_value = parse_number_of_grids(actual_grids)
+        if actual_grids_value > 12:
+            raise ValueError("Actual screening grids must not exceed 12.")
     except ValueError:
-        flash("Number of grids must be at least 1.")
-        return redirect(url_for("admin.screening_admin"))
+        return fail("Actual screening grids must be between 1 and 12.")
+    try:
+        clipped_grids_value = int(clipped_grids)
+        if clipped_grids_value < 0 or clipped_grids_value > actual_grids_value:
+            raise ValueError
+    except ValueError:
+        return fail("Clipped grids must be zero or no more than the actual grids.")
 
     conn = get_db()
     cur = conn.cursor()
@@ -3002,8 +2918,51 @@ def complete_sc(booking_id):
         conn.rollback()
         cur.close()
         conn.close()
-        flash("That screening booking is no longer ongoing.")
-        return redirect(url_for("admin.screening_admin"))
+        return fail("That screening booking is no longer ongoing.")
+    try:
+        charges = calculate_booking_revenue(
+            booking, actual_slots_value, actual_grids_value, processing_requested,
+            grid_source, grid_type, "Screening / Clipping", user_category,
+            clipped_grids_value,
+        )
+    except ValueError as exc:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        return fail(str(exc))
+    csic_final_amount = None
+    csic_original_amount = None
+    csic_discount_reason = None
+    csic_adjustment = None
+    if is_csic:
+        if is_non_billable_booking(booking):
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return fail("This PI is designated non-billable and cannot be moved to CSIC revenue.")
+        try:
+            booking_category = pricing_category(booking["origin"])
+            selected_category = pricing_category(user_category or booking["origin"])
+            if booking_category == "internal" or selected_category != booking_category:
+                raise ValueError("CSIC is available only when the booking category matches its external origin.")
+            csic_final_amount = parse_csic_final_amount(
+                request.form.get("csic_final_amount", "")
+            )
+            csic_original_amount = charges["grand_total"]
+            csic_discount_reason = request.form.get("csic_discount_reason", "").strip()
+            if len(csic_discount_reason) > 500:
+                raise ValueError("The CSIC discount reason must be 500 characters or fewer.")
+            if csic_final_amount < csic_original_amount and not csic_discount_reason:
+                raise ValueError("Enter a reason when the CSIC final amount is lower than the calculated amount.")
+            charges = apply_csic_final_amount(
+                charges, csic_final_amount, booking_category
+            )
+            csic_adjustment = charges["csic_adjustment"]
+        except ValueError as exc:
+            conn.rollback()
+            cur.close()
+            conn.close()
+            return fail(str(exc))
     try:
         complete_booking_grid_moves(
             cur, "screening", booking_id, request.form, session.get("admin_user_id")
@@ -3012,8 +2971,7 @@ def complete_sc(booking_id):
         conn.rollback()
         cur.close()
         conn.close()
-        flash(str(exc))
-        return redirect(url_for("admin.screening_admin"))
+        return fail(str(exc))
     except Exception:
         conn.rollback()
         cur.close()
@@ -3021,34 +2979,70 @@ def complete_sc(booking_id):
         raise
     cur.execute(
         """UPDATE screening_bookings SET status='completed', completion_date=?,
-           actual_slots=?, actual_grids=?, number_of_grids=?,
-           service_stage='Screening / Clipping', grid_source=NULL, grid_type=NULL,
-           grid_charge=0, handling_charge=0, clip_base_charge=0, slot_charge=0,
-           freezing_charge=0, clipping_charge=0, processing_charge=0, subtotal=0,
-           gst_amount=0, grand_total=0, clipped_grids=0, total_billed=0,
-           processing_requested=0, bill_generated_at=NULL
+           actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
+           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
+           processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
+           clipped_grids=?,
+           total_billed=?, is_csic=?, csic_final_amount=?, csic_original_amount=?,
+           csic_discount_reason=?, csic_adjustment=?,
+           processing_requested=?, bill_generated_at=CURRENT_TIMESTAMP
            WHERE id=?""",
-        (
-            datetime.date.today(), str(actual_slots_value), actual_grids_value,
-            actual_grids_value, booking_id,
-        ),
+        (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
+         charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
+         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
+         str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
+         str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
+         str(charges["total_billed"]), int(is_csic),
+         str(csic_final_amount) if csic_final_amount is not None else None,
+         str(csic_original_amount) if csic_original_amount is not None else None,
+         csic_discount_reason,
+         str(csic_adjustment) if csic_adjustment is not None else None,
+         int(processing_requested), booking_id),
     )
+    if is_csic:
+        cur.execute(
+            """INSERT INTO csic_booking_audit
+               (service_key, booking_id, action, calculated_amount, final_amount,
+                discount_reason, changed_by)
+               VALUES (?, ?, 'completion', ?, ?, ?, ?)""",
+            (
+                "screening",
+                booking_id,
+                str(csic_original_amount),
+                str(csic_final_amount),
+                csic_discount_reason or None,
+                session.get("admin_user_id"),
+            ),
+        )
     cur.execute("SELECT * FROM screening_bookings WHERE id=?", [booking_id])
     reg = cur.fetchone()
     conn.commit()
     cur.close()
     conn.close()
 
+    email_warning = None
     if reg:
-        send_email(
-            reg["email"],
-            "Cryo-EM Screening Slot Completed",
-            (
-                f"Dear {reg['user_name']},\n\n"
-                f"Your screening slot is completed. Kindly collect your data.\n\n"
-                f"Cryo-EM Team"
-            ),
-        )
+        try:
+            send_email(
+                reg["email"],
+                "Cryo-EM Screening Slot Completed",
+                (
+                    f"Dear {reg['user_name']},\n\n"
+                    f"Your screening slot is completed. Kindly collect your data.\n\n"
+                    f"Cryo-EM Team"
+                ),
+            )
+        except Exception:
+            current_app.logger.exception(
+                "Screening completion notification failed for booking %s", booking_id
+            )
+            email_warning = "The booking was completed, but the notification email could not be sent."
+    if expects_json:
+        return jsonify({"success": True, "warning": email_warning})
+    if email_warning:
+        flash(email_warning, "warning")
     return redirect(url_for("admin.screening_admin"))
 
 
@@ -3309,20 +3303,12 @@ _CHARGE_SHEET_TABLES = {
     "screening": ("screening_bookings", "Screening", "completion_date"),
     "freezing": ("completed_freezing", "Freezing", "completed_at"),
 }
-_PAYMENT_PROOF_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
-_PAYMENT_PROOF_MIME_TYPES = {
-    "pdf": "application/pdf",
-    "png": "image/png",
-    "jpg": "image/jpeg",
-    "jpeg": "image/jpeg",
-}
-
-
 def _history_rows(rows):
     """Normalize legacy rows so older production records render safely."""
     defaults = {
         "actual_slots": 0,
         "actual_grids": 0,
+        "is_csic": 0,
         "charge_sheet_sent_at": None,
         "grid_source": "",
         "grid_type": "",
@@ -3366,6 +3352,163 @@ def _grid_breakdown(row):
     normal = breakdown.get("normal_holey_carbon")
     gold = breakdown.get("gold_carbon_graphene")
     return (normal or None), (gold or None)
+
+
+@admin_bp.route("/billing/csic/<service_key>/<int:booking_id>", methods=["POST"])
+def set_csic_booking(service_key, booking_id):
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    table_info = _CHARGE_SHEET_TABLES.get(service_key)
+    if not table_info:
+        flash("Unknown booking type.", "error")
+        return redirect(url_for("admin.history"))
+
+    is_csic_value = request.form.get("is_csic")
+    if is_csic_value not in {None, "1"}:
+        flash("Invalid CSIC status.", "error")
+        return redirect(url_for("admin.history"))
+    is_csic = is_csic_value == "1"
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(f"SELECT * FROM {table_info[0]} WHERE id=?", [booking_id])
+    row = cur.fetchone()
+    if not row or (service_key != "freezing" and row["status"] != "completed"):
+        cur.close()
+        conn.close()
+        flash("That completed booking could not be found.", "error")
+        return redirect(url_for("admin.history"))
+    row = dict(row)
+
+    origin = (row["origin"] or "").strip().casefold()
+    if origin not in {
+        "external", "academic", "external academic",
+        "industry", "industrial", "external industry",
+    }:
+        cur.close()
+        conn.close()
+        flash("Only external academic and industry bookings can be switched to CSIC revenue.", "error")
+        return redirect(url_for("admin.history"))
+    if is_csic and is_non_billable_booking(row):
+        cur.close()
+        conn.close()
+        flash("This PI is already designated non-billable.", "error")
+        return redirect(url_for("admin.history"))
+    if row["charge_sheet_sent_at"]:
+        cur.close()
+        conn.close()
+        flash("CSIC status cannot be changed after a charge sheet has been sent.", "error")
+        return redirect(url_for("admin.history"))
+
+    grid_source = row["grid_source"] or ""
+    grid_type = row["grid_type"] or ""
+    normal_grids, gold_grids = _grid_breakdown(row)
+    if not grid_source:
+        cur.close()
+        conn.close()
+        flash("Select the grid source before changing this booking's revenue category.", "error")
+        return redirect(url_for("admin.history"))
+    try:
+        base_charges = calculate_charge_sheet(
+            row["origin"],
+            table_info[1],
+            row["number_of_grids"] or row["actual_grids"] or row["grids"],
+            grid_source,
+            grid_type,
+            row["actual_slots"] or 1,
+            bool(row["processing_requested"]),
+            clipped_grids=row["clipped_grids"] or 0,
+            normal_grids=normal_grids,
+            gold_grids=gold_grids,
+        )
+    except ValueError as exc:
+        cur.close()
+        conn.close()
+        flash(str(exc), "error")
+        return redirect(url_for("admin.history"))
+
+    if is_csic:
+        try:
+            csic_final_amount = parse_csic_final_amount(
+                request.form.get("csic_final_amount", "")
+            )
+            csic_amount_components(csic_final_amount, row["origin"])
+            csic_original_amount = base_charges["grand_total"]
+            csic_discount_reason = request.form.get("csic_discount_reason", "").strip()
+            if len(csic_discount_reason) > 500:
+                raise ValueError("The CSIC discount reason must be 500 characters or fewer.")
+            if csic_final_amount < csic_original_amount and not csic_discount_reason:
+                raise ValueError("Enter a reason when the CSIC final amount is lower than the calculated amount.")
+            base_charges = apply_csic_final_amount(
+                base_charges, csic_final_amount, row["origin"]
+            )
+        except ValueError as exc:
+            cur.close()
+            conn.close()
+            flash(str(exc), "error")
+            return redirect(url_for("admin.history"))
+        total_billed = str(csic_final_amount)
+    else:
+        csic_final_amount = None
+        csic_original_amount = None
+        csic_discount_reason = None
+        total_billed = str(base_charges["total_billed"])
+
+    cur.execute(
+        f"UPDATE {table_info[0]} SET is_csic=?, csic_final_amount=?, "
+        "csic_original_amount=?, csic_discount_reason=?, csic_adjustment=?, "
+        "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
+        "freezing_charge=?, clipping_charge=?, processing_charge=?, subtotal=?, "
+        "gst_amount=?, grand_total=?, total_billed=? "
+        "WHERE id=? AND charge_sheet_sent_at IS NULL",
+        [
+            int(is_csic),
+            str(csic_final_amount) if csic_final_amount is not None else None,
+            str(csic_original_amount) if csic_original_amount is not None else None,
+            csic_discount_reason,
+            str(base_charges["csic_adjustment"]) if is_csic else None,
+            str(base_charges["grid_charge"]),
+            str(base_charges["handling_charge"]),
+            str(base_charges["clip_base_charge"]),
+            str(base_charges["slot_charge"]),
+            str(base_charges["freezing_charge"]),
+            str(base_charges["clipping_charge"]),
+            str(base_charges["processing_charge"]),
+            str(base_charges["subtotal"]),
+            str(base_charges.get("gst_amount", base_charges.get("gst", 0))),
+            str(base_charges["grand_total"]),
+            total_billed,
+            booking_id,
+        ],
+    )
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("CSIC status could not be changed.", "error")
+        return redirect(url_for("admin.history"))
+    cur.execute(
+        """INSERT INTO csic_booking_audit
+           (service_key, booking_id, action, calculated_amount, final_amount,
+            discount_reason, changed_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            service_key,
+            booking_id,
+            "moved_to_csic" if is_csic else "returned_to_regular",
+            str(csic_original_amount) if csic_original_amount is not None else str(base_charges["grand_total"]),
+            str(csic_final_amount) if csic_final_amount is not None else None,
+            csic_discount_reason,
+            session.get("admin_user_id"),
+        ),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+    flash(
+        "Booking moved to CSIC revenue." if is_csic else "Booking returned to regular billing.",
+        "success",
+    )
+    return redirect(url_for("admin.history"))
 
 
 def _charge_sheet_record(service_key, booking_id):
@@ -3444,11 +3587,6 @@ def edit_completed_booking(service_key, booking_id):
         cur.close()
         conn.close()
         flash("That completed booking could not be found.")
-        return redirect(url_for("admin.history"))
-    if is_non_billable_booking(row, service_key):
-        cur.close()
-        conn.close()
-        flash("Non-billable bookings cannot be edited from billing history.")
         return redirect(url_for("admin.history"))
     if row["charge_sheet_sent_at"]:
         cur.close()
@@ -3541,13 +3679,36 @@ def edit_completed_booking(service_key, booking_id):
         return redirect(url_for("admin.history"))
 
     updated.update(charges)
+    keep_csic = is_csic_booking(row)
+    csic_final_amount = row["csic_final_amount"]
+    if (
+        keep_csic
+        and (
+            origin.casefold() == "internal"
+            or is_non_billable_booking(updated)
+        )
+    ):
+        keep_csic = False
+        csic_final_amount = None
     if is_non_billable_booking(updated):
+        keep_csic = False
+        csic_final_amount = None
         for field in (
             "grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
             "processing_charge", "subtotal", "gst", "gst_amount", "grand_total",
             "total_billed", "freezing_charge", "clipping_charge",
         ):
             updated[field] = Decimal("0.00")
+    elif keep_csic and csic_final_amount is not None:
+        try:
+            csic_amount_components(csic_final_amount, origin)
+        except ValueError as exc:
+            cur.close()
+            conn.close()
+            flash(str(exc))
+            return redirect(url_for("admin.history"))
+        updated["grand_total"] = parse_csic_final_amount(csic_final_amount)
+        updated["total_billed"] = parse_csic_final_amount(csic_final_amount)
 
     values = {
         "user_name": updated["user_name"],
@@ -3571,6 +3732,8 @@ def edit_completed_booking(service_key, booking_id):
         "gst_amount": str(updated["gst_amount"]),
         "grand_total": str(updated["grand_total"]),
         "total_billed": str(updated["total_billed"]),
+        "is_csic": int(keep_csic),
+        "csic_final_amount": str(csic_final_amount) if csic_final_amount is not None else None,
         "processing_requested": int(processing_requested),
         "clipped_grids": int(clipped_grids) if service_key != "freezing" else 0,
         "bill_generated_at": datetime.datetime.now().isoformat(sep=" ", timespec="seconds"),
@@ -3681,8 +3844,8 @@ def send_charge_sheet(service_key, booking_id):
 
 
     row = dict(row)
-    if is_non_billable_booking(row, service_key):
-        flash("Charge sheets are not applicable for this non-billable booking.")
+    if not is_billable_booking(row):
+        flash("Charge sheets are not applicable for this booking.")
         return redirect(url_for("admin.history"))
     # Recalculate immediately before rendering/sending.  Stored totals and
     # browser values are never treated as the financial source of truth.
@@ -3706,7 +3869,15 @@ def send_charge_sheet(service_key, booking_id):
     except ValueError as exc:
         flash(str(exc))
         return redirect(url_for("admin.history"))
-    row.update(charges)
+    invoice_charges = charges
+    csic_original_amount = None
+    if is_csic_booking(row) and row.get("csic_final_amount") is not None:
+        csic_original_amount = charges["grand_total"]
+        invoice_charges = apply_csic_final_amount(
+            charges, row["csic_final_amount"], row["origin"]
+        )
+    charges = invoice_charges
+    row.update(invoice_charges)
     pi_email = request.form.get("pi_email", "").strip()
     if pi_email and not _valid_email(pi_email):
         flash("Enter a valid PI email address.")
@@ -3760,7 +3931,8 @@ def send_charge_sheet(service_key, booking_id):
         "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
         "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
         "freezing_charge=?, clipping_charge=?, processing_charge=?, subtotal=?, "
-        "gst_amount=?, grand_total=?, total_billed=?, charge_sheet_id=?, "
+        "gst_amount=?, grand_total=?, total_billed=?, csic_adjustment=?, "
+        "csic_original_amount=COALESCE(csic_original_amount, ?), charge_sheet_id=?, "
         "bill_generated_at=CURRENT_TIMESTAMP "
         "WHERE id=?".format(_CHARGE_SHEET_TABLES[service_key][0]),
         [charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
@@ -3768,7 +3940,10 @@ def send_charge_sheet(service_key, booking_id):
          str(charges["clip_base_charge"]), str(charges["slot_charge"]),
          str(charges["freezing_charge"]), str(charges["clipping_charge"]),
          str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
-         str(charges["grand_total"]), str(charges["total_billed"]), charge_sheet_id, booking_id],
+         str(charges["grand_total"]), str(charges["total_billed"]),
+         str(charges.get("csic_adjustment")) if is_csic_booking(row) else None,
+         str(csic_original_amount) if csic_original_amount is not None else None,
+         charge_sheet_id, booking_id],
     )
     if pi_email:
         cur.execute(
@@ -3800,8 +3975,8 @@ def preview_charge_sheet(service_key, booking_id):
         flash("That completed booking could not be found.")
         return redirect(url_for("admin.history"))
     row = dict(row)
-    if is_non_billable_booking(row, service_key):
-        flash("Charge sheets are not applicable for this non-billable booking.")
+    if not is_billable_booking(row):
+        flash("Charge sheets are not applicable for this booking.")
         return redirect(url_for("admin.history"))
     grid_source = row.get("grid_source") or request.form.get("grid_source", "").strip()
     grid_type = row.get("grid_type") or request.form.get("grid_type", "").strip()
@@ -3823,7 +3998,12 @@ def preview_charge_sheet(service_key, booking_id):
     except ValueError as exc:
         flash(str(exc))
         return redirect(url_for("admin.history"))
-    row.update(charges)
+    invoice_charges = charges
+    if is_csic_booking(row) and row.get("csic_final_amount") is not None:
+        invoice_charges = apply_csic_final_amount(
+            charges, row["csic_final_amount"], row["origin"]
+        )
+    row.update(invoice_charges)
     row["grid_source"] = grid_source
     row["grid_type"] = grid_type
     row["charge_sheet_id"] = row.get("charge_sheet_id") or f"PREVIEW-{service_key.upper()}-{booking_id}"
@@ -3862,14 +4042,14 @@ def send_combined_charge_sheet():
             if not row or (service_key != "freezing" and row["status"] != "completed"):
                 raise ValueError("One of the selected slots is no longer completed.")
             row = dict(row)
-            if is_non_billable_booking(row, service_key):
+            if not is_billable_booking(row):
                 raise ValueError("Only billable slots can be combined.")
             grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
             grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
             normal_grids, gold_grids = _grid_breakdown(row)
             if not grid_source:
                 raise ValueError("Select a grid source for every selected slot.")
-            row.update(calculate_charge_sheet(
+            charges = calculate_charge_sheet(
                 row.get("origin", ""), table_info[1],
                 row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
                 grid_source, grid_type, row.get("actual_slots") or 1,
@@ -3877,7 +4057,12 @@ def send_combined_charge_sheet():
                 clipped_grids=row.get("clipped_grids") or 0,
                 normal_grids=normal_grids,
                 gold_grids=gold_grids,
-            ))
+            )
+            if is_csic_booking(row) and row.get("csic_final_amount") is not None:
+                charges = apply_csic_final_amount(
+                    charges, row["csic_final_amount"], row["origin"]
+                )
+            row.update(charges)
             row["combined_service"] = table_info[1]
             items.append((service_key, booking_id, row))
     except (KeyError, TypeError, ValueError) as exc:
@@ -3937,68 +4122,68 @@ def update_payment(service_key, booking_id):
     table = table_info[0]
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(f"SELECT * FROM {table} WHERE id=?", [booking_id])
+    cur.execute(
+        f"""SELECT pi_name, is_csic, origin, charge_sheet_sent_at,
+                   payment_status, debit_head_status
+            FROM {table} WHERE id=?""",
+        [booking_id],
+    )
     booking = cur.fetchone()
-    if booking and is_non_billable_booking(booking, service_key):
+    if not booking:
         cur.close()
         conn.close()
-        flash("Payment tracking is not available for non-billable bookings.")
+        flash("That booking could not be found.")
         return redirect(url_for("admin.history"))
-    cur.close()
-    conn.close()
+    if not is_billable_booking(booking):
+        cur.close()
+        conn.close()
+        flash("This booking is not part of regular billing.")
+        return redirect(url_for("admin.history"))
+    if not booking["charge_sheet_sent_at"]:
+        cur.close()
+        conn.close()
+        flash("Generate and send the bill before marking payment received.")
+        return redirect(url_for("admin.history"))
 
-    origin = request.form.get("origin", "").strip().casefold()
+    origin = (booking["origin"] or "").strip().casefold()
     internal = origin == "internal"
-    status = request.form.get("status", "").strip()
-    allowed = (
-        {"Debit Head Pending", "Debit Head Received", "Debit Head Verified"}
-        if internal else
-        {"Payment Pending", "Payment Proof Received", "Payment Verified", "Payment Rejected"}
-    )
-    if status not in allowed:
+    received_value = request.form.get("payment_received")
+    if received_value not in {None, "1"}:
+        cur.close()
+        conn.close()
         flash("Invalid payment status.")
         return redirect(url_for("admin.history"))
-    proof = request.files.get("payment_proof")
-    proof_path = None
-    proof_name = None
-    if proof and proof.filename:
-        safe_name = secure_filename(proof.filename)
-        extension = safe_name.rsplit(".", 1)[-1].lower() if "." in safe_name else ""
-        if not safe_name or extension not in _PAYMENT_PROOF_EXTENSIONS:
-            flash("Payment proof must be a PDF, PNG, JPG, or JPEG file.")
-            return redirect(url_for("admin.history"))
-        if proof.mimetype != _PAYMENT_PROOF_MIME_TYPES[extension]:
-            flash("The payment proof file type does not match its extension.")
-            return redirect(url_for("admin.history"))
-        proof_directory = current_app.config["PAYMENT_PROOF_DIR"]
-        os.makedirs(proof_directory, mode=0o700, exist_ok=True)
-        proof_name = safe_name
-        proof_path = f"{uuid.uuid4().hex}.{extension}"
-        proof.save(os.path.join(proof_directory, proof_path))
-    conn = get_db()
-    cur = conn.cursor()
+    received = received_value == "1"
+    status = (
+        "Debit Head Verified" if received else "Debit Head Pending"
+    ) if internal else (
+        "Payment Verified" if received else "Payment Pending"
+    )
     if internal:
         cur.execute(
-            f"UPDATE {table} SET debit_head_status=?, debit_head_details=?, admin_remarks=? WHERE id=?",
-            [status, request.form.get("debit_head_details", "").strip(),
-             request.form.get("admin_remarks", "").strip(), booking_id],
+            f"""UPDATE {table} SET debit_head_status=?
+                WHERE id=? AND charge_sheet_sent_at IS NOT NULL""",
+            [status, booking_id],
         )
     else:
         cur.execute(
-            f"""UPDATE {table} SET payment_status=?, transaction_reference=?, transaction_date=?,
-               amount_received=?, payment_mode=?, proof_received_date=?, payment_proof_path=?,
-               payment_proof_original_name=?, admin_remarks=? WHERE id=?""",
-            [status, request.form.get("transaction_reference", "").strip(),
-             request.form.get("transaction_date") or None,
-             request.form.get("amount_received") or None,
-             request.form.get("payment_mode", "").strip(),
-             request.form.get("proof_received_date") or None,
-             proof_path, proof_name, request.form.get("admin_remarks", "").strip(), booking_id],
+            f"""UPDATE {table} SET payment_status=?
+                WHERE id=? AND charge_sheet_sent_at IS NOT NULL""",
+            [status, booking_id],
         )
+    if cur.rowcount != 1:
+        conn.rollback()
+        cur.close()
+        conn.close()
+        flash("Payment status could not be updated. Confirm that the bill has been sent.")
+        return redirect(url_for("admin.history"))
     conn.commit()
     cur.close()
     conn.close()
-    flash("Payment tracking details updated.")
+    flash(
+        "Payment marked received." if received else "Payment marked pending.",
+        "success",
+    )
     return redirect(url_for("admin.history"))
 
 
@@ -4012,13 +4197,10 @@ def download_payment_proof(service_key, booking_id):
         return redirect(url_for("admin.history"))
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(f"SELECT * FROM {table_info[0]} WHERE id=?", [booking_id])
+    cur.execute(f"SELECT payment_proof_path, payment_proof_original_name FROM {table_info[0]} WHERE id=?", [booking_id])
     row = cur.fetchone()
     cur.close()
     conn.close()
-    if row and is_non_billable_booking(row, service_key):
-        flash("Payment proof is not applicable for non-billable bookings.")
-        return redirect(url_for("admin.history"))
     if not row or not row["payment_proof_path"]:
         flash("No payment proof is stored for this booking.")
         return redirect(url_for("admin.history"))
@@ -4046,6 +4228,39 @@ def history():
         "SELECT * FROM screening_bookings WHERE status='completed' ORDER BY completion_date DESC"
     )
     completed_screening = _history_rows(cur.fetchall())
+    csic_audit = {}
+    for service_key, rows in (
+        ("data_collection", completed_imaging),
+        ("freezing", completed_freezing),
+        ("screening", completed_screening),
+    ):
+        booking_ids = [
+            row["id"] for row in rows if is_csic_booking(row)
+        ]
+        for offset in range(0, len(booking_ids), 500):
+            batch = booking_ids[offset:offset + 500]
+            placeholders = ", ".join("?" for _ in batch)
+            cur.execute(
+                f"""SELECT a.booking_id, a.action, a.calculated_amount, a.final_amount,
+                           a.discount_reason, a.changed_at, u.username
+                    FROM csic_booking_audit a
+                    LEFT JOIN users u ON u.id=a.changed_by
+                    WHERE a.service_key=? AND a.booking_id IN ({placeholders})
+                    ORDER BY a.changed_at DESC, a.audit_id DESC""",
+                [service_key, *batch],
+            )
+            for audit in cur.fetchall():
+                csic_audit.setdefault(
+                    (service_key, audit["booking_id"]), []
+                ).append(dict(audit))
+    for service_key, rows in (
+        ("data_collection", completed_imaging),
+        ("freezing", completed_freezing),
+        ("screening", completed_screening),
+    ):
+        for row in rows:
+            row["csic_audit"] = csic_audit.get((service_key, row["id"]), [])
+            row["payment_received"] = is_payment_received_booking(row)
     cur.close()
     conn.close()
 
@@ -4056,4 +4271,6 @@ def history():
         completed_screening=completed_screening,
         charge_sheet_tables=_CHARGE_SHEET_TABLES,
         is_non_billable_booking=is_non_billable_booking,
+        is_csic_booking=is_csic_booking,
+        is_billable_booking=is_billable_booking,
     )

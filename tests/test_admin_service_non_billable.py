@@ -11,7 +11,7 @@ from blueprints.admin import _revenue_dashboard
 from main import create_app
 
 
-class AdminServiceNonBillableTests(unittest.TestCase):
+class AdminServiceBillingTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         db_path = os.path.join(self.temp_dir.name, "non-billable-services.sqlite3")
@@ -51,7 +51,7 @@ class AdminServiceNonBillableTests(unittest.TestCase):
             conn.close()
         return booking_id
 
-    def test_screening_and_data_collection_complete_without_billing_fields(self):
+    def test_screening_and_data_collection_do_not_complete_without_billing_fields(self):
         screening_id = self._insert_ongoing_booking(
             "screening_bookings", "screening@example.test"
         )
@@ -60,15 +60,14 @@ class AdminServiceNonBillableTests(unittest.TestCase):
         )
         token = self._csrf_token()
 
-        with patch("blueprints.admin.send_email"):
-            screening_response = self.client.post(
-                f"/admin/screening/complete/{screening_id}",
-                data={"_csrf_token": token, "actual_slots": "2", "actual_grids": "3"},
-            )
-            data_collection_response = self.client.post(
-                f"/admin/datacollecting/complete/{data_collection_id}",
-                data={"_csrf_token": token, "actual_slots": "2", "actual_grids": "3"},
-            )
+        screening_response = self.client.post(
+            f"/admin/screening/complete/{screening_id}",
+            data={"_csrf_token": token, "actual_slots": "2", "actual_grids": "3"},
+        )
+        data_collection_response = self.client.post(
+            f"/admin/datacollecting/complete/{data_collection_id}",
+            data={"_csrf_token": token, "actual_slots": "2", "actual_grids": "3"},
+        )
 
         self.assertEqual(screening_response.status_code, 302)
         self.assertEqual(data_collection_response.status_code, 302)
@@ -86,20 +85,22 @@ class AdminServiceNonBillableTests(unittest.TestCase):
                         FROM {table} WHERE id=?""",
                     [booking_id],
                 ).fetchone()
-                self.assertEqual(row["status"], "completed")
-                self.assertEqual(Decimal(str(row["actual_slots"])), Decimal("2"))
-                self.assertEqual(row["actual_grids"], 3)
-                self.assertEqual(row["number_of_grids"], 3)
+                self.assertEqual(row["status"], "ongoing")
+                self.assertIsNone(row["actual_slots"])
+                self.assertIsNone(row["actual_grids"])
+                self.assertIsNone(row["number_of_grids"])
                 self.assertIsNone(row["grid_source"])
                 for field in (
                     "grid_charge", "slot_charge", "subtotal", "gst_amount",
                     "grand_total", "total_billed",
                 ):
-                    self.assertEqual(Decimal(str(row[field])), Decimal("0"))
+                    self.assertTrue(
+                        row[field] is None or Decimal(str(row[field])) == Decimal("0")
+                    )
                 self.assertIsNone(row["bill_generated_at"])
             conn.close()
 
-    def test_completed_screening_and_data_collection_records_have_no_billing_actions(self):
+    def test_completed_screening_and_data_collection_records_are_billable(self):
         screening_id = self._insert_ongoing_booking(
             "screening_bookings", "screening@example.test"
         )
@@ -125,31 +126,35 @@ class AdminServiceNonBillableTests(unittest.TestCase):
         token = self._csrf_token()
         page = self.client.get("/admin/history")
         self.assertEqual(page.status_code, 200)
-        self.assertIn(b"Completed \xe2\x80\x94 non-billable", page.data)
-        self.assertNotIn(b"Generate &amp; Send", page.data)
-        self.assertNotIn(b'<input type="checkbox" data-slot-select', page.data)
+        self.assertNotIn(b"Completed \xe2\x80\x94 non-billable", page.data)
+        self.assertIn(f'data-booking-id="{screening_id}"'.encode(), page.data)
+        self.assertIn(f'data-booking-id="{data_collection_id}"'.encode(), page.data)
 
         with patch("blueprints.admin.send_email") as send_email:
-            send_response = self.client.post(
-                f"/admin/charge-sheet/imaging/{data_collection_id}",
-                data={"_csrf_token": token, "grid_source": "facility"},
+            screening_response = self.client.post(
+                f"/admin/charge-sheet/screening/{screening_id}",
+                data={
+                    "_csrf_token": token,
+                    "grid_source": "facility",
+                    "grid_type": "normal_holey_carbon",
+                },
             )
-            preview_response = self.client.post(
-                f"/admin/charge-sheet/screening/{screening_id}/preview",
-                data={"_csrf_token": token, "grid_source": "facility"},
+            data_collection_response = self.client.post(
+                f"/admin/charge-sheet/imaging/{data_collection_id}",
+                data={
+                    "_csrf_token": token,
+                    "grid_source": "facility",
+                    "grid_type": "normal_holey_carbon",
+                },
             )
             payment_response = self.client.post(
                 f"/admin/payment/imaging/{data_collection_id}",
-                data={
-                    "_csrf_token": token,
-                    "origin": "academic",
-                    "status": "Payment Verified",
-                },
+                data={"_csrf_token": token, "payment_received": "1"},
             )
-        self.assertEqual(send_response.status_code, 302)
-        self.assertEqual(preview_response.status_code, 302)
+        self.assertEqual(screening_response.status_code, 302)
+        self.assertEqual(data_collection_response.status_code, 302)
         self.assertEqual(payment_response.status_code, 302)
-        send_email.assert_not_called()
+        self.assertEqual(send_email.call_count, 2)
 
         with self.app.app_context():
             conn = database.get_db()
@@ -159,13 +164,20 @@ class AdminServiceNonBillableTests(unittest.TestCase):
                    FROM bookings WHERE id=?""",
                 [data_collection_id],
             ).fetchone()
-            self.assertEqual(Decimal(str(row["total_billed"])), Decimal("1234"))
-            self.assertEqual(Decimal(str(row["grand_total"])), Decimal("1234"))
-            self.assertEqual(row["payment_status"], "Payment Pending")
-            self.assertIsNone(row["charge_sheet_sent_at"])
+            self.assertGreater(Decimal(str(row["total_billed"])), Decimal("0"))
+            self.assertGreater(Decimal(str(row["grand_total"])), Decimal("0"))
+            self.assertEqual(row["payment_status"], "Payment Verified")
+            self.assertIsNotNone(row["charge_sheet_sent_at"])
+            screening = conn.execute(
+                """SELECT total_billed, charge_sheet_sent_at
+                   FROM screening_bookings WHERE id=?""",
+                [screening_id],
+            ).fetchone()
+            self.assertGreater(Decimal(str(screening["total_billed"])), Decimal("0"))
+            self.assertIsNotNone(screening["charge_sheet_sent_at"])
             conn.close()
 
-    def test_revenue_dashboard_excludes_all_screening_and_data_collection_records(self):
+    def test_revenue_dashboard_includes_screening_and_data_collection_records(self):
         today = datetime.date.today()
         start = today.replace(day=1).isoformat()
         end = today.isoformat()
@@ -192,13 +204,13 @@ class AdminServiceNonBillableTests(unittest.TestCase):
                     )
                 conn.commit()
                 after = _revenue_dashboard(cur)["totals"]
-                self.assertEqual(after["net"], baseline["net"])
-                self.assertEqual(after["gross"], baseline["gross"])
-                self.assertEqual(after["billed"], baseline["billed"])
+                self.assertEqual(after["net"], baseline["net"] + Decimal("2468"))
+                self.assertEqual(after["gross"], baseline["gross"] + Decimal("2468"))
+                self.assertEqual(after["billed"], baseline["billed"] + Decimal("2468"))
                 cur.close()
                 conn.close()
 
-    def test_admin_billing_preview_rejects_screening_and_data_collection(self):
+    def test_admin_billing_preview_accepts_screening_and_data_collection(self):
         token = self._csrf_token()
         for stage in ("Screening / Clipping", "Data Collection"):
             response = self.client.post(
@@ -212,11 +224,8 @@ class AdminServiceNonBillableTests(unittest.TestCase):
                     "grid_type": "normal_holey_carbon",
                 },
             )
-            self.assertEqual(response.status_code, 400)
-            self.assertEqual(
-                response.get_json()["error"],
-                "Screening and data collection are not billed here.",
-            )
+            self.assertEqual(response.status_code, 200)
+            self.assertGreater(Decimal(response.get_json()["total_billed"]), Decimal("0"))
 
 
 if __name__ == "__main__":

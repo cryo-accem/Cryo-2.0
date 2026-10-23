@@ -38,10 +38,11 @@
                   <summary><span>{{ box }}</span><span>{{ box_grids|length }} grid(s)</span></summary>
                   <div class="inventory-storage-positions">
                     {% for grid in box_grids %}
-                      <div class="inventory-storage-position" role="group" aria-label="Position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.researcher_name }}, {{ grid.status_label }}">
-                        <span class="inventory-storage-position__number">{{ grid.grid_position }}</span>
-                        <strong>{{ grid.grid_code }}</strong>
-                        <span class="inventory-storage-position__sample">{{ grid.researcher_name }} · {{ grid.sample_name }}</span>
+                      <div class="inventory-storage-position" role="group" aria-label="{{ grid.researcher_name }}, {{ grid.linked_username or 'no linked username' }}, {{ grid.sample_name }}, position {{ grid.grid_position }}, {{ grid.grid_code }}, {{ grid.status_label }}">
+                        <span class="inventory-storage-position__number" aria-label="Grid position {{ grid.grid_position }}">{{ grid.grid_position }}</span>
+                        <strong>{{ grid.researcher_name }}</strong>
+                        <span class="inventory-storage-position__sample">{{ grid.sample_name }}{% if grid.linked_username %} · {{ grid.linked_username }}{% endif %}</span>
+                        <small class="inventory-storage-position__reference">{{ grid.grid_code }}</small>
                         <span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span>
                       </div>
                     {% endfor %}
@@ -59,9 +60,9 @@
   <section class="inventory-panel">
     <div class="inventory-panel__heading"><div><span class="chart-kicker">Grid status</span><h2>Not currently in storage</h2><p>Frozen grids remain F until their status changes; grids in the microscope and discarded grids are listed separately.</p></div></div>
     {% if not_stored_grids %}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Grid</th><th>Sample</th><th>Freezing batch</th><th>Frozen</th></tr></thead><tbody>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Researcher</th><th>Username</th><th>Sample</th><th>Freezing batch</th><th>Frozen</th><th>Grid reference</th></tr></thead><tbody>
         {% for grid in not_stored_grids %}
-          <tr><td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}" title="{{ grid.status_label }}">{{ grid.status_code }}</span> {{ grid.status_label }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}">{{ grid.grid_code }}</a></td><td>{{ grid.sample_code }} · {{ grid.sample_name }}</td><td>{{ grid.batch_code }}</td><td>{{ grid.frozen_at|facility_time }}</td></tr>
+          <tr><td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}" title="{{ grid.status_label }}">{{ grid.status_code }}</span> {{ grid.status_label }}</td><td>{{ grid.researcher_name }}</td><td>{{ grid.linked_username or '—' }}</td><td><strong>{{ grid.sample_name }}</strong><br><small>{{ grid.sample_code }}</small></td><td>{{ grid.batch_code }}</td><td>{{ grid.frozen_at|facility_time }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=grid.grid_code) }}"><small>{{ grid.grid_code }}</small></a></td></tr>
         {% endfor %}
       </tbody></table></div>
     {% else %}
@@ -77,7 +78,7 @@
     </section>
   </div>
   <section class="inventory-panel inventory-recent"><div class="inventory-panel__heading"><div><span class="chart-kicker">Audit trail</span><h2>Recent activity</h2></div><a class="button small secondary" href="{{ url_for('inventory.activity') }}">View full history</a></div>
-    {% if recent %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Grid</th><th>Action</th><th>Operator</th><th>Notes</th></tr></thead><tbody>{% for event in recent %}<tr><td>{{ event.event_time|facility_time }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=event.grid_code) }}">{{ event.grid_code }}</a></td><td>{{ event.event_type|replace('_', ' ')|title }}</td><td>{{ event.operator_name or '—' }}</td><td>{{ event.notes or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-message">No inventory activity yet.</p>{% endif %}
+    {% if recent %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Time</th><th>Researcher</th><th>Username</th><th>Sample</th><th>Action</th><th>Operator</th><th>Grid reference</th><th>Notes</th></tr></thead><tbody>{% for event in recent %}<tr><td>{{ event.event_time|facility_time }}</td><td>{{ event.researcher_name }}</td><td>{{ event.linked_username or '—' }}</td><td>{{ event.sample_name }}</td><td>{{ event.event_type|replace('_', ' ')|title }}</td><td>{{ event.operator_name or '—' }}</td><td><a href="{{ url_for('inventory.grid_detail', grid_code=event.grid_code) }}"><small>{{ event.grid_code }}</small></a></td><td>{{ event.notes or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="empty-message">No inventory activity yet.</p>{% endif %}
   </section>
   <div class="inventory-quick-links"><a class="button secondary" href="{{ url_for('inventory.grids') }}">Search and manage grids</a><a class="button secondary" href="{{ url_for('inventory.storage') }}">Browse storage</a><a class="button secondary" href="{{ url_for('inventory.sessions') }}">Data collection sessions</a></div>
 </section></main>
