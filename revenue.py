@@ -213,7 +213,7 @@ def calculate_charge_sheet(
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
     full_clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
-    clip_base_charge = full_clip_base_charge * Decimal(grids - clipped) / Decimal(grids)
+    clip_base_charge = full_clip_base_charge * Decimal(grids - clipped)
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
     processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
     subtotal = grid_charge + handling_charge + clip_base_charge + slot_charge + processing_charge

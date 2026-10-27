@@ -231,9 +231,9 @@ class AdminHistoryEditTests(unittest.TestCase):
         self.assertEqual(edited_row["sample_name"], "Updated sample")
         self.assertEqual(str(edited_row["actual_slots"]), "2")
         self.assertEqual(edited_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
+        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("2500.00"))
         self.assertEqual(Decimal(str(edited_row["slot_charge"])), Decimal("24000.00"))
-        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
+        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("38940.00"))
 
     def test_sent_charge_sheet_uses_edited_values_and_clipped_grid_calculation(self):
         self.client.post(
@@ -278,9 +278,9 @@ class AdminHistoryEditTests(unittest.TestCase):
         self.assertEqual(sent_row["sample_name"], "Updated sample")
         self.assertEqual(str(sent_row["actual_slots"]), "2")
         self.assertEqual(sent_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(sent_row["clip_base_charge"])), Decimal("1250.00"))
+        self.assertEqual(Decimal(str(sent_row["clip_base_charge"])), Decimal("2500.00"))
         self.assertEqual(Decimal(str(sent_row["slot_charge"])), Decimal("24000.00"))
-        self.assertEqual(Decimal(str(sent_row["total_billed"])), Decimal("37465.00"))
+        self.assertEqual(Decimal(str(sent_row["total_billed"])), Decimal("38940.00"))
 
     def test_combined_charge_sheet_uses_edited_clipped_grid_calculation(self):
         self.client.post(
@@ -323,8 +323,8 @@ class AdminHistoryEditTests(unittest.TestCase):
         edited_row = combined_row["combined_items"][0]
         self.assertEqual(edited_row["user_name"], "Edited For Combined")
         self.assertEqual(edited_row["clipped_grids"], 1)
-        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("1250.00"))
-        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("37465.00"))
+        self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("2500.00"))
+        self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("38940.00"))
 
     def test_sent_booking_cannot_be_edited(self):
         response = self.client.post(

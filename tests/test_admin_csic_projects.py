@@ -425,6 +425,36 @@ class AdminCsicBillingTests(unittest.TestCase):
         self.assertEqual(adjusted["subtotal"] + adjusted["gst_amount"], Decimal("70000.00"))
         self.assertLess(adjusted["csic_adjustment"], 0)
 
+    def test_clip_base_charge_is_per_unclipped_grid_and_invoice_quantity_matches(self):
+        charges = calculate_charge_sheet(
+            "academic",
+            "Screening / Clipping",
+            6,
+            "self_owned",
+            actual_slots=1,
+        )
+        self.assertEqual(charges["clip_base_charge"], Decimal("15000.00"))
+        row = {
+            **charges,
+            "grid_source": "self_owned",
+            "number_of_grids": 6,
+        }
+        clip_line = next(
+            line for line in _billing_lines(row, "Screening")
+            if line[0] == "C-clip + Base ring"
+        )
+        self.assertEqual(clip_line, ("C-clip + Base ring", "6 grid(s)", Decimal("15000.00")))
+
+        partially_clipped = calculate_charge_sheet(
+            "academic",
+            "Screening / Clipping",
+            6,
+            "self_owned",
+            actual_slots=1,
+            clipped_grids=2,
+        )
+        self.assertEqual(partially_clipped["clip_base_charge"], Decimal("10000.00"))
+
     def test_admin_panel_keeps_csic_revenue_insight_but_removes_project_controls(self):
         with self.app.app_context():
             conn = database.get_db()

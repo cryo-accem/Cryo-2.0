@@ -176,7 +176,9 @@ def _billing_lines(row, service):
     if stage in {"Freezing / Grid Registration", "Screening / Clipping", "Data Collection"}:
         lines.append(("Handling Charge", f"{grids or 0} grid(s)", _decimal(handling_amount)))
     if stage in {"Screening / Clipping", "Data Collection"}:
-        lines.append(("C-clip + Base ring", "1 service", _decimal(clip_amount)))
+        clipped_grids = _value(row, "clipped_grids", 0) or 0
+        chargeable_grids = max(int(grids or 0) - int(clipped_grids), 0)
+        lines.append(("C-clip + Base ring", f"{chargeable_grids} grid(s)", _decimal(clip_amount)))
         lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
     if _decimal(processing_amount):
         lines.append(("Data Processing / Image Analysis", "1 service", _decimal(processing_amount)))
