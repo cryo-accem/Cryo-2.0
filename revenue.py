@@ -123,6 +123,20 @@ def normalize_grid_source(source):
     raise ValueError("Unsupported grid source.")
 
 
+def normalize_clip_base_source(source):
+    value = str(source or "").strip().casefold().replace("-", " ").replace("_", " ")
+    if value in {"facility", "facility provided"}:
+        return "facility"
+    if value in {
+        "self owned", "self owned provided", "user provided", "lab provided",
+        "self owned / user provided",
+    }:
+        return "self_owned"
+    if not value:
+        raise ValueError("Please select who provided the C-clip and base ring.")
+    raise ValueError("Unsupported C-clip and base ring source.")
+
+
 def normalize_grid_type(grid_type):
     value = str(grid_type or "").strip().casefold().replace("-", "_").replace(" ", "_")
     if value in {"normal_holey_carbon", "normal_holey_carbon_grid"}:
@@ -162,6 +176,7 @@ def calculate_charge_sheet(
     clipped_grids=0,
     normal_grids=None,
     gold_grids=None,
+    clip_base_source="facility",
 ):
     """Calculate every chargeable component from validated business inputs."""
     category = pricing_category(user_category)
@@ -174,6 +189,7 @@ def calculate_charge_sheet(
     if clipped > grids:
         raise ValueError("Clipped grids cannot exceed actual grids.")
     source = normalize_grid_source(grid_source)
+    selected_clip_base_source = normalize_clip_base_source(clip_base_source)
     selected_grid_type = normalize_grid_type(grid_type)
     if source == "facility" and not selected_grid_type and normal_grids is None and gold_grids is None:
         raise ValueError("Please select the grid type for facility-provided grids.")
@@ -213,7 +229,10 @@ def calculate_charge_sheet(
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
     full_clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
-    clip_base_charge = full_clip_base_charge * Decimal(grids - clipped)
+    clip_base_charge = (
+        full_clip_base_charge * Decimal(grids - clipped)
+        if selected_clip_base_source == "facility" else Decimal("0")
+    )
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
     processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
     subtotal = grid_charge + handling_charge + clip_base_charge + slot_charge + processing_charge
@@ -224,6 +243,7 @@ def calculate_charge_sheet(
         "number_of_grids": grids,
         "actual_grids": grids,
         "grid_source": source,
+        "clip_base_source": selected_clip_base_source,
         "grid_type": selected_grid_type if source == "facility" else None,
         "normal_grids": normal_count if source == "facility" else 0,
         "gold_grids": gold_count if source == "facility" else 0,
@@ -272,11 +292,12 @@ def is_billable_booking(booking):
 def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_requested=False,
                               grid_source="facility", grid_type="normal_holey_carbon",
                               service_stage="Data Collection", user_category=None,
-                              clipped_grids=0):
+                              clipped_grids=0, clip_base_source="facility"):
     """Compatibility adapter for existing completion routes."""
     charges = calculate_charge_sheet(
         user_category or booking["origin"], service_stage, actual_grids, grid_source, grid_type,
         actual_slots, processing_requested, clipped_grids,
+        clip_base_source=clip_base_source,
     )
     if is_non_billable_booking(booking):
         for key in ("grid_charge", "handling_charge", "clip_base_charge", "slot_charge",

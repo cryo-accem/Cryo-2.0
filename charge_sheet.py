@@ -178,7 +178,13 @@ def _billing_lines(row, service):
     if stage in {"Screening / Clipping", "Data Collection"}:
         clipped_grids = _value(row, "clipped_grids", 0) or 0
         chargeable_grids = max(int(grids or 0) - int(clipped_grids), 0)
-        lines.append(("C-clip + Base ring", f"{chargeable_grids} grid(s)", _decimal(clip_amount)))
+        clip_base_source = str(_value(row, "clip_base_source", "facility") or "facility").casefold()
+        clip_label = (
+            "C-clip + Base ring (Lab / user provided)"
+            if clip_base_source == "self_owned"
+            else "C-clip + Base ring"
+        )
+        lines.append((clip_label, f"{chargeable_grids} grid(s)", _decimal(clip_amount)))
         lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
     if _decimal(processing_amount):
         lines.append(("Data Processing / Image Analysis", "1 service", _decimal(processing_amount)))

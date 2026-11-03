@@ -727,6 +727,12 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
         event_type = "returned_to_storage"
     elif allow_microscope_return:
         event_type = "screening_returned_to_storage"
+    elif (
+        not old_location
+        and "batch_id" in grid.keys()
+        and grid["batch_id"] is None
+    ):
+        event_type = "initial_storage"
     elif old_location:
         event_type = "storage_relocation"
     elif grid["current_status"] == "Stored":
@@ -1170,7 +1176,9 @@ def load_screening_booking(booking_id, actor_id):
         connection.close()
 
 
-def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_id):
+def complete_booking_grid_moves(
+    cursor, service_type, booking_id, fields, actor_id, booking=None
+):
     link_targets = {
         "screening": ("screening_booking_grids", "screening_booking_id", "SCREENING"),
         "data_collection": ("data_collection_booking_grids", "booking_id", "DATA-COLLECTION"),
@@ -1186,8 +1194,6 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
         [booking_id],
     )
     grids = cursor.fetchall()
-    if not grids:
-        return 0
 
     grid_codes = fields.getlist("inventory_grid_code")
     containers = fields.getlist("inventory_falcon")
@@ -1263,6 +1269,99 @@ def complete_booking_grid_moves(cursor, service_type, booking_id, fields, actor_
             mark_stored=True,
             allow_microscope_return=allow_microscope_return,
         )
+    add_inventory_grids = fields.get("add_inventory_grids")
+    if add_inventory_grids not in {None, "", "1"}:
+        raise InventoryError("Choose whether to add additional grids to inventory.")
+    if add_inventory_grids == "1":
+        if booking is None:
+            raise RuntimeError("The booking details are required to register new inventory grids.")
+        actual_grid_count = _positive_int(fields.get("actual_grids"), "Actual grids")
+        additional_count = max(0, actual_grid_count - count)
+        if additional_count > MAX_GRIDS_PER_BATCH:
+            raise InventoryError(
+                f"No more than {MAX_GRIDS_PER_BATCH} additional grids can be added to inventory at once."
+            )
+        new_type_ids = fields.getlist("inventory_new_grid_type_id")
+        new_containers = fields.getlist("inventory_new_falcon")
+        new_boxes = fields.getlist("inventory_new_box")
+        new_positions = fields.getlist("inventory_new_position")
+        if not (
+            len(new_type_ids) == len(new_containers)
+            == len(new_boxes) == len(new_positions) == additional_count
+        ):
+            raise InventoryError(
+                "Enter a grid type and storage location for each additional grid."
+            )
+        if additional_count:
+            sample_id = _create_sample(
+                cursor,
+                {
+                    "sample_name": booking["sample_name"],
+                    "researcher_name": booking["user_name"] or "Booking user",
+                    "lab_name": booking["esm"] or booking["origin"] or "ACCEM",
+                    "external_reference": f"{operation_prefix}-{booking_id}",
+                },
+                actor_id,
+                event_time,
+            )
+            for index in range(additional_count):
+                grid_type_id = _positive_int(new_type_ids[index], "grid type")
+                cursor.execute(
+                    "SELECT grid_type_id FROM grid_types WHERE grid_type_id=? AND active=1",
+                    [grid_type_id],
+                )
+                if not cursor.fetchone():
+                    raise InventoryError("Choose an active grid type for each additional grid.")
+                container = _text(
+                    new_containers[index], "Falcon container ID", 100, True
+                )
+                box = _text(new_boxes[index], "Grid box", 100, True)
+                position = _text(new_positions[index], "Grid position", 40, True)
+                grid_code = _next_code(cursor, "grid", "ACCEM-G-", 4)
+                cursor.execute(
+                    """INSERT INTO inventory_grids
+                       (grid_code, batch_id, sample_id, grid_type_id, current_status,
+                        created_at, created_by)
+                       VALUES (?, NULL, ?, ?, 'Stored', ?, ?)""",
+                    (grid_code, sample_id, grid_type_id, event_time, actor_id),
+                )
+                grid_id = cursor.lastrowid
+                cursor.execute(
+                    f"""INSERT INTO {link_table}
+                        ({booking_column}, grid_id, linked_at, linked_by)
+                        VALUES (?, ?, ?, ?)""",
+                    (booking_id, grid_id, event_time, actor_id),
+                )
+                _event(
+                    cursor, grid_id, "grid_registered", actor_id,
+                    new_value=grid_code,
+                    notes=(
+                        f"Added during {service_type.replace('_', ' ')} booking "
+                        f"{booking_id}; no freezing record exists."
+                    ),
+                    operation_reference=f"{operation_prefix}-{booking_id}",
+                    event_time=event_time,
+                )
+                _store_grid(
+                    cursor,
+                    {
+                        "grid_id": grid_id,
+                        "grid_code": grid_code,
+                        "batch_id": None,
+                        "current_status": "Stored",
+                    },
+                    {
+                        "falcon_container_id": container,
+                        "grid_box_name": box,
+                        "grid_position": position,
+                    },
+                    actor_id,
+                    "Storage recorded when the booking was completed.",
+                    event_time,
+                    operation_reference=f"{operation_prefix}-{booking_id}",
+                    mark_stored=True,
+                )
+        return count + additional_count
     return count
 
 
@@ -1724,7 +1823,7 @@ def search_grids(args, page=1, page_size=25):
     joins = """ FROM inventory_grids g
         JOIN inventory_samples s ON s.sample_id=g.sample_id
         LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
-        JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+        LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
         JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
         LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL """
     connection = get_db()
@@ -1761,7 +1860,7 @@ def search_grid_box_groups(args, page=1, page_size=40):
     joins = """ FROM inventory_grids g
         JOIN inventory_samples s ON s.sample_id=g.sample_id
         LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
-        JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+        LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
         JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
         LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL """
     falcon_group = (
@@ -1897,7 +1996,7 @@ def dashboard_storage():
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                LEFT JOIN users linked_user ON linked_user.id=s.linked_user_id
-               JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+               LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
                LEFT JOIN storage_locations sl
                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
                ORDER BY sl.falcon_container_id, sl.grid_box_name,
@@ -2029,7 +2128,7 @@ def grid_details(grid_code):
                       creator.username AS created_by_name, clipper.username AS clipped_by_name
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
-               JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+               LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
                LEFT JOIN freezing_booking_inventory fbi ON fbi.batch_id=fb.batch_id
                JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
                LEFT JOIN users creator ON creator.id=g.created_by
@@ -2243,7 +2342,7 @@ def iter_export_grid_rows(args, batch_size=500):
                    JOIN data_sessions ds ON ds.session_id=l.session_id
                    WHERE l.grid_id=g.grid_id) AS latest_session
            FROM inventory_grids g JOIN inventory_samples s ON s.sample_id=g.sample_id
-           JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+           LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
            JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
            LEFT JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
            """ + where_sql + " ORDER BY g.grid_id DESC"

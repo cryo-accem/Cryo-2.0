@@ -17,6 +17,7 @@ from inventory_service import (
 )
 from blueprints.freezing import register_freezing as register_freezing_booking
 from blueprints.imaging import register_imaging
+from blueprints.screening import register_screening
 
 
 class GridInventoryTests(unittest.TestCase):
@@ -2041,6 +2042,147 @@ class GridInventoryTests(unittest.TestCase):
         ).fetchone()["current_status"]
         conn.close()
         self.assertEqual(status, "In Data Collection")
+
+    def test_booking_completion_can_store_new_inventory_grids_without_freezing_records(self):
+        cases = (
+            (
+                "screening",
+                register_screening,
+                "/admin/screening/load/",
+                "/admin/screening/complete/",
+            ),
+            (
+                "data_collection",
+                register_imaging,
+                "/admin/datacollecting/load/",
+                "/admin/datacollecting/complete/",
+            ),
+        )
+        conn = database.get_db()
+        grid_type_id = conn.execute(
+            "SELECT grid_type_id FROM grid_types WHERE active=1 ORDER BY grid_type_id LIMIT 1"
+        ).fetchone()["grid_type_id"]
+        conn.close()
+        for path in ("/admin/screening", "/admin/datacollecting"):
+            page = self.client.get(path)
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(b"Save additional grids in inventory", page.data)
+
+        for service_type, register, load_path, complete_path in cases:
+            with self.subTest(service_type=service_type):
+                user_name = f"Unfrozen {service_type} User"
+                sample_name = f"Unfrozen {service_type} Sample"
+                email = f"unfrozen-{service_type}@example.test"
+                with patch(
+                    "blueprints.screening.send_email"
+                    if service_type == "screening"
+                    else "blueprints.imaging.send_email"
+                ):
+                    if service_type == "screening":
+                        success, message = register(
+                            user_name, "Inventory PI", email, "Internal", "",
+                            sample_name, 2, 1,
+                        )
+                    else:
+                        success, message = register(
+                            user_name, "Inventory PI", email, "Internal", "",
+                            sample_name, 2, 1,
+                        )
+                self.assertTrue(success, message)
+                booking_table = (
+                    "screening_bookings"
+                    if service_type == "screening"
+                    else "bookings"
+                )
+                conn = database.get_db()
+                booking_id = conn.execute(
+                    f"SELECT id FROM {booking_table} WHERE email=?", [email]
+                ).fetchone()["id"]
+                conn.close()
+                with patch("blueprints.admin.send_email"):
+                    load_response = self.client.get(f"{load_path}{booking_id}")
+                self.assertEqual(load_response.status_code, 302)
+
+                with patch("blueprints.admin.send_email"):
+                    completion = self.client.post(
+                        f"{complete_path}{booking_id}",
+                        data={
+                            "_csrf_token": self.csrf_token(),
+                            "actual_slots": "1",
+                            "actual_grids": "2",
+                            "grid_source": "user provided",
+                            "grid_type": "",
+                            "clipped_grids": "0",
+                            "inventory_new_grid_type_id": [str(grid_type_id)] * 2,
+                            "inventory_new_falcon": [f"{service_type}-FALCON"] * 2,
+                            "inventory_new_box": [f"{service_type}-BOX"] * 2,
+                            "inventory_new_position": ["A1", "A2"],
+                            "add_inventory_grids": "1",
+                        },
+                    )
+                self.assertEqual(completion.status_code, 302)
+
+                conn = database.get_db()
+                grids = conn.execute(
+                    """SELECT g.grid_code, g.batch_id, g.current_status,
+                              s.sample_name, s.researcher_name,
+                              sl.falcon_container_id, sl.grid_box_name, sl.grid_position
+                       FROM inventory_grids g
+                       JOIN inventory_samples s ON s.sample_id=g.sample_id
+                       LEFT JOIN storage_locations sl
+                         ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
+                       WHERE s.sample_name=? AND s.researcher_name=?
+                       ORDER BY g.grid_id""",
+                    [sample_name, user_name],
+                ).fetchall()
+                events = conn.execute(
+                    """SELECT e.event_type, e.notes
+                       FROM grid_events e JOIN inventory_grids g ON g.grid_id=e.grid_id
+                       JOIN inventory_samples s ON s.sample_id=g.sample_id
+                       WHERE s.sample_name=? AND s.researcher_name=?""",
+                    [sample_name, user_name],
+                ).fetchall()
+                link_table, booking_column = (
+                    ("screening_booking_grids", "screening_booking_id")
+                    if service_type == "screening"
+                    else ("data_collection_booking_grids", "booking_id")
+                )
+                linked_count = conn.execute(
+                    f"SELECT COUNT(*) FROM {link_table} WHERE {booking_column}=?",
+                    [booking_id],
+                ).fetchone()[0]
+                conn.close()
+
+                self.assertEqual(len(grids), 2)
+                self.assertEqual(linked_count, 2)
+                self.assertTrue(all(grid["batch_id"] is None for grid in grids))
+                self.assertTrue(all(grid["current_status"] == "Stored" for grid in grids))
+                self.assertEqual(
+                    [grid["grid_position"] for grid in grids], ["A1", "A2"]
+                )
+                self.assertTrue(all(grid["grid_code"].startswith("ACCEM-G-") for grid in grids))
+                self.assertEqual(
+                    {event["event_type"] for event in events},
+                    {"grid_registered", "initial_storage"},
+                )
+                self.assertTrue(
+                    any("no freezing record exists" in (event["notes"] or "") for event in events)
+                )
+                search = self.client.get("/admin/inventory/grids?q=Unfrozen")
+                self.assertEqual(search.status_code, 200)
+                self.assertIn(b"No freezing record", search.data)
+                detail = self.client.get(f"/admin/inventory/grids/{grids[0]['grid_code']}")
+                self.assertEqual(detail.status_code, 200)
+                self.assertIn(b"No freezing record", detail.data)
+                dashboard = self.client.get("/admin/inventory/")
+                self.assertEqual(dashboard.status_code, 200)
+                for grid in grids:
+                    self.assertIn(grid["grid_code"].encode(), dashboard.data)
+                available = public_inventory_grids(user_name, available_only=True)
+                self.assertEqual(
+                    {grid["grid_code"] for grid in available},
+                    {grid["grid_code"] for grid in grids},
+                )
 
     def test_batch_registration_assigns_unique_grid_ids_and_search_filters_work(self):
         codes = self.create_batch(3)

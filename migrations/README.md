@@ -1,11 +1,12 @@
 # Grid Inventory migration
 
-The migrations are additive and tracked in `inventory_schema_migrations`.
+The migrations are versioned and tracked in `inventory_schema_migrations`.
 They create inventory tables, indexes, grid type options, identifier
 sequences, an optional link from a completed freezing booking to its inventory
 batch, optional per-grid blot conditions, and auditable links from screening
-and data-collection bookings to selected inventory grids; they do not alter or
-replace existing booking, billing, user, or other application tables.
+and data-collection bookings to selected inventory grids. They preserve
+existing inventory history and do not alter booking, billing, user, or other
+application tables.
 Migration `005_grid_types` activates the four supported grid types and
 deactivates other options without deleting types referenced by historical grids.
 The active types are Quantifoil holey carbon, Carbon-coated grids, Gold
@@ -17,6 +18,10 @@ Migration `007_unlimited_admin_screening` removes the legacy MySQL check
 constraint that capped screening bookings at four grids. Public screening and
 data-collection forms continue to enforce their four-grid limit in application
 validation; admin bookings are not capped.
+Migration `009_unfrozen_inventory_grids` allows inventory records with no
+freezing batch. Screening and data-collection completion can register and store
+additional grids without creating a fictitious freezing record; existing
+freezing-linked grids and their batch history are preserved.
 
 Public booking forms can reserve up to four available inventory grids for
 screening or data collection. The grid links are stored in the booking-link

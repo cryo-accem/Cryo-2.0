@@ -120,6 +120,41 @@ class AdminHistoryEditTests(unittest.TestCase):
             cur.close()
             conn.close()
 
+    def test_edit_saves_lab_provided_clip_base_source_without_charge(self):
+        response = self.client.post(
+            "/admin/history/imaging/1/edit",
+            data={
+                "_csrf_token": self._csrf_token(),
+                "user_name": "Original User",
+                "pi_name": "Original PI",
+                "email": "original@example.com",
+                "origin": "External",
+                "esm": "",
+                "sample_name": "Original sample",
+                "grids": "2",
+                "days": "1",
+                "completion_date": "2026-09-10",
+                "actual_slots": "1",
+                "actual_grids": "2",
+                "grid_source": "facility",
+                "grid_type": "normal_holey_carbon",
+                "clip_base_source": "self_owned",
+                "clipped_grids": "0",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        with self.app.app_context():
+            conn = database.get_db()
+            booking = conn.execute(
+                "SELECT clip_base_source, clip_base_charge FROM bookings WHERE id=?",
+                [1],
+            ).fetchone()
+            conn.close()
+        self.assertEqual(booking["clip_base_source"], "self_owned")
+        self.assertEqual(Decimal(str(booking["clip_base_charge"])), Decimal("0.00"))
+
     def test_edit_accepts_database_formatted_whole_number_slots(self):
         response = self.client.post(
             "/admin/history/imaging/1/edit",

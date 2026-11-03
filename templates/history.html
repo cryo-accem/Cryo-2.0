@@ -76,6 +76,7 @@
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <select name="grid_source" required aria-label="Grid source"><option value="">Grid source</option><option value="facility" {{ 'selected' if slot.grid_source == 'facility' else '' }}>Facility Provided</option><option value="self_owned" {{ 'selected' if slot.grid_source == 'self_owned' else '' }}>Self Owned / User Provided</option></select>
               <select name="grid_type" aria-label="Grid type"><option value="">Grid type</option><option value="normal_holey_carbon" {{ 'selected' if slot.grid_type == 'normal_holey_carbon' else '' }}>Normal Holey Carbon Grid</option><option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / Carbon Coated / Graphene Oxide Grid</option></select>
+              {% if service_key != 'freezing' %}<select name="clip_base_source" required aria-label="C-clip and base ring source"><option value="facility" {{ 'selected' if slot.clip_base_source|default('facility') == 'facility' else '' }}>C-clip + base ring: Facility</option><option value="self_owned" {{ 'selected' if slot.clip_base_source == 'self_owned' else '' }}>C-clip + base ring: Lab / user provided</option></select>{% endif %}
               {% if slot.origin|lower == 'internal' %}<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" placeholder="PI email (optional)" aria-label="PI email">{% endif %}
               <button class="button small secondary" type="submit" formmethod="post" formaction="{{ url_for('admin.preview_charge_sheet', service_key=service_key, booking_id=slot.id) }}" formtarget="_blank">Preview Charge Sheet</button>
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
@@ -117,6 +118,14 @@
                     <option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / graphene</option>
                   </select>
                 </label>
+                {% if service_key != 'freezing' %}
+                <label>C-clip + base ring source
+                  <select name="clip_base_source" required>
+                    <option value="facility" {{ 'selected' if slot.clip_base_source|default('facility') == 'facility' else '' }}>Facility provided (charge applies)</option>
+                    <option value="self_owned" {{ 'selected' if slot.clip_base_source == 'self_owned' else '' }}>Lab / user provided (no charge)</option>
+                  </select>
+                </label>
+                {% endif %}
                 <label>Normal grids<input type="number" name="normal_grids" min="0" value="{{ slot.grid_breakdown.normal_holey_carbon if slot.grid_breakdown else '' }}"></label>
                 <label>Gold / graphene grids<input type="number" name="gold_grids" min="0" value="{{ slot.grid_breakdown.gold_carbon_graphene if slot.grid_breakdown else '' }}"></label>
                 {% if service_key != 'freezing' %}
@@ -238,7 +247,8 @@
     const selected = boxes.filter((box) => box.checked).map((box) => ({
       service_key: box.dataset.serviceKey, booking_id: box.dataset.bookingId,
       grid_source: box.closest("tr").querySelector("select[name=grid_source]")?.value || "",
-      grid_type: box.closest("tr").querySelector("select[name=grid_type]")?.value || ""
+      grid_type: box.closest("tr").querySelector("select[name=grid_type]")?.value || "",
+      clip_base_source: box.closest("tr").querySelector("select[name=clip_base_source]")?.value || "facility"
     }));
     payload.value = JSON.stringify(selected);
     submit.disabled = selected.length === 0;

@@ -6,7 +6,7 @@
   <div class="data-stack">
     <div class="table-tools" data-admin-filter><label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI, email or sample"></label><select data-origin-filter aria-label="Filter by origin"><option value="">All origins</option><option value="Internal">Internal / Academic</option><option value="External">External</option><option value="Industry">Industrial</option></select></div>
     <section class="data-panel"><h2>Waiting <span class="status-badge status-badge--pending">Pending</span></h2>{% if waiting_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in waiting_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><a href="{{ url_for('admin.load_sc', booking_id=reg.id) }}" class="btn btn-load">Load</a>    <form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}" onsubmit="return confirm('Delete this screening slot? This cannot be undone.');"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No waiting registrations.</div>{% endif %}</section>
-    <section class="data-panel"><h2>Ongoing <span class="status-badge status-badge--confirmed">Confirmed</span></h2>{% if ongoing_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in ongoing_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><button type="button" class="btn btn-complete completion-trigger" data-action="{{ url_for('admin.complete_sc', booking_id=reg.id) }}" data-origin="{{ reg.origin }}" data-pi-name="{{ reg.pi_name }}" data-grid-links="{{ linked_grids.get(reg.id, [])|tojson|forceescape }}">Complete</button><form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No ongoing registrations.</div>{% endif %}</section>
+    <section class="data-panel"><h2>Ongoing <span class="status-badge status-badge--confirmed">Confirmed</span></h2>{% if ongoing_registrations %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Actions</th><th>Slot ID</th><th>User Name</th><th>PI Name</th><th>Email</th><th>Origin</th><th>Institute</th><th>Sample</th><th>Grids</th><th>Days</th><th>Reg. Date</th></tr></thead><tbody>{% for reg in ongoing_registrations %}<tr data-origin="{{ reg.origin }}"><td class="action-buttons"><button type="button" class="btn btn-complete completion-trigger" data-action="{{ url_for('admin.complete_sc', booking_id=reg.id) }}" data-origin="{{ reg.origin }}" data-pi-name="{{ reg.pi_name }}" data-sample-name="{{ reg.sample_name }}" data-grid-links="{{ linked_grids.get(reg.id, [])|tojson|forceescape }}">Complete</button><form method="post" action="{{ url_for('admin.delete_sc', booking_id=reg.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button type="submit" class="btn btn-delete">Delete</button></form></td><td>{{ reg.id }}</td><td>{{ reg.user_name }}</td><td>{{ reg.pi_name }}</td><td>{{ reg.email }}</td><td>{{ reg.origin }}</td><td>{{ reg.esm }}</td><td>{{ reg.sample_name }}</td><td>{{ reg.grids }}</td><td>{{ reg.days }}</td><td>{{ reg.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No ongoing registrations.</div>{% endif %}</section>
   </div>
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a></div>
 </section></main>
@@ -34,6 +34,7 @@
             <label>Actual grids<input name="actual_grids" type="number" min="1" max="12" step="1" required></label>
             <label>Grid source<select name="grid_source" required><option value="">Select source</option><option value="facility">Facility Provided</option><option value="self_owned">Self Owned / User Provided</option></select></label>
             <label id="grid-type-label">Grid type<select name="grid_type"><option value="">Select type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select></label>
+            <label>C-clip + base ring source<select name="clip_base_source" required><option value="facility">Facility provided</option><option value="self_owned">Lab / user provided (no charge)</option></select></label>
             <label class="completion-checkbox"><input name="clipped_enabled" type="checkbox"> Some grids are already clipped</label>
             <label id="clipped-grids-label" hidden>Clipped grids<input name="clipped_grids" type="number" min="1" step="1" value="0"></label>
             <label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested</label>
@@ -47,6 +48,13 @@
           <div class="completion-error" id="completion-error" hidden role="alert"></div>
         </section>
       </div>
+      <section id="additional-grid-storage" class="completion-mapped-grids" hidden>
+        <h3>Add unlinked grids to inventory</h3>
+        <p>These grids will be registered as stored inventory without a freezing record.</p>
+        <p data-additional-grid-count></p>
+        <label class="completion-checkbox"><input type="checkbox" name="add_inventory_grids" value="1"> Save additional grids in inventory</label>
+        <div data-additional-grid-fields></div>
+      </section>
       <div class="completion-modal__actions"><button type="submit" class="button" data-confirm-completion disabled><i class="fa-solid fa-check" aria-hidden="true"></i> Confirm &amp; complete</button></div>
     </form>
   </div>
@@ -68,6 +76,12 @@
   const clippedGrids = form.querySelector("[name=clipped_grids]");
   const gridSource = form.querySelector("[name=grid_source]");
   const gridType = form.querySelector("[name=grid_type]");
+  const additionalGridStorage = document.getElementById("additional-grid-storage");
+  const additionalGridCount = additionalGridStorage.querySelector("[data-additional-grid-count]");
+  const additionalGridFields = additionalGridStorage.querySelector("[data-additional-grid-fields]");
+  const addInventoryGrids = form.querySelector("[name=add_inventory_grids]");
+  const inventoryGridTypes = {{ inventory_grid_types|tojson }};
+  let linkedGridCount = 0;
   let nonBillablePi = false;
   let previewRequest = 0;
   const categoryFor = (value) => {
@@ -77,11 +91,13 @@
   };
   const storageFields = document.getElementById("mapped-grid-storage");
   const renderMappedGrids = (grids) => {
+    linkedGridCount = grids.length;
     storageFields.replaceChildren();
     if (!grids.length) {
       const empty = document.createElement("p");
       empty.textContent = "No linked grids need storage details for this booking.";
       storageFields.append(empty);
+      updateAdditionalGridStorage();
       return;
     }
     const heading = document.createElement("h3");
@@ -156,6 +172,46 @@
       syncOutcome();
       storageFields.append(card);
     });
+    updateAdditionalGridStorage();
+  };
+  const updateAdditionalGridStorage = () => {
+    const actualGridCount = Number.parseInt(form.actual_grids.value, 10) || 0;
+    const additionalCount = Math.max(0, actualGridCount - linkedGridCount);
+    additionalGridStorage.hidden = additionalCount === 0;
+    additionalGridCount.textContent = `${additionalCount} additional grid${additionalCount === 1 ? "" : "s"} can be added based on the actual grid count.`;
+    additionalGridFields.replaceChildren();
+    if (!addInventoryGrids.checked || additionalCount === 0) return;
+    for (let index = 0; index < additionalCount; index += 1) {
+      const card = document.createElement("fieldset");
+      card.className = "completion-mapped-grid";
+      const legend = document.createElement("legend");
+      legend.textContent = `New grid ${index + 1} · ${form.dataset.sampleName || "Booking sample"}`;
+      card.append(legend);
+      const typeLabel = document.createElement("label");
+      typeLabel.textContent = "Grid type";
+      const type = document.createElement("select");
+      type.name = "inventory_new_grid_type_id";
+      type.required = true;
+      type.add(new Option("Choose type", ""));
+      inventoryGridTypes.forEach((item) => type.add(new Option(item.grid_type_name, item.grid_type_id)));
+      typeLabel.append(type);
+      card.append(typeLabel);
+      for (const [name, label, maxLength] of [
+        ["inventory_new_falcon", "Falcon container", 100],
+        ["inventory_new_box", "Grid box", 100],
+        ["inventory_new_position", "Grid position", 40],
+      ]) {
+        const wrapper = document.createElement("label");
+        wrapper.textContent = label;
+        const input = document.createElement("input");
+        input.name = name;
+        input.maxLength = maxLength;
+        input.required = true;
+        wrapper.append(input);
+        card.append(wrapper);
+      }
+      additionalGridFields.append(card);
+    }
   };
   const updateFields = () => {
     clippedGrids.disabled = !clippedToggle.checked;
@@ -176,11 +232,14 @@
       csicDiscountReason.disabled = true;
     }
   };
+  const billingFieldsValid = () => [...form.querySelectorAll("input, select, textarea")]
+    .filter((field) => !field.closest("#mapped-grid-storage, #additional-grid-storage"))
+    .every((field) => field.disabled || field.validity.valid);
   const updatePreview = async () => {
     updateFields();
     const requestId = ++previewRequest;
     confirmButton.disabled = true;
-    if (!form.reportValidity()) {
+    if (!billingFieldsValid()) {
       summary.hidden = true;
       return;
     }
@@ -216,6 +275,7 @@
     form.action = button.dataset.action;
     form.reset();
     form.user_category.value = categoryFor(button.dataset.origin);
+    form.dataset.sampleName = button.dataset.sampleName || "";
     nonBillablePi = /^(?:(?:professor|prof\.?|dr\.?)\s+)?somnath\s+dutta$/i.test((button.dataset.piName || "").trim().replace(/\s+/g, " "));
     renderMappedGrids(JSON.parse(button.dataset.gridLinks || "[]"));
     summary.hidden = true;
@@ -224,6 +284,8 @@
     modal.hidden = false;
   }));
   document.querySelector("[data-close-completion]").addEventListener("click", () => { modal.hidden = true; });
+  form.actual_grids.addEventListener("input", updateAdditionalGridStorage);
+  addInventoryGrids.addEventListener("change", updateAdditionalGridStorage);
   form.addEventListener("input", updatePreview);
   form.addEventListener("change", updatePreview);
   form.addEventListener("submit", async (event) => {

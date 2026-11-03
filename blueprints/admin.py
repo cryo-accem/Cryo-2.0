@@ -269,6 +269,7 @@ def billing_preview():
             request.values.get("clipped_grids", "0") or "0",
             request.values.get("normal_grids") or None,
             request.values.get("gold_grids") or None,
+            request.values.get("clip_base_source", "facility") or "facility",
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -2492,6 +2493,7 @@ def datacollecting():
         "admin_datacollecting.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
+        inventory_grid_types=[dict(row) for row in list_grid_types()],
         linked_grids=booking_grid_links_for_bookings(
             "data_collection", [registration["id"] for registration in ongoing]
         ),
@@ -2534,6 +2536,7 @@ def complete_dc(booking_id):
     gold_grids = request.form.get("gold_grids", "").strip() or None
     processing_requested = request.form.get("processing_requested") == "1"
     clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
+    clip_base_source = request.form.get("clip_base_source", "facility").strip() or "facility"
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.datacollecting"))
@@ -2587,7 +2590,7 @@ def complete_dc(booking_id):
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Data Collection", user_category,
-            clipped_grids_value,
+            clipped_grids_value, clip_base_source,
         )
     except ValueError as exc:
         conn.rollback()
@@ -2597,7 +2600,8 @@ def complete_dc(booking_id):
         return redirect(url_for("admin.datacollecting"))
     try:
         complete_booking_grid_moves(
-            cur, "data_collection", booking_id, request.form, session.get("admin_user_id")
+            cur, "data_collection", booking_id, request.form,
+            session.get("admin_user_id"), booking=booking,
         )
     except InventoryError as exc:
         conn.rollback()
@@ -2613,7 +2617,7 @@ def complete_dc(booking_id):
     cur.execute(
         """UPDATE bookings SET status='completed', completion_date=?,
            actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           grid_source=?, grid_type=?, clip_base_source=?, grid_charge=?, handling_charge=?,
            clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
            processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
            clipped_grids=?,
@@ -2621,7 +2625,8 @@ def complete_dc(booking_id):
            WHERE id=?""",
         (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
          charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         charges["grid_type"], charges["clip_base_source"],
+         str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
          str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
          str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
@@ -2826,6 +2831,7 @@ def screening_admin():
         "admin_screening.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
+        inventory_grid_types=[dict(row) for row in list_grid_types()],
         linked_grids=booking_grid_links_for_bookings(
             "screening", [registration["id"] for registration in ongoing]
         ),
@@ -2880,6 +2886,7 @@ def complete_sc(booking_id):
         return fail("This booking can only be completed as Screening / Clipping.")
     processing_requested = request.form.get("processing_requested") == "1"
     clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
+    clip_base_source = request.form.get("clip_base_source", "facility").strip() or "facility"
     if not grid_source:
         return fail("Please select the grid source before generating the bill.")
     if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
@@ -2923,7 +2930,7 @@ def complete_sc(booking_id):
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Screening / Clipping", user_category,
-            clipped_grids_value,
+            clipped_grids_value, clip_base_source,
         )
     except ValueError as exc:
         conn.rollback()
@@ -2965,7 +2972,8 @@ def complete_sc(booking_id):
             return fail(str(exc))
     try:
         complete_booking_grid_moves(
-            cur, "screening", booking_id, request.form, session.get("admin_user_id")
+            cur, "screening", booking_id, request.form,
+            session.get("admin_user_id"), booking=booking,
         )
     except InventoryError as exc:
         conn.rollback()
@@ -2980,7 +2988,7 @@ def complete_sc(booking_id):
     cur.execute(
         """UPDATE screening_bookings SET status='completed', completion_date=?,
            actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-           grid_source=?, grid_type=?, grid_charge=?, handling_charge=?,
+           grid_source=?, grid_type=?, clip_base_source=?, grid_charge=?, handling_charge=?,
            clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
            processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
            clipped_grids=?,
@@ -2990,7 +2998,8 @@ def complete_sc(booking_id):
            WHERE id=?""",
         (datetime.date.today(), str(charges["actual_slots"]), charges["actual_grids"],
          charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         charges["grid_type"], charges["clip_base_source"],
+         str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
          str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
          str(charges["gst_amount"]), str(charges["grand_total"]), charges["clipped_grids"],
@@ -3417,6 +3426,7 @@ def set_csic_booking(service_key, booking_id):
             row["actual_slots"] or 1,
             bool(row["processing_requested"]),
             clipped_grids=row["clipped_grids"] or 0,
+            clip_base_source=row.get("clip_base_source") or "facility",
             normal_grids=normal_grids,
             gold_grids=gold_grids,
         )
@@ -3654,6 +3664,11 @@ def edit_completed_booking(service_key, booking_id):
             raise ValueError("Enter a valid completion date.")
         grid_source = request.form.get("grid_source", "").strip()
         grid_type = request.form.get("grid_type", "").strip()
+        clip_base_source = (
+            request.form.get("clip_base_source", updated.get("clip_base_source") or "facility").strip()
+            if service_key != "freezing"
+            else updated.get("clip_base_source") or "facility"
+        )
         normal_grids = request.form.get("normal_grids", "").strip() or None
         gold_grids = request.form.get("gold_grids", "").strip() or None
         clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
@@ -3671,6 +3686,7 @@ def edit_completed_booking(service_key, booking_id):
             clipped_grids if service_key != "freezing" else 0,
             normal_grids,
             gold_grids,
+            clip_base_source,
         )
     except ValueError as exc:
         cur.close()
@@ -3721,6 +3737,7 @@ def edit_completed_booking(service_key, booking_id):
         "number_of_grids": charges["number_of_grids"],
         "grid_source": charges["grid_source"],
         "grid_type": charges["grid_type"],
+        "clip_base_source": charges["clip_base_source"],
         "grid_charge": str(updated["grid_charge"]),
         "handling_charge": str(updated["handling_charge"]),
         "clip_base_charge": str(updated["clip_base_charge"]),
@@ -3863,6 +3880,9 @@ def send_charge_sheet(service_key, booking_id):
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
             clipped_grids=row.get("clipped_grids") or 0,
+            clip_base_source=request.form.get(
+                "clip_base_source", row.get("clip_base_source") or "facility"
+            ),
             normal_grids=normal_grids,
             gold_grids=gold_grids,
         )
@@ -3928,7 +3948,7 @@ def send_charge_sheet(service_key, booking_id):
     )
 
     cur.execute(
-        "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
+        "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, clip_base_source=?, "
         "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
         "freezing_charge=?, clipping_charge=?, processing_charge=?, subtotal=?, "
         "gst_amount=?, grand_total=?, total_billed=?, csic_adjustment=?, "
@@ -3936,7 +3956,8 @@ def send_charge_sheet(service_key, booking_id):
         "bill_generated_at=CURRENT_TIMESTAMP "
         "WHERE id=?".format(_CHARGE_SHEET_TABLES[service_key][0]),
         [charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-         charges["grid_type"], str(charges["grid_charge"]), str(charges["handling_charge"]),
+         charges["grid_type"], charges["clip_base_source"],
+         str(charges["grid_charge"]), str(charges["handling_charge"]),
          str(charges["clip_base_charge"]), str(charges["slot_charge"]),
          str(charges["freezing_charge"]), str(charges["clipping_charge"]),
          str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
@@ -3992,6 +4013,9 @@ def preview_charge_sheet(service_key, booking_id):
             row.get("actual_slots") or 1,
             bool(row.get("processing_requested")),
             clipped_grids=row.get("clipped_grids") or 0,
+            clip_base_source=request.form.get(
+                "clip_base_source", row.get("clip_base_source") or "facility"
+            ),
             normal_grids=normal_grids,
             gold_grids=gold_grids,
         )
@@ -4006,6 +4030,7 @@ def preview_charge_sheet(service_key, booking_id):
     row.update(invoice_charges)
     row["grid_source"] = grid_source
     row["grid_type"] = grid_type
+    row["clip_base_source"] = charges["clip_base_source"]
     row["charge_sheet_id"] = row.get("charge_sheet_id") or f"PREVIEW-{service_key.upper()}-{booking_id}"
     pdf = generate_charge_sheet(row, service)
     return send_file(
@@ -4046,6 +4071,11 @@ def send_combined_charge_sheet():
                 raise ValueError("Only billable slots can be combined.")
             grid_source = str(selection.get("grid_source") or row.get("grid_source") or "").strip()
             grid_type = str(selection.get("grid_type") or row.get("grid_type") or "").strip()
+            clip_base_source = str(
+                selection.get("clip_base_source")
+                or row.get("clip_base_source")
+                or "facility"
+            ).strip()
             normal_grids, gold_grids = _grid_breakdown(row)
             if not grid_source:
                 raise ValueError("Select a grid source for every selected slot.")
@@ -4055,6 +4085,7 @@ def send_combined_charge_sheet():
                 grid_source, grid_type, row.get("actual_slots") or 1,
                 bool(row.get("processing_requested")),
                 clipped_grids=row.get("clipped_grids") or 0,
+                clip_base_source=clip_base_source,
                 normal_grids=normal_grids,
                 gold_grids=gold_grids,
             )
@@ -4095,11 +4126,11 @@ def send_combined_charge_sheet():
     )
     for service_key, booking_id, row in items:
         cur.execute(
-            f"UPDATE {_CHARGE_SHEET_TABLES[service_key][0]} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, "
+            f"UPDATE {_CHARGE_SHEET_TABLES[service_key][0]} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, clip_base_source=?, "
             "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?, "
             "processing_charge=?, subtotal=?, gst_amount=?, grand_total=?, total_billed=?, charge_sheet_id=?, "
             "bill_generated_at=CURRENT_TIMESTAMP, charge_sheet_sent_at=CURRENT_TIMESTAMP WHERE id=?",
-            [row["number_of_grids"], row["service_stage"], row["grid_source"], row["grid_type"],
+            [row["number_of_grids"], row["service_stage"], row["grid_source"], row["grid_type"], row["clip_base_source"],
              str(row["grid_charge"]), str(row["handling_charge"]), str(row["clip_base_charge"]), str(row["slot_charge"]),
              str(row["freezing_charge"]), str(row["clipping_charge"]), str(row["processing_charge"]), str(row["subtotal"]),
              str(row["gst_amount"]), str(row["grand_total"]), str(row["total_billed"]), charge_sheet_id, booking_id],

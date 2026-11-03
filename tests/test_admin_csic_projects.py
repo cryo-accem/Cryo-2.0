@@ -173,6 +173,75 @@ class AdminCsicBillingTests(unittest.TestCase):
         self.assertEqual(booking["is_csic"], 0)
         self.assertIsNone(booking["csic_final_amount"])
 
+    def test_screening_completion_persists_lab_provided_clip_base_source(self):
+        booking_id = self._add_ongoing_booking()
+        response = self._complete_screening(booking_id, clip_base_source="self_owned")
+        self.assertEqual(response.status_code, 302)
+
+        with self.app.app_context():
+            conn = database.get_db()
+            booking = conn.execute(
+                "SELECT clip_base_source, clip_base_charge "
+                "FROM screening_bookings WHERE id=?",
+                [booking_id],
+            ).fetchone()
+            conn.close()
+        self.assertEqual(booking["clip_base_source"], "self_owned")
+        self.assertEqual(Decimal(str(booking["clip_base_charge"])), Decimal("0.00"))
+
+    def test_data_collection_completion_persists_lab_provided_clip_base_source(self):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, esm, sample_name, grids,
+                    days, status, registration_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'ongoing', ?)""",
+                (
+                    "Data User",
+                    "Data PI",
+                    "data@example.test",
+                    "Industry",
+                    "Example Institute",
+                    "Data sample",
+                    2,
+                    1,
+                    datetime.date.today().isoformat(),
+                ),
+            )
+            booking_id = cur.lastrowid
+            conn.commit()
+            cur.close()
+            conn.close()
+
+        with patch("blueprints.admin.send_email"):
+            response = self.client.post(
+                f"/admin/datacollecting/complete/{booking_id}",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "user_category": "industry",
+                    "service_stage": "Data Collection",
+                    "actual_slots": "1",
+                    "actual_grids": "2",
+                    "grid_source": "self_owned",
+                    "clip_base_source": "self_owned",
+                    "clipped_grids": "0",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+
+        with self.app.app_context():
+            conn = database.get_db()
+            booking = conn.execute(
+                "SELECT clip_base_source, clip_base_charge "
+                "FROM bookings WHERE id=?",
+                [booking_id],
+            ).fetchone()
+            conn.close()
+        self.assertEqual(booking["clip_base_source"], "self_owned")
+        self.assertEqual(Decimal(str(booking["clip_base_charge"])), Decimal("0.00"))
+
     def test_screening_completion_shows_side_by_side_storage_and_billing_panes(self):
         response = self.client.get("/admin/screening")
         self.assertEqual(response.status_code, 200)
@@ -454,6 +523,31 @@ class AdminCsicBillingTests(unittest.TestCase):
             clipped_grids=2,
         )
         self.assertEqual(partially_clipped["clip_base_charge"], Decimal("10000.00"))
+
+    def test_lab_provided_clip_base_is_not_charged_and_is_labeled_on_invoice(self):
+        charges = calculate_charge_sheet(
+            "academic",
+            "Screening / Clipping",
+            2,
+            "self_owned",
+            actual_slots=1,
+            clip_base_source="self_owned",
+        )
+        self.assertEqual(charges["clip_base_source"], "self_owned")
+        self.assertEqual(charges["clip_base_charge"], Decimal("0.00"))
+        row = {
+            **charges,
+            "grid_source": "self_owned",
+            "number_of_grids": 2,
+        }
+        clip_line = next(
+            line for line in _billing_lines(row, "Screening")
+            if line[0].startswith("C-clip + Base ring")
+        )
+        self.assertEqual(
+            clip_line,
+            ("C-clip + Base ring (Lab / user provided)", "2 grid(s)", Decimal("0.00")),
+        )
 
     def test_admin_panel_keeps_csic_revenue_insight_but_removes_project_controls(self):
         with self.app.app_context():
