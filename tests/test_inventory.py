@@ -370,6 +370,85 @@ class GridInventoryTests(unittest.TestCase):
         ]
         self.assertEqual(position_order, sorted(position_order))
 
+    def test_renaming_falcon_container_updates_all_active_grids_and_preserves_history(self):
+        codes = self.create_batch(3)
+        for position, code in enumerate(codes[:2], start=1):
+            self.post_storage(code, "Falcon-Ashmita", "Box-1", str(position))
+        self.post_storage(codes[2], "Falcon-Ashmitha", "Box-1", "3")
+
+        response = self.client.post(
+            "/admin/inventory/storage/rename-falcon",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "current_falcon_container_id": "Falcon-Ashmita",
+                "new_falcon_container_id": "Falcon-Ashmitha",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        storage = self.client.get("/admin/inventory/storage")
+        self.assertEqual(storage.status_code, 200)
+        self.assertIn(b"Falcon-Ashmitha", storage.data)
+        self.assertIn(b"Update Falcon name for all grids", storage.data)
+        self.assertNotIn(b"Falcon-Ashmita", storage.data)
+        self.assertEqual(storage.data.count(b"<summary>Falcon-Ashmitha"), 1)
+
+        conn = database.get_db()
+        active = conn.execute(
+            """SELECT falcon_container_id FROM storage_locations
+               WHERE removed_at IS NULL ORDER BY grid_id"""
+        ).fetchall()
+        history = conn.execute(
+            """SELECT COUNT(*) AS count FROM storage_locations
+               WHERE falcon_container_id='Falcon-Ashmita'"""
+        ).fetchone()
+        events = conn.execute(
+            """SELECT COUNT(*) AS count FROM grid_events
+               WHERE operation_reference='FALCON-CONTAINER-RENAME'"""
+        ).fetchone()
+        conn.close()
+        self.assertEqual([row["falcon_container_id"] for row in active], ["Falcon-Ashmitha"] * 3)
+        self.assertEqual(history["count"], 2)
+        self.assertEqual(events["count"], 2)
+
+    def test_renaming_falcon_container_collision_rolls_back_all_grids(self):
+        codes = self.create_batch(2)
+        self.post_storage(codes[0], "Falcon-old", "Box-shared", "1")
+        self.post_storage(codes[1], "Falcon-old", "Box-shared", "2")
+        collision_code = self.create_batch(1)[0]
+        self.post_storage(collision_code, "Falcon-new", "Box-shared", "2")
+
+        response = self.client.post(
+            "/admin/inventory/storage/rename-falcon",
+            data={
+                "_csrf_token": self.csrf_token(),
+                "current_falcon_container_id": "Falcon-old",
+                "new_falcon_container_id": "Falcon-new",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"position Box-shared / 2 is occupied", response.data)
+        conn = database.get_db()
+        active = conn.execute(
+            """SELECT falcon_container_id, grid_position FROM storage_locations
+               WHERE grid_id IN (
+                 SELECT grid_id FROM inventory_grids WHERE grid_code IN (?, ?)
+               ) AND removed_at IS NULL ORDER BY grid_position""",
+            codes,
+        ).fetchall()
+        rename_events = conn.execute(
+            """SELECT COUNT(*) AS count FROM grid_events
+               WHERE operation_reference='FALCON-CONTAINER-RENAME'"""
+        ).fetchone()
+        conn.close()
+        self.assertEqual(
+            [(row["falcon_container_id"], row["grid_position"]) for row in active],
+            [("Falcon-old", "1"), ("Falcon-old", "2")],
+        )
+        self.assertEqual(rename_events["count"], 0)
+
     def test_grid_detail_loads_and_active_storage_grid_can_be_discarded_individually(self):
         grid_code = self.create_batch(1)[0]
         self.assertEqual(

@@ -11,6 +11,12 @@
         {% for container, container_grids in locations|groupby('falcon_container_id') %}
           <details class="inventory-storage-container">
             <summary>{{ container }} <span>{{ container_grids|length }} grid(s)</span></summary>
+            <form class="inventory-inline-form" method="post" action="{{ url_for('inventory.rename_falcon_container_route') }}" onsubmit="return confirm('Rename this Falcon container for all {{ container_grids|length }} active stored grid(s)? Previous storage locations will remain in history.');">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="current_falcon_container_id" value="{{ container }}">
+              <label>Rename Falcon container<input name="new_falcon_container_id" maxlength="100" required value="{{ container }}"></label>
+              <button class="button small secondary" type="submit">Update Falcon name for all grids</button>
+            </form>
             <div class="inventory-storage-boxes">
               {% for box, box_grids in container_grids|groupby('grid_box_name') %}
                 <details class="inventory-storage-box">

@@ -118,6 +118,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "inventory.bulk_discard",
     "inventory.grid_storage",
     "inventory.storage",
+    "inventory.rename_falcon_container_route",
     "inventory.sessions",
     "inventory.session_detail",
     "inventory.complete_grid_session",

@@ -1398,6 +1398,104 @@ def store_grid(grid_code, destination, actor_id, notes=None):
         connection.close()
 
 
+def rename_falcon_container(current_name, new_name, actor_id):
+    current_name = _text(current_name, "Current Falcon container name", 100, True)
+    new_name = _text(new_name, "New Falcon container name", 100, True)
+    if current_name == new_name:
+        raise InventoryError("Enter a different Falcon container name.")
+
+    event_time = now_utc()
+    notes = f"Falcon container renamed from {current_name} to {new_name}."
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        _begin(connection)
+        cursor.execute(
+            """SELECT sl.storage_location_id, sl.grid_id, sl.falcon_container_id,
+                      sl.grid_box_name, sl.grid_position, sl.stored_at, g.grid_code
+               FROM storage_locations sl
+               JOIN inventory_grids g ON g.grid_id=sl.grid_id
+               WHERE sl.falcon_container_id=? AND sl.removed_at IS NULL
+               ORDER BY sl.storage_location_id""" + _lock_clause(),
+            [current_name],
+        )
+        locations = cursor.fetchall()
+        if not locations:
+            raise InventoryError(
+                f"No active grids were found in Falcon container {current_name}."
+            )
+
+        for location in locations:
+            cursor.execute(
+                """SELECT g.grid_code FROM storage_locations sl
+                   JOIN inventory_grids g ON g.grid_id=sl.grid_id
+                   WHERE sl.falcon_container_id=? AND sl.grid_box_name=?
+                     AND sl.grid_position=? AND sl.removed_at IS NULL
+                     AND sl.grid_id<>? LIMIT 1""" + _lock_clause(),
+                [
+                    new_name,
+                    location["grid_box_name"],
+                    location["grid_position"],
+                    location["grid_id"],
+                ],
+            )
+            occupied = cursor.fetchone()
+            if occupied:
+                raise InventoryError(
+                    f"Cannot rename the Falcon container: position "
+                    f"{location['grid_box_name']} / {location['grid_position']} "
+                    f"is occupied by {occupied['grid_code']} in {new_name}."
+                )
+
+            old_label = (
+                f"{location['falcon_container_id']} / "
+                f"{location['grid_box_name']} / {location['grid_position']}"
+            )
+            new_label = (
+                f"{new_name} / {location['grid_box_name']} / "
+                f"{location['grid_position']}"
+            )
+            cursor.execute(
+                """UPDATE storage_locations SET removed_at=?, removed_by=?
+                   WHERE storage_location_id=? AND removed_at IS NULL""",
+                [event_time, actor_id, location["storage_location_id"]],
+            )
+            cursor.execute(
+                """INSERT INTO storage_locations
+                   (grid_id, falcon_container_id, grid_box_name, grid_position,
+                    stored_at, stored_by, notes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    location["grid_id"],
+                    new_name,
+                    location["grid_box_name"],
+                    location["grid_position"],
+                    event_time,
+                    actor_id,
+                    notes,
+                ],
+            )
+            _event(
+                cursor,
+                location["grid_id"],
+                "storage_relocation",
+                actor_id,
+                old_value=old_label,
+                new_value=new_label,
+                notes=notes,
+                operation_reference="FALCON-CONTAINER-RENAME",
+                event_time=event_time,
+            )
+        connection.commit()
+        return len(locations)
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def create_data_session(fields, actor_id):
     selected = fields.getlist("grid_codes") if hasattr(fields, "getlist") else fields.get("grid_codes", [])
     if isinstance(selected, str):

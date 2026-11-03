@@ -16,7 +16,8 @@ from inventory_service import (
     dashboard_storage, facility_time, grid_booking_links, grid_details,
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
     list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
-    discard_grid_from_storage, register_freezing, search_grid_box_groups, search_storage, session_details,
+    discard_grid_from_storage, register_freezing, rename_falcon_container,
+    search_grid_box_groups, search_storage, session_details,
     set_grid_type_active, store_grid, unlink_grid_from_booking,
     discard_grids, update_clipping, update_grid_type,
 )
@@ -417,6 +418,25 @@ def storage():
         flash(str(exc), "error")
         locations = []
     return render_template("inventory_storage.html", locations=locations, filters=request.args)
+
+
+@inventory_bp.route("/storage/rename-falcon", methods=["POST"])
+def rename_falcon_container_route():
+    current_name = request.form.get("current_falcon_container_id")
+    new_name = request.form.get("new_falcon_container_id")
+    try:
+        count = rename_falcon_container(current_name, new_name, _actor_id())
+    except InventoryError as exc:
+        flash(str(exc), "error")
+    except (sqlite3.IntegrityError, pymysql.err.IntegrityError) as exc:
+        flash(_integrity_message(exc), "error")
+    else:
+        flash(
+            f"Renamed the Falcon container for {count} stored grid(s). "
+            "Previous storage locations remain in the history.",
+            "success",
+        )
+    return redirect(url_for("inventory.storage"))
 
 
 @inventory_bp.route("/sessions", methods=["GET", "POST"])
