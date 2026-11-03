@@ -1282,29 +1282,37 @@ def complete_booking_grid_moves(
                 f"No more than {MAX_GRIDS_PER_BATCH} additional grids can be added to inventory at once."
             )
         new_type_ids = fields.getlist("inventory_new_grid_type_id")
+        new_sample_names = fields.getlist("inventory_new_sample_name")
         new_containers = fields.getlist("inventory_new_falcon")
         new_boxes = fields.getlist("inventory_new_box")
         new_positions = fields.getlist("inventory_new_position")
+        if not new_sample_names:
+            new_sample_names = [booking["sample_name"]] * additional_count
         if not (
             len(new_type_ids) == len(new_containers)
-            == len(new_boxes) == len(new_positions) == additional_count
+            == len(new_sample_names) == len(new_boxes) == len(new_positions) == additional_count
         ):
             raise InventoryError(
-                "Enter a grid type and storage location for each additional grid."
+                "Enter a sample name, grid type, and storage location for each additional grid."
             )
         if additional_count:
-            sample_id = _create_sample(
-                cursor,
-                {
-                    "sample_name": booking["sample_name"],
-                    "researcher_name": booking["user_name"] or "Booking user",
-                    "lab_name": booking["esm"] or booking["origin"] or "ACCEM",
-                    "external_reference": f"{operation_prefix}-{booking_id}",
-                },
-                actor_id,
-                event_time,
-            )
+            sample_ids = {}
             for index in range(additional_count):
+                sample_name = _text(
+                    new_sample_names[index], "Sample name", 180, True
+                )
+                if sample_name not in sample_ids:
+                    sample_ids[sample_name] = _create_sample(
+                        cursor,
+                        {
+                            "sample_name": sample_name,
+                            "researcher_name": booking["user_name"] or "Booking user",
+                            "lab_name": booking["esm"] or booking["origin"] or "ACCEM",
+                            "external_reference": f"{operation_prefix}-{booking_id}",
+                        },
+                        actor_id,
+                        event_time,
+                    )
                 grid_type_id = _positive_int(new_type_ids[index], "grid type")
                 cursor.execute(
                     "SELECT grid_type_id FROM grid_types WHERE grid_type_id=? AND active=1",
@@ -1323,7 +1331,7 @@ def complete_booking_grid_moves(
                        (grid_code, batch_id, sample_id, grid_type_id, current_status,
                         created_at, created_by)
                        VALUES (?, NULL, ?, ?, 'Stored', ?, ?)""",
-                    (grid_code, sample_id, grid_type_id, event_time, actor_id),
+                    (grid_code, sample_ids[sample_name], grid_type_id, event_time, actor_id),
                 )
                 grid_id = cursor.lastrowid
                 cursor.execute(

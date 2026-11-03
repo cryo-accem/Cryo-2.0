@@ -189,8 +189,17 @@
       const card = document.createElement("fieldset");
       card.className = "completion-mapped-grid";
       const legend = document.createElement("legend");
-      legend.textContent = `New grid ${index + 1} · ${form.dataset.sampleName || "Booking sample"}`;
+      legend.textContent = `New grid ${index + 1}`;
       card.append(legend);
+      const sampleLabel = document.createElement("label");
+      sampleLabel.textContent = "Sample name";
+      const sampleName = document.createElement("input");
+      sampleName.name = "inventory_new_sample_name";
+      sampleName.maxLength = 180;
+      sampleName.required = true;
+      sampleName.value = form.dataset.sampleName || "";
+      sampleLabel.append(sampleName);
+      card.append(sampleLabel);
       const typeLabel = document.createElement("label");
       typeLabel.textContent = "Grid type";
       const type = document.createElement("select");
@@ -200,10 +209,10 @@
       inventoryGridTypes.forEach((item) => type.add(new Option(item.grid_type_name, item.grid_type_id)));
       typeLabel.append(type);
       card.append(typeLabel);
-      for (const [name, label, maxLength] of [
-        ["inventory_new_falcon", "Falcon container", 100],
-        ["inventory_new_box", "Grid box", 100],
-        ["inventory_new_position", "Grid position", 40],
+      for (const [name, label, maxLength, copyLabel] of [
+        ["inventory_new_falcon", "Falcon container", 100, "Copy first Falcon to all grids"],
+        ["inventory_new_box", "Grid box", 100, "Copy first grid box to all grids"],
+        ["inventory_new_position", "Grid position", 40, ""],
       ]) {
         const wrapper = document.createElement("label");
         wrapper.textContent = label;
@@ -212,11 +221,33 @@
         input.maxLength = maxLength;
         input.required = true;
         wrapper.append(input);
-        card.append(wrapper);
+        const field = document.createElement("div");
+        field.append(wrapper);
+        if (index === 0 && copyLabel) {
+          const copyButton = document.createElement("button");
+          copyButton.type = "button";
+          copyButton.className = "button small secondary";
+          copyButton.dataset.copyFirstGridField = name;
+          copyButton.textContent = copyLabel;
+          field.append(copyButton);
+        }
+        card.append(field);
       }
       additionalGridFields.append(card);
     }
   };
+  additionalGridFields.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-copy-first-grid-field]");
+    if (!button) return;
+    const inputs = [...additionalGridFields.querySelectorAll(
+      `input[name="${button.dataset.copyFirstGridField}"]`,
+    )];
+    const firstValue = inputs[0]?.value || "";
+    inputs.slice(1).forEach((input) => {
+      input.value = firstValue;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  });
   const updateFields = () => {
     clippedGrids.disabled = !clippedToggle.checked;
     document.getElementById("clipped-grids-label").hidden = !clippedToggle.checked;

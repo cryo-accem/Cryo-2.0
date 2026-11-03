@@ -2068,6 +2068,10 @@ class GridInventoryTests(unittest.TestCase):
             self.assertEqual(page.status_code, 200)
             self.assertIn(b"Save additional grids in inventory", page.data)
             self.assertIn(b"No pre-linked grids. Add new grids below", page.data)
+            self.assertIn(b"inventory_new_sample_name", page.data)
+            self.assertIn(b"Copy first Falcon to all grids", page.data)
+            self.assertIn(b"Copy first grid box to all grids", page.data)
+            self.assertIn(b"data-copy-first-grid-field", page.data)
             self.assertIn(
                 b"additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0",
                 page.data,
@@ -2118,6 +2122,10 @@ class GridInventoryTests(unittest.TestCase):
                             "grid_source": "user provided",
                             "grid_type": "",
                             "clipped_grids": "0",
+                            "inventory_new_sample_name": [
+                                f"{sample_name} A",
+                                f"{sample_name} B",
+                            ],
                             "inventory_new_grid_type_id": [str(grid_type_id)] * 2,
                             "inventory_new_falcon": [f"{service_type}-FALCON"] * 2,
                             "inventory_new_box": [f"{service_type}-BOX"] * 2,
@@ -2136,16 +2144,16 @@ class GridInventoryTests(unittest.TestCase):
                        JOIN inventory_samples s ON s.sample_id=g.sample_id
                        LEFT JOIN storage_locations sl
                          ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
-                       WHERE s.sample_name=? AND s.researcher_name=?
+                       WHERE s.researcher_name=? AND s.sample_name LIKE ?
                        ORDER BY g.grid_id""",
-                    [sample_name, user_name],
+                    [user_name, f"{sample_name}%"],
                 ).fetchall()
                 events = conn.execute(
                     """SELECT e.event_type, e.notes
                        FROM grid_events e JOIN inventory_grids g ON g.grid_id=e.grid_id
                        JOIN inventory_samples s ON s.sample_id=g.sample_id
-                       WHERE s.sample_name=? AND s.researcher_name=?""",
-                    [sample_name, user_name],
+                       WHERE s.researcher_name=? AND s.sample_name LIKE ?""",
+                    [user_name, f"{sample_name}%"],
                 ).fetchall()
                 link_table, booking_column = (
                     ("screening_booking_grids", "screening_booking_id")
@@ -2159,6 +2167,10 @@ class GridInventoryTests(unittest.TestCase):
                 conn.close()
 
                 self.assertEqual(len(grids), 2)
+                self.assertEqual(
+                    {grid["sample_name"] for grid in grids},
+                    {f"{sample_name} A", f"{sample_name} B"},
+                )
                 self.assertEqual(linked_count, 2)
                 self.assertTrue(all(grid["batch_id"] is None for grid in grids))
                 self.assertTrue(all(grid["current_status"] == "Stored" for grid in grids))
