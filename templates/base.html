@@ -6,7 +6,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css', v='20261103-completion-modal-polish-v2') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css', v='20261103-storage-name-suggestions-v1') }}">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
   <title>{% block title %}{% if page_content %}ACCEM | {{ page_content.title }}{% else %}ACCEM | Cryo-Electron Microscopy{% endif %}{% endblock %}</title>
 </head>
@@ -342,6 +342,9 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
 <script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-wav-audio') }}" defer></script>
+{% endif %}
+{% if request.path.startswith('/admin') and request.path != '/admin/' %}
+<script src="{{ url_for('static', filename='js/storage_name_suggestions.js', v='20261103-storage-name-suggestions-v1') }}" data-suggestions-url="{{ url_for('inventory.storage_name_suggestions_json') }}" defer></script>
 {% endif %}
 </body>
 </html>

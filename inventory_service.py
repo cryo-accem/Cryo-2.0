@@ -2327,6 +2327,31 @@ def search_storage(args):
         connection.close()
 
 
+def storage_name_suggestions(limit=20):
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        suggestions = {}
+        for key, column in (
+            ("falcons", "falcon_container_id"),
+            ("boxes", "grid_box_name"),
+        ):
+            cursor.execute(
+                f"""SELECT {column} AS name
+                    FROM storage_locations
+                    WHERE TRIM({column})<>''
+                    GROUP BY {column}
+                    ORDER BY COUNT(*) DESC, MAX(storage_location_id) DESC
+                    LIMIT ?""",
+                [limit],
+            )
+            suggestions[key] = [row["name"] for row in cursor.fetchall()]
+        return suggestions
+    finally:
+        cursor.close()
+        connection.close()
+
+
 def list_sessions():
     connection = get_db()
     cursor = connection.cursor()

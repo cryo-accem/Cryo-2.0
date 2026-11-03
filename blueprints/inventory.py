@@ -17,7 +17,7 @@ from inventory_service import (
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
     list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
     discard_grid_from_storage, register_freezing, rename_falcon_container,
-    search_grid_box_groups, search_storage, session_details,
+    search_grid_box_groups, search_storage, session_details, storage_name_suggestions,
     set_grid_type_active, store_grid, unlink_grid_from_booking,
     discard_grids, update_clipping, update_grid_type,
 )
@@ -240,6 +240,11 @@ def matching_samples_json():
         }
         for sample in matching_inventory_samples(researcher_name, sample_name)
     ])
+
+
+@inventory_bp.route("/api/storage-name-suggestions")
+def storage_name_suggestions_json():
+    return jsonify(storage_name_suggestions())
 
 
 @inventory_bp.route("/grids/<grid_code>")

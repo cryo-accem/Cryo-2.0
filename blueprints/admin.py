@@ -110,6 +110,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "inventory.grid_types",
     "inventory.samples_json",
     "inventory.matching_samples_json",
+    "inventory.storage_name_suggestions_json",
     "inventory.grid_detail",
     "inventory.grid_clipping",
     "inventory.grid_type",

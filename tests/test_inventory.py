@@ -271,7 +271,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         content = dashboard.data.decode()
         self.assertIn(
-            "/static/css/site.css?v=20261103-completion-modal-polish-v2",
+            "/static/css/site.css?v=20261103-storage-name-suggestions-v1",
             content,
         )
         self.assertIn("Falcon-A", content)
@@ -369,6 +369,22 @@ class GridInventoryTests(unittest.TestCase):
             for position in range(1, 11)
         ]
         self.assertEqual(position_order, sorted(position_order))
+
+    def test_storage_name_suggestions_return_previously_used_falcons_and_boxes(self):
+        codes = self.create_batch(3)
+        self.post_storage(codes[0], "Falcon-common", "Box-common", "1")
+        self.post_storage(codes[1], "Falcon-common", "Box-common", "2")
+        self.post_storage(codes[2], "Falcon-other", "Box-other", "1")
+
+        response = self.client.get("/admin/inventory/api/storage-name-suggestions")
+
+        self.assertEqual(response.status_code, 200)
+        suggestions = response.get_json()
+        self.assertEqual(suggestions["falcons"][0], "Falcon-common")
+        self.assertEqual(suggestions["boxes"][0], "Box-common")
+        self.assertIn(b"storage_name_suggestions.js", self.client.get(
+            "/admin/inventory/storage"
+        ).data)
 
     def test_renaming_falcon_container_updates_all_active_grids_and_preserves_history(self):
         codes = self.create_batch(3)
@@ -2151,7 +2167,7 @@ class GridInventoryTests(unittest.TestCase):
             self.assertIn(b"Copy first Falcon to all grids", page.data)
             self.assertIn(b"Copy first grid box to all grids", page.data)
             self.assertIn(b"data-copy-first-grid-field", page.data)
-            self.assertIn(b"20261103-completion-modal-polish-v2", page.data)
+            self.assertIn(b"20261103-storage-name-suggestions-v1", page.data)
             self.assertIn(
                 b"additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0",
                 page.data,
