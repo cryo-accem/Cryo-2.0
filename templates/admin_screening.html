@@ -194,6 +194,7 @@
       const sampleLabel = document.createElement("label");
       sampleLabel.textContent = "Sample name";
       const sampleName = document.createElement("input");
+      sampleName.type = "text";
       sampleName.name = "inventory_new_sample_name";
       sampleName.maxLength = 180;
       sampleName.required = true;
@@ -217,16 +218,18 @@
         const wrapper = document.createElement("label");
         wrapper.textContent = label;
         const input = document.createElement("input");
+        input.type = "text";
         input.name = name;
         input.maxLength = maxLength;
         input.required = true;
         wrapper.append(input);
         const field = document.createElement("div");
+        field.className = "completion-storage-field";
         field.append(wrapper);
         if (index === 0 && copyLabel) {
           const copyButton = document.createElement("button");
           copyButton.type = "button";
-          copyButton.className = "button small secondary";
+          copyButton.className = "button small secondary completion-copy-first";
           copyButton.dataset.copyFirstGridField = name;
           copyButton.textContent = copyLabel;
           field.append(copyButton);

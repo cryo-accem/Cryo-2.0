@@ -271,7 +271,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(dashboard.status_code, 200)
         content = dashboard.data.decode()
         self.assertIn(
-            "/static/css/site.css?v=20261023-grid-identity-first-v1",
+            "/static/css/site.css?v=20261103-completion-modal-polish-v2",
             content,
         )
         self.assertIn("Falcon-A", content)
@@ -2072,6 +2072,7 @@ class GridInventoryTests(unittest.TestCase):
             self.assertIn(b"Copy first Falcon to all grids", page.data)
             self.assertIn(b"Copy first grid box to all grids", page.data)
             self.assertIn(b"data-copy-first-grid-field", page.data)
+            self.assertIn(b"20261103-completion-modal-polish-v2", page.data)
             self.assertIn(
                 b"additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0",
                 page.data,
