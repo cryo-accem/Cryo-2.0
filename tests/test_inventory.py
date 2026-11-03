@@ -2067,6 +2067,11 @@ class GridInventoryTests(unittest.TestCase):
             page = self.client.get(path)
             self.assertEqual(page.status_code, 200)
             self.assertIn(b"Save additional grids in inventory", page.data)
+            self.assertIn(b"No pre-linked grids. Add new grids below", page.data)
+            self.assertIn(
+                b"additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0",
+                page.data,
+            )
 
         for service_type, register, load_path, complete_path in cases:
             with self.subTest(service_type=service_type):

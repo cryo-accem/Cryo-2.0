@@ -24,6 +24,13 @@
           <h3>Grid storage</h3>
           <p>Choose per grid. Marking a grid discarded keeps its history but makes it unavailable for future booking.</p>
           <section id="mapped-grid-storage" class="completion-mapped-grids"></section>
+          <section id="additional-grid-storage" class="completion-mapped-grids">
+            <h3>Add grids without a freezing record</h3>
+            <p>Enter the actual grid count in Billing, then choose this option to register and store unlinked grids.</p>
+            <p data-additional-grid-count></p>
+            <label class="completion-checkbox"><input type="checkbox" name="add_inventory_grids" value="1"> Save additional grids in inventory</label>
+            <div data-additional-grid-fields></div>
+          </section>
         </section>
         <section class="completion-pane completion-pane--billing">
           <h3>Billing and revenue</h3>
@@ -48,13 +55,6 @@
           <div class="completion-error" id="completion-error" hidden role="alert"></div>
         </section>
       </div>
-      <section id="additional-grid-storage" class="completion-mapped-grids" hidden>
-        <h3>Add unlinked grids to inventory</h3>
-        <p>These grids will be registered as stored inventory without a freezing record.</p>
-        <p data-additional-grid-count></p>
-        <label class="completion-checkbox"><input type="checkbox" name="add_inventory_grids" value="1"> Save additional grids in inventory</label>
-        <div data-additional-grid-fields></div>
-      </section>
       <div class="completion-modal__actions"><button type="submit" class="button" data-confirm-completion disabled><i class="fa-solid fa-check" aria-hidden="true"></i> Confirm &amp; complete</button></div>
     </form>
   </div>
@@ -95,7 +95,7 @@
     storageFields.replaceChildren();
     if (!grids.length) {
       const empty = document.createElement("p");
-      empty.textContent = "No linked grids need storage details for this booking.";
+      empty.textContent = "No pre-linked grids. Add new grids below to save them without a freezing record.";
       storageFields.append(empty);
       updateAdditionalGridStorage();
       return;
@@ -177,8 +177,12 @@
   const updateAdditionalGridStorage = () => {
     const actualGridCount = Number.parseInt(form.actual_grids.value, 10) || 0;
     const additionalCount = Math.max(0, actualGridCount - linkedGridCount);
-    additionalGridStorage.hidden = additionalCount === 0;
-    additionalGridCount.textContent = `${additionalCount} additional grid${additionalCount === 1 ? "" : "s"} can be added based on the actual grid count.`;
+    additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0;
+    additionalGridCount.textContent = additionalCount
+      ? `${additionalCount} additional grid${additionalCount === 1 ? "" : "s"} can be added based on the actual grid count.`
+      : linkedGridCount === 0
+        ? "Enter the actual grid count in Billing to enable storage fields for new grids."
+        : "There are no additional grids beyond those already linked to this booking.";
     additionalGridFields.replaceChildren();
     if (!addInventoryGrids.checked || additionalCount === 0) return;
     for (let index = 0; index < additionalCount; index += 1) {
