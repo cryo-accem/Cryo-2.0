@@ -41,6 +41,10 @@ from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, r
 from blueprints.imaging import register_imaging
 from blueprints.screening import register_screening
 from charge_sheet import generate_charge_sheet
+from billing_address import (
+    BILL_TO_COLUMNS, BILL_TO_FIELDS, bill_to_from_form, build_address_book, missing_bill_to,
+    suggested_bill_to,
+)
 from normalization import normalize_pi_name, clean_display_name, preferred_pi_label
 from blueprints.public import (
     EMDB_REVIEW_CACHE_KEY, EMDB_STRUCTURES_CACHE_KEY, PI_USERS,
@@ -4716,6 +4720,21 @@ def _next_charge_sheet_id(cur, origin, completed_date):
     return f"{academic_year}_{code}_{sequence:04d}"
 
 
+def _missing_bill_to_message(missing):
+    return (
+        "Add the PI billing address before sending (F&A needs it on the charge sheet). "
+        "Missing: " + ", ".join(missing) + "."
+    )
+
+
+def _save_bill_to(cur, table, booking_id, bill_to):
+    cur.execute(
+        f"UPDATE {table} SET " + ", ".join(f"{column}=?" for column in BILL_TO_COLUMNS)
+        + " WHERE id=?",
+        [*(bill_to[column] or None for column in BILL_TO_COLUMNS), booking_id],
+    )
+
+
 @admin_bp.route("/charge-sheet/<service_key>/<int:booking_id>", methods=["POST"])
 def send_charge_sheet(service_key, booking_id):
     if not session.get("admin_logged_in"):
@@ -4780,6 +4799,12 @@ def send_charge_sheet(service_key, booking_id):
         return redirect(url_for("admin.history"))
     if pi_email:
         row["pi_email"] = pi_email
+    bill_to = bill_to_from_form(request.form) or suggested_bill_to(row)
+    missing = missing_bill_to(bill_to, row)
+    if missing:
+        flash(_missing_bill_to_message(missing))
+        return redirect(url_for("admin.history"))
+    row.update(bill_to)
     conn = get_db()
     cur = conn.cursor()
     charge_sheet_id = row.get("charge_sheet_id")
@@ -4845,6 +4870,7 @@ def send_charge_sheet(service_key, booking_id):
                 "charge_sheet_sent_at=COALESCE(charge_sheet_sent_at, CURRENT_TIMESTAMP) WHERE id=?",
                 [booking_id],
             )
+        _save_bill_to(cur, table, booking_id, bill_to)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -4941,6 +4967,7 @@ def preview_charge_sheet(service_key, booking_id):
     row["grid_type"] = grid_type
     row["clip_base_source"] = charges["clip_base_source"]
     row["charge_sheet_id"] = row.get("charge_sheet_id") or f"PREVIEW-{service_key.upper()}-{booking_id}"
+    row.update(bill_to_from_form(request.form) or suggested_bill_to(row))
     pdf = generate_charge_sheet(row, service)
     return send_file(
         io.BytesIO(pdf),
@@ -5047,6 +5074,13 @@ def send_combined_charge_sheet():
         flash("Internal and external bookings cannot be combined on one charge sheet.")
         return redirect(url_for("admin.history"))
     first = items[0][2]
+    bill_to = bill_to_from_form(request.form) or suggested_bill_to(first)
+    missing = missing_bill_to(bill_to, first)
+    if missing:
+        cur.close()
+        conn.close()
+        flash(_missing_bill_to_message(missing))
+        return redirect(url_for("admin.history"))
     existing_ids = {row.get("charge_sheet_id") for _, _, row in items}
     already_sent = [row for _, _, row in items if row.get("_already_sent")]
     if already_sent and not (len(already_sent) == len(items) and len(existing_ids) == 1):
@@ -5069,6 +5103,7 @@ def send_combined_charge_sheet():
             cur, first.get("origin", ""), first.get("completion_date") or first.get("completed_at")
         )
     combined = dict(first)
+    combined.update(bill_to)
     combined["charge_sheet_id"] = charge_sheet_id
     combined["combined_items"] = [row for _, _, row in items]
     for field in ("actual_slots", "number_of_grids", "subtotal", "gst_amount", "grand_total", "total_billed"):
@@ -5100,6 +5135,8 @@ def send_combined_charge_sheet():
                 "Refresh the page and check its charge sheet before sending again."
             )
             return redirect(url_for("admin.history"))
+        for service_key, booking_id, _row in items:
+            _save_bill_to(cur, _CHARGE_SHEET_TABLES[service_key][0], booking_id, bill_to)
         conn.commit()
     except Exception:
         conn.rollback()
@@ -5302,6 +5339,12 @@ def history():
         for row in rows:
             row["csic_audit"] = csic_audit.get((service_key, row["id"]), [])
             row["payment_received"] = is_payment_received_booking(row)
+    address_book = build_address_book(
+        completed_imaging + completed_screening + completed_freezing
+    )
+    for row in completed_imaging + completed_screening + completed_freezing:
+        row["bill_to"] = suggested_bill_to(row, address_book)
+        row["bill_to_missing"] = missing_bill_to(row["bill_to"], row)
     cur.close()
     conn.close()
 
@@ -5314,4 +5357,5 @@ def history():
         is_non_billable_booking=is_non_billable_booking,
         is_csic_booking=is_csic_booking,
         is_billable_booking=is_billable_booking,
+        bill_to_fields=BILL_TO_FIELDS,
     )

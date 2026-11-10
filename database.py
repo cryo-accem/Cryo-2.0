@@ -964,6 +964,11 @@ def _add_completion_columns(cur, table: str):
         "debit_head_details": "TEXT",
         "debit_head_status": "TEXT DEFAULT 'Debit Head Pending'",
         "pi_email": "VARCHAR(150)",
+        "bill_to_name": "TEXT",
+        "bill_to_designation": "TEXT",
+        "bill_to_department": "TEXT",
+        "bill_to_institute": "TEXT",
+        "bill_to_city": "TEXT",
     }
     if not _is_sqlite_url():
         payment_columns = {
@@ -980,6 +985,11 @@ def _add_completion_columns(cur, table: str):
             "debit_head_details": "TEXT",
             "debit_head_status": "VARCHAR(40) DEFAULT 'Debit Head Pending'",
             "pi_email": "VARCHAR(150)",
+            "bill_to_name": "VARCHAR(150)",
+            "bill_to_designation": "VARCHAR(150)",
+            "bill_to_department": "VARCHAR(150)",
+            "bill_to_institute": "VARCHAR(150)",
+            "bill_to_city": "VARCHAR(150)",
         }
 
     for column, column_type in payment_columns.items():

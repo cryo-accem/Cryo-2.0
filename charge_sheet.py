@@ -1,4 +1,5 @@
 from decimal import Decimal
+from billing_address import address_lines
 from io import BytesIO
 import json
 import os
@@ -258,6 +259,15 @@ def _prebilled_grids(row):
         return 0
 
 
+def _to_block(row):
+    """The PI's address, as on the manual sheets, then the user it is for."""
+    # _paragraph() escapes the text, so the values are inserted raw here.
+    address = "<br/>".join(address_lines(row))
+    user = str(row.get("user_name") or "")
+    email = str(row.get("email") or "")
+    return f"<b>{address}</b><br/>User: {user} ({email})"
+
+
 def _billing_lines(row, service):
     if _value(row, "combined_items"):
         lines = []
@@ -409,16 +419,13 @@ def _external_pdf(row, service, category, is_industry):
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     booking_label = _booking_label(row, service)
     date_value = _value(row, "completion_date", _value(row, "completed_at"))
-    institution_name = _value(row, "esm", "") or "Not provided"
     grid_count = _grid_count_label(row)
     is_freezing = _is_freezing_sheet(row, service)
     info = [
         [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]),
          str(_value(row, "charge_sheet_id", f"CS-{row['id']}")),
          _paragraph("<b>Date:</b>", styles["Small"]), _display_date(date_value)],
-        [_paragraph("<b>TO:</b>", styles["Small"]), _paragraph(
-            f"{row['user_name']}<br/>{row['email']}<br/>Institution: {institution_name}",
-            styles["Small"]), "", ""],
+        [_paragraph("<b>To:</b>", styles["Small"]), _paragraph(_to_block(row), styles["Small"]), "", ""],
         [_paragraph("<b>Booking ID(s):</b>", styles["Small"]), booking_label,
          _paragraph("<b>Service:</b>", styles["Small"]), service],
         [_paragraph("<b>User Category:</b>", styles["Small"]), category, "", ""],
@@ -529,7 +536,7 @@ def _internal_pdf(row, service):
     date_value = _value(row, "completion_date", _value(row, "completed_at"))
     story.append(_paragraph(f"<b>Charge Sheet No:</b> {charge_sheet_number}<br/>"
                             f"<b>Date:</b> {_display_date(date_value)}<br/>"
-                            f"<b>TO:</b> {row['user_name']}<br/>Department/Unit: Indian Institute of Science<br/>Email: {row['email']}<br/>"
+                            f"<b>To</b><br/>{_to_block(row)}<br/><br/>"
                             f"<b>Booking ID(s):</b> {booking_label} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal<br/>"
                             f"<b>Number of Grids:</b> {grid_count}<br/>"
                             f"<b>Grid Source:</b> {source_label}"

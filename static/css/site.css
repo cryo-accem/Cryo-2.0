@@ -1027,6 +1027,17 @@ a { color: inherit; }
 .history-edit[open] { min-width: 220px; padding: 10px; border: 1px solid #dce8ee; border-radius: 10px; background: #f8fbfd; }
 .history-edit .stacked-form { max-height: 420px; overflow-y: auto; padding-right: 3px; }
 .history-edit .stacked-form label { display: grid; gap: 4px; color: #5c7280; font-size: 9px; font-weight: 700; }
+/* Charge-sheet "To" (PI billing address) fields */
+.bill-to { min-width: 200px; border: 1px solid #dce8ee; border-radius: 10px; background: #f8fbfd; padding: 6px 10px; }
+.bill-to summary { color: #167da5; font-size: 10px; font-weight: 800; cursor: pointer; }
+.bill-to[open] { display: grid; gap: 6px; padding-bottom: 10px; }
+.bill-to__needed { margin-left: 4px; padding: 1px 6px; border-radius: 999px; background: #fff1d6; color: #8a5300; font-size: 9px; }
+.bill-to__hint { margin: 0; color: #5c7280; font-size: 9px; line-height: 1.4; }
+.bill-to label { display: grid; gap: 3px; color: #5c7280; font-size: 9px; font-weight: 700; }
+.bill-to input { width: 100%; min-width: 0; }
+.combined-charge-panel .bill-to { margin-top: 10px; }
+.combined-charge-panel .bill-to[open] { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.combined-charge-panel .bill-to summary, .combined-charge-panel .bill-to__hint { grid-column: 1 / -1; }
 .history-edit .stacked-form .history-edit__check { display: flex; align-items: center; gap: 7px; }
 .history-edit .stacked-form .history-edit__check input { width: auto; min-height: 0; }
 .csic-booking-toggle { margin: 0 0 8px; }

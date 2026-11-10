@@ -252,7 +252,7 @@ class FreezingInstituteTests(_AppTestCase):
         self.assertEqual(completed["esm"], "Example Institute")
 
         text = _sheet_text(dict(completed), "Freezing")
-        self.assertIn("Institution: Example Institute", text)
+        self.assertIn("Example Institute.", text)
         self.assertNotIn("Not provided", text)
 
     def test_history_edit_keeps_freezing_institute(self):

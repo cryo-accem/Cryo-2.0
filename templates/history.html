@@ -27,6 +27,17 @@
     </div>
   </div>
 
+  {% macro bill_to_inputs(slot, combined=False) %}
+  {% set is_industry = slot.origin|lower in ['industry', 'industrial', 'external industry'] %}
+  <details class="bill-to"{% if combined or slot.bill_to_missing %} open{% endif %}>
+    <summary><i class="fa-solid fa-user" aria-hidden="true"></i> To (PI billing address){% if not combined and slot.bill_to_missing %} <span class="bill-to__needed">details needed</span>{% endif %}</summary>
+    <p class="bill-to__hint">Printed in the "To" block exactly as F&amp;A expects. Saved and reused for this PI's next bookings.</p>
+    {% for column, label, placeholder, industry_required in bill_to_fields %}
+    <label>{{ label }}<input name="{{ column }}" value="{{ slot.bill_to[column] if slot.bill_to else '' }}" placeholder="{{ placeholder }}" maxlength="150" autocomplete="off"{% if combined %} data-bill-to-input{% endif %}{% if industry_required or not (is_industry or combined) %} required{% endif %}></label>
+    {% endfor %}
+  </details>
+  {% endmacro %}
+
   <form method="post" action="{{ url_for('admin.send_combined_charge_sheet') }}" data-combined-charge-form class="data-panel combined-charge-panel">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
     <div class="table-tools combined-charge-toolbar">
@@ -35,6 +46,7 @@
       <button class="button small" type="submit" disabled data-combined-submit>Create combined charge sheet</button>
     </div>
     <input type="hidden" name="selected_slots" data-selected-slots>
+    <div data-combined-bill-to hidden>{{ bill_to_inputs({'origin': ''}, combined=True) }}</div>
   </form>
 
   {% macro completed_table(title, rows, service_key, service_label, has_days=False) %}
@@ -44,7 +56,7 @@
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Receipt status</th></tr></thead>
       <tbody>{% for slot in rows %}
-        <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}">
+        <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}" data-bill-to="{{ slot.bill_to|tojson|forceescape }}">
           <td>{% if is_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
@@ -78,7 +90,8 @@
               <select name="grid_type" aria-label="Grid type"><option value="">Grid type</option><option value="normal_holey_carbon" {{ 'selected' if slot.grid_type == 'normal_holey_carbon' else '' }}>Normal Holey Carbon Grid</option><option value="gold_carbon_graphene" {{ 'selected' if slot.grid_type == 'gold_carbon_graphene' else '' }}>Gold / Carbon Coated / Graphene Oxide Grid</option></select>
               {% if service_key != 'freezing' %}<select name="clip_base_source" required aria-label="C-clip and base ring source"><option value="facility" {{ 'selected' if slot.clip_base_source|default('facility') == 'facility' else '' }}>C-clip + base ring: Facility</option><option value="self_owned" {{ 'selected' if slot.clip_base_source == 'self_owned' else '' }}>C-clip + base ring: Lab / user provided</option></select>{% endif %}
               {% if slot.origin|lower == 'internal' %}<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" placeholder="PI email (optional)" aria-label="PI email">{% endif %}
-              <button class="button small secondary" type="submit" formmethod="post" formaction="{{ url_for('admin.preview_charge_sheet', service_key=service_key, booking_id=slot.id) }}" formtarget="_blank">Preview Charge Sheet</button>
+              {{ bill_to_inputs(slot) }}
+              <button class="button small secondary" type="submit" formnovalidate formmethod="post" formaction="{{ url_for('admin.preview_charge_sheet', service_key=service_key, booking_id=slot.id) }}" formtarget="_blank">Preview Charge Sheet</button>
               <button class="button small" type="submit">{{ 'Resend Charge Sheet' if slot.charge_sheet_sent_at else 'Generate & Send' }}</button>
             </form>
             {% endif %}
@@ -229,6 +242,9 @@
   const payload = form.querySelector("[data-selected-slots]");
   const submit = form.querySelector("[data-combined-submit]");
   const count = form.querySelector("[data-selected-count]");
+  const billTo = form.querySelector("[data-combined-bill-to]");
+  let billToEdited = false;
+  billTo.addEventListener("input", () => { billToEdited = true; });
   const users = [...new Map(rows.map((row) => [row.dataset.userEmail, row.dataset.userName])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
   users.forEach(([email, name]) => {
@@ -252,6 +268,14 @@
     }));
     payload.value = JSON.stringify(selected);
     submit.disabled = selected.length === 0;
+    billTo.hidden = selected.length === 0;
+    billTo.querySelectorAll("input").forEach((input) => { input.disabled = selected.length === 0; });
+    if (selected.length && !billToEdited) {
+      const firstRow = boxes.find((box) => box.checked).closest("tr");
+      let saved = {};
+      try { saved = JSON.parse(firstRow.dataset.billTo || "{}"); } catch (error) { saved = {}; }
+      billTo.querySelectorAll("[data-bill-to-input]").forEach((input) => { input.value = saved[input.name] || ""; });
+    }
     count.textContent = selected.length
       ? `${selected.length} slot(s) selected`
       : "Select billable slots belonging to one user to create or resend one combined charge sheet.";
