@@ -3551,3 +3551,21 @@ html.lightbox-open { overflow: hidden; }
 #dismissed details > summary h2::before { content: "▸"; color: #64748b; font-size: 14px; transition: transform .15s ease; }
 #dismissed details[open] > summary h2::before { transform: rotate(90deg); }
 @media (max-width: 700px) { .pubfinder-action { white-space: normal; } .pubfinder-action .inline-form + .inline-form { margin: 6px 0 0; display: block; } }
+
+/* Drop-down toggles: the faint chevron reads as empty space, so trim the
+   padding after it; word-to-word spacing then matches the plain links. */
+@media (min-width: 801px) {
+  .nav-group__toggle { gap: 5px; }
+}
+@media (min-width: 1001px) {
+  .site-nav .nav-group__toggle { padding-right: 8px; }
+}
+@media (min-width: 1001px) and (max-width: 1200px) {
+  .site-nav .nav-group__toggle { padding-right: 6px; }
+}
+@media (min-width: 1001px) and (max-width: 1100px) {
+  .site-nav .nav-group__toggle { padding-right: 5px; }
+}
+@media (min-width: 801px) and (max-width: 1000px) {
+  .site-nav .nav-group__toggle { padding-right: 7px; }
+}
