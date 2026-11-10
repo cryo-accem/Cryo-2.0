@@ -2233,6 +2233,7 @@ def publication_finder_page():
     emdb = _load_emdb_payload()
     return render_template(
         "admin_publication_finder.html",
+        just_added=session.pop("finder_added", None),
         run=run,
         comparison=comparison,
         emdb=emdb,
@@ -2301,11 +2302,16 @@ def add_finder_publication():
         candidate.get("doi_url") or "",
         candidate.get("year") or "",
     )
-    flash(
-        f"Added to the Publications page: {candidate.get('title')}" if ok else message,
-        "success" if ok else "error",
-    )
-    return redirect(url_for("admin.publication_finder"))
+    if not ok:
+        flash(message, "error")
+        return redirect(url_for("admin.publication_finder"))
+    # Shown as a banner right above the results list (the page jumps there),
+    # so the admin sees the confirmation next to the button they clicked.
+    session["finder_added"] = {
+        "title": str(candidate.get("title") or "")[:300],
+        "year": str(candidate.get("year") or ""),
+    }
+    return redirect(url_for("admin.publication_finder", _anchor="finder-added"))
 
 
 def _load_emdb_payload():

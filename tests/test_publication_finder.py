@@ -412,6 +412,27 @@ class AdminPublicationFinderTests(NoNetworkMixin, unittest.TestCase):
         on_site = html.split('id="on-website"', 1)[1].split('id="not-found-online"', 1)[0]
         self.assertIn("A brand new facility paper", on_site)
 
+    def test_add_shows_a_success_banner_next_to_the_results(self):
+        self.login()
+        _, _, token = self.run_search()
+        response = self.client.post("/admin/publications/finder/add",
+                                    data={"_csrf_token": token, "key": "10.1000/new-paper"})
+        self.assertTrue(response.headers["Location"].endswith("/admin/publications/finder#finder-added"))
+        html = self.client.get("/admin/publications/finder").get_data(as_text=True)
+        banner = html.split('id="finder-added"', 1)[1].split("</div>\n  </div>", 1)[0]
+        self.assertIn("Added to the website", banner)
+        self.assertIn("A brand new facility paper", banner)
+        self.assertIn('href="/publication"', banner)
+        self.assertLess(html.index('id="finder-added"'), html.index('id="not-on-website"'))
+        # Shown once: a later visit has no banner.
+        self.assertNotIn('id="finder-added"', self.client.get("/admin/publications/finder").get_data(as_text=True))
+
+    def test_add_button_shows_busy_label(self):
+        self.login()
+        _, _, _ = self.run_search()
+        html = self.client.get("/admin/publications/finder").get_data(as_text=True)
+        self.assertIn('class="inline-form" data-busy-label="Adding…"', html)
+
     def test_add_rejects_unknown_key(self):
         self.login()
         _, _, token = self.run_search()

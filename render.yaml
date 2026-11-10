@@ -3,7 +3,7 @@ services:
     name: cryo-accem
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app --workers 2 --threads 4 --timeout 60 --preload
+    startCommand: gunicorn main:app --workers 2 --threads 4 --timeout 180 --preload
     healthCheckPath: /
     envVars:
       - key: PYTHON_VERSION

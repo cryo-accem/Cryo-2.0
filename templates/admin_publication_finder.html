@@ -21,7 +21,7 @@
     <td><span class="pubfinder-badge pubfinder-badge--{{ c.confidence }}">{{ c.confidence|capitalize }}</span></td>
     {% if show_add %}
     <td class="pubfinder-action">
-      <form method="post" action="{{ url_for('admin.add_finder_publication') }}" class="inline-form">
+      <form method="post" action="{{ url_for('admin.add_finder_publication') }}" class="inline-form" data-busy-label="Adding…">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="key" value="{{ candidate_key(c) }}">
         <button class="btn btn-load" type="submit"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add to website</button>
@@ -81,6 +81,16 @@
     <div><strong>{{ comparison.on_website_not_found_online|length }}</strong><span>On website, not found online</span></div>
   </div>
 
+  {% if just_added %}
+  <div class="pubfinder-added" id="finder-added" role="status" tabindex="-1">
+    <i class="fa-solid fa-check" aria-hidden="true"></i>
+    <div>
+      <strong>Added to the website</strong>
+      <p>“{{ just_added.title }}”{% if just_added.year %} ({{ just_added.year }}){% endif %} is now on the Publications page.</p>
+      <p class="pubfinder-added__links"><a href="{{ url_for('public.publications') }}" target="_blank" rel="noopener">View Publications page <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a> · <a href="{{ url_for('admin.maintenance') }}">Edit or remove it in Maintenance</a></p>
+    </div>
+  </div>
+  {% endif %}
   <section class="data-panel pubfinder-group" id="not-on-website">
     <h2>Found online, not on website <span class="pubfinder-count">{{ comparison.not_on_website|length }}</span></h2>
     <p class="pubfinder-muted">Review each paper before adding it: “Add to website” creates a managed publication (editable or removable on the Maintenance page).</p>
