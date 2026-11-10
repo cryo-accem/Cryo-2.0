@@ -2300,9 +2300,11 @@ class GridInventoryTests(unittest.TestCase):
                     [grid["grid_position"] for grid in grids], ["A1", "A2"]
                 )
                 self.assertTrue(all(grid["grid_code"].startswith("ACCEM-G-") for grid in grids))
+                # Screening clips every screened grid, so it is recorded too.
                 self.assertEqual(
                     {event["event_type"] for event in events},
-                    {"grid_registered", "initial_storage"},
+                    {"grid_registered", "initial_storage"}
+                    | ({"clipping_status_change"} if service_type == "screening" else set()),
                 )
                 self.assertTrue(
                     any("no freezing record exists" in (event["notes"] or "") for event in events)

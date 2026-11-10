@@ -2,43 +2,104 @@
 {% block title %}ACCEM | Admin dashboard{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back, Drose</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back{% if admin_name %}, {{ admin_name }}{% endif %}</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
+  <section class="dash-attention" aria-labelledby="dash-attention-title">
+    <div class="dash-attention__heading">
+      <div><span class="chart-kicker">Today · {{ revenue.today }}</span><h2 id="dash-attention-title">Needs attention</h2></div>
+      <p class="dash-attention__updated"><i class="fa-regular fa-clock" aria-hidden="true"></i> Updated {{ updated_at }} IST</p>
+    </div>
+    <ul class="dash-attention__grid">
+      {% for item in attention['items'] %}
+      <li class="dash-tile dash-tile--{{ item.key }}{% if item.alert %} dash-tile--alert{% endif %}{% if not item.value %} dash-tile--clear{% endif %}" data-attention="{{ item.key }}">
+        <a href="{{ item.url }}">
+          <span class="dash-tile__label"><i class="fa-solid {{ item.icon }}" aria-hidden="true"></i>{{ item.label }}</span>
+          <span class="dash-tile__value"><strong data-attention-value>{{ item.value }}</strong> <span>{{ item.unit }}</span></span>
+          <span class="dash-tile__detail">{{ item.detail }}</span>
+          <span class="dash-tile__action">{{ item.action }} <span aria-hidden="true">→</span></span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="revenue-dashboard dash-pending" aria-labelledby="pending-payments-title">
+    <div class="revenue-heading">
+      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title" tabindex="-1">Bills awaiting receipt</h2><p>Sent bills not yet marked received in History. Internal debit-head bills are listed separately.</p></div>
+      <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
+    </div>
+    <div class="revenue-cards">
+      <div class="revenue-card"><span>Bills awaiting payment</span><strong>{{ pending_payments.payment_count }} bills</strong></div>
+      <div class="revenue-card"><span>Unpaid bill total</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
+      <div class="revenue-card"><span>Debit-head bills awaiting confirmation</span><strong>{{ pending_payments.debit_head_count }} bills</strong></div>
+    </div>
+    {% if pending_payments.rows %}
+    <div class="table-wrap">
+      <table class="data-table dash-pending__table">
+        <caption class="dash-sr-only">Sent bills awaiting payment or debit-head confirmation, newest first</caption>
+        <thead><tr><th scope="col">Service</th><th scope="col">User / PI</th><th scope="col">Origin</th><th scope="col">Completed</th><th scope="col">Bill</th><th scope="col">Status</th><th scope="col">Bill total</th><th scope="col">Reminder</th></tr></thead>
+        <tbody>
+          {% for item in pending_payments.rows %}
+          <tr>
+            <td data-label="Service">{{ item.service_label }}</td>
+            <td data-label="User / PI"><div><strong>{{ item.user_name }}</strong><small>PI: {{ item.pi_name }}</small></div></td>
+            <td data-label="Origin">{{ item.origin }}</td>
+            <td data-label="Completed">{{ (item.completion_value|string)[:10] if item.completion_value else '—' }}</td>
+            <td data-label="Bill">{{ item.charge_sheet_id or 'Not issued' }}</td>
+            <td data-label="Status"><span class="status-badge waiting">{{ item.tracking_label }}</span></td>
+            <td data-label="Bill total">₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
+            <td data-label="Reminder"><form class="payment-reminder-form" method="post" action="{{ url_for('admin.send_payment_reminder', service_key=item.service_key, booking_id=item.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button small secondary payment-reminder-button" type="submit" aria-label="Send reminder mail to {{ item.user_name }} for {{ item.charge_sheet_id or item.service_label }}">Send reminder mail</button><small class="reminder-count">{{ item.reminder_count }} sent</small></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="empty-message">No sent bills are currently awaiting receipt.</p>
+    {% endif %}
+  </section>
   <div class="dashboard-charts">
     <section class="chart-card">
       <div class="chart-card__heading"><div><span class="chart-kicker">User overview</span><h2>Users by PI</h2><p>Distinct registered users grouped by principal investigator.</p></div><a class="button small secondary" href="{{ url_for('admin.download_pi_users_csv') }}">Download CSV</a></div>
-      <div class="donut-layout">
+      <div class="donut-layout dash-donut-layout">
         <div class="donut-chart" data-donut>
           <svg viewBox="0 0 120 120" aria-label="Users grouped by PI">
+            <circle class="donut-track" cx="60" cy="60" r="52"></circle>
             {% for item in pi_chart %}<circle class="donut-segment" tabindex="0" role="img" aria-label="{{ item.label }}: {{ item.value }} users" cx="60" cy="60" r="52" pathLength="100" style="--segment-color: {{ item.color }}; stroke-dasharray: {{ item.end - item.start }} 100; stroke-dashoffset: -{{ item.start }}" data-label="{{ item.label }}" data-value="{{ item.value }}"></circle>{% endfor %}
           </svg>
           <div class="donut-center"><strong>{{ pi_total }}</strong><span>users</span></div>
           <div class="donut-tooltip" role="status"></div>
         </div>
+        <ul class="dash-legend" aria-label="Users by PI">
+          {% for item in pi_chart %}<li><i style="background: {{ item.color }}" aria-hidden="true"></i><span>{{ item.label }}</span><strong>{{ item.value }}</strong></li>{% else %}<li class="dash-legend__empty">No users recorded yet.</li>{% endfor %}
+        </ul>
       </div>
     </section>
     <section class="chart-card">
       <div class="chart-card__heading"><div><span class="chart-kicker">Queue overview</span><h2>Current workload</h2><p>Registrations currently awaiting facility action.</p></div><i class="fa-solid fa-chart-pie" aria-hidden="true"></i></div>
-      <div class="donut-layout">
+      <div class="donut-layout dash-donut-layout">
         <div class="donut-chart donut-chart--queue" data-donut>
           <svg viewBox="0 0 120 120" aria-label="Waiting registrations by service">
+            <circle class="donut-track" cx="60" cy="60" r="52"></circle>
             {% for item in waiting_chart %}<circle class="donut-segment" tabindex="0" role="img" aria-label="{{ item.label }}: {{ item.value }}" cx="60" cy="60" r="52" pathLength="100" style="--segment-color: {{ item.color }}; stroke-dasharray: {{ item.end - item.start }} 100; stroke-dashoffset: -{{ item.start }}" data-label="{{ item.label }}" data-value="{{ item.value }}"></circle>{% endfor %}
           </svg>
           <div class="donut-center"><strong>{{ waiting_total }}</strong><span>in queue</span></div>
           <div class="donut-tooltip" role="status"></div>
         </div>
+        <ul class="dash-legend" aria-label="Queue by service">
+          {% for item in waiting_chart %}<li><i style="background: {{ item.color }}" aria-hidden="true"></i><span>{{ item.label }}{% if item.label == 'Freezing' %} (active){% else %} (waiting){% endif %}</span><strong>{{ item.value }}</strong></li>{% endfor %}
+        </ul>
       </div>
     </section>
   </div>
   <section class="revenue-dashboard" id="revenue-dashboard" tabindex="-1">
-    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Regular booking revenue and CSIC revenue are tracked separately.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
-    <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %}</p>
+    <div class="revenue-heading"><div><span class="chart-kicker">Accounting</span><h2>Revenue &amp; slot usage</h2><p>Regular booking revenue and CSIC revenue are tracked separately.</p></div><form class="revenue-filter" method="get"><label>Plot <select name="period"><option value="weekly" {% if revenue.period == 'weekly' %}selected{% endif %}>Weekly</option><option value="monthly" {% if revenue.period == 'monthly' %}selected{% endif %}>Monthly</option><option value="annual" {% if revenue.period == 'annual' %}selected{% endif %}>Annual</option></select></label><label>Range <select name="range"><option value="all" {% if revenue.preset == 'all' %}selected{% endif %}>All time</option><option value="this_month" {% if revenue.preset == 'this_month' %}selected{% endif %}>This month</option><option value="last_month" {% if revenue.preset == 'last_month' %}selected{% endif %}>Last month</option><option value="last_3_months" {% if revenue.preset == 'last_3_months' %}selected{% endif %}>Last 3 months</option><option value="this_year" {% if revenue.preset == 'this_year' %}selected{% endif %}>This year</option><option value="last_year" {% if revenue.preset == 'last_year' %}selected{% endif %}>Last year</option><option value="custom" {% if revenue.preset == 'custom' %}selected{% endif %}>Custom dates</option></select></label><span class="custom-range-fields"{% if revenue.preset != 'custom' %} hidden{% endif %}><label>From <input type="date" name="start" value="{{ revenue.start }}"></label><label>To <input type="date" name="end" value="{{ revenue.end }}"></label></span><button class="button small" type="submit">Apply</button></form></div>
+    <p class="revenue-applied-range" role="status">{% if revenue.preset == 'custom' %}Showing revenue from {{ revenue.start }} to {{ revenue.end }}.{% elif revenue.preset == 'all' %}Showing all available revenue.{% else %}Showing {{ revenue.preset|replace('_', ' ') }} revenue.{% endif %} <span class="dash-range-dates">{{ revenue.range_label }}{% if revenue.start %} (IST dates){% endif %}</span></p>{% if revenue.range_error %}<p class="dash-range-error" role="alert">{{ revenue.range_error }}</p>{% endif %}
     <div class="revenue-summary">
       <article class="revenue-primary-stat"><span>Net revenue (except CSIC)</span><strong>₹{{ "{:,.2f}".format(revenue.totals.net) }}</strong><small>Completed billable bookings · CSIC tracked separately</small></article>
       <details class="revenue-details">
         <summary>Billing &amp; usage details</summary>
         <div class="revenue-detail-grid">
-          {% for label, key in [('GST','gst'),('Gross billed','gross'),('Amount billed','billed'),('Bills marked received','received'),('Outstanding','outstanding'),('Completed bookings','bookings'),('24-hour slots used','slots'),('Actual grids','grids'),('CSIC net revenue','csic_net'),('CSIC GST (18%)','csic_gst'),('CSIC gross','csic_gross')] %}
-          <div><span>{{ label }}</span><strong>{% if key in ['gst','gross','billed','received','outstanding','csic_net','csic_gst','csic_gross'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>
+          {% for label, key in [('GST','gst'),('Gross billed','gross'),('Amount billed','billed'),('Bills marked received','received'),('Outstanding','outstanding'),('Completed bookings (excl. CSIC)','bookings'),('CSIC bookings','csic_bookings'),('24-hour slots used','slots'),('Actual grids','grids'),('CSIC net revenue','csic_net'),('CSIC GST (18%)','csic_gst'),('CSIC gross','csic_gross')] %}
+          <div><span>{{ label }}</span><strong>{% if key in ['gst','gross','billed','received','outstanding','csic_net','csic_gst','csic_gross'] %}₹{{ "{:,.2f}".format(revenue.totals[key]) }}{% elif key == 'bookings' %}{{ revenue.completed_bookings }}{% elif key == 'csic_bookings' %}{{ revenue.csic_bookings }}{% else %}{{ revenue.totals[key] }}{% endif %}</strong></div>
           {% endfor %}
         </div>
         <div class="revenue-detail-breakdowns">
@@ -49,43 +110,9 @@
       </details>
     </div>
     <div class="revenue-charts">
-      <section class="revenue-chart-card"><div class="revenue-chart-title"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<button class="button small secondary download-revenue-chart" type="button" aria-label="Download {{ revenue.period|title }} net revenue chart as PNG"><i class="fa-solid fa-download" aria-hidden="true"></i> Download PNG</button>{% endif %}</div>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart" data-chart-title="{{ revenue.period|title }} net revenue">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}" data-label="{{ item.label }}" data-value="{{ item.value }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
-      <section class="revenue-chart-card revenue-comparison-card"><div class="comparison-heading"><div><h3>Revenue comparison</h3><p>Current year versus the previous year.</p><p class="comparison-change comparison-change--{{ revenue.year_comparison.change_direction }}"><strong>{{ revenue.year_comparison.change_period }}: {{ revenue.year_comparison.change_label }}</strong> vs {{ revenue.year_comparison.previous_year }}</p></div><div class="comparison-legend"><span><i class="comparison-dot comparison-dot--current"></i>{{ revenue.year_comparison.current_year }}</span><span><i class="comparison-dot comparison-dot--previous"></i>{{ revenue.year_comparison.previous_year }}</span></div></div><div class="comparison-chart" role="img" aria-label="Revenue comparison for {{ revenue.year_comparison.current_year }} and {{ revenue.year_comparison.previous_year }}"><svg viewBox="0 0 100 160" preserveAspectRatio="none"><line x1="5" y1="20" x2="95" y2="20" class="comparison-gridline"></line><line x1="5" y1="60" x2="95" y2="60" class="comparison-gridline"></line><line x1="5" y1="100" x2="95" y2="100" class="comparison-gridline"></line><line x1="5" y1="140" x2="95" y2="140" class="comparison-axis"></line><path d="{{ revenue.year_comparison.previous_path }}" class="comparison-line comparison-line--previous"></path><path d="{{ revenue.year_comparison.current_path }}" class="comparison-line comparison-line--current"></path>{% for item in revenue.year_comparison.months %}<circle cx="{{ item.x }}" cy="{{ item.previous_y }}" r="2.2" class="comparison-point comparison-point--previous"></circle><circle cx="{{ item.x }}" cy="{{ item.current_y }}" r="2.5" class="comparison-point comparison-point--current"></circle>{% endfor %}</svg><div class="comparison-labels">{% for item in revenue.year_comparison.months %}<span title="{{ item.label }}: {{ revenue.year_comparison.current_year }} ₹{{ '{:,.2f}'.format(item.current) }}, {{ revenue.year_comparison.previous_year }} ₹{{ '{:,.2f}'.format(item.previous) }}">{{ item.label }}</span>{% endfor %}</div></div></section>
+      <section class="revenue-chart-card"><div class="revenue-chart-title"><h3>{{ revenue.period|title }} net revenue</h3>{% if revenue.monthly %}<button class="button small secondary download-revenue-chart" type="button" aria-label="Download {{ revenue.period|title }} net revenue chart as PNG"><i class="fa-solid fa-download" aria-hidden="true"></i> Download PNG</button>{% endif %}</div>{% if revenue.monthly %}<div class="revenue-bars" role="img" aria-label="{{ revenue.period|title }} net revenue bar chart" data-chart-title="{{ revenue.period|title }} net revenue">{% set chart_max = revenue.monthly|map(attribute='value')|max %}{% for item in revenue.monthly %}{% set height = (item.value / chart_max * 100) if chart_max else 0 %}<div class="revenue-bar-item" title="{{ item.label }}: ₹{{ '{:,.2f}'.format(item.value) }}" data-label="{{ item.label }}" data-value="{{ item.value }}"><strong>₹{{ "{:,.0f}".format(item.value) }}</strong><div class="revenue-bar" style="height: {{ height }}%"></div><span>{{ item.short_label or item.label }}</span></div>{% endfor %}</div>{% else %}<p class="empty-message">No completed revenue in this period.</p>{% endif %}</section>
+      <section class="revenue-chart-card revenue-comparison-card"><div class="comparison-heading"><div><h3>Revenue comparison</h3><p>Current year versus the previous year.</p><p class="comparison-change comparison-change--{{ revenue.year_comparison.change_direction }}"><strong>{{ revenue.year_comparison.change_period }}: {{ revenue.year_comparison.change_label }}</strong> vs {{ revenue.year_comparison.previous_year }}</p></div><div class="comparison-legend"><span><i class="comparison-dot comparison-dot--current"></i>{{ revenue.year_comparison.current_year }}</span><span><i class="comparison-dot comparison-dot--previous"></i>{{ revenue.year_comparison.previous_year }}</span></div></div><div class="comparison-chart" role="img" aria-label="Revenue comparison for {{ revenue.year_comparison.current_year }} and {{ revenue.year_comparison.previous_year }}"><svg viewBox="0 0 100 160" preserveAspectRatio="none"><line x1="5" y1="20" x2="95" y2="20" class="comparison-gridline"></line><line x1="5" y1="60" x2="95" y2="60" class="comparison-gridline"></line><line x1="5" y1="100" x2="95" y2="100" class="comparison-gridline"></line><line x1="5" y1="140" x2="95" y2="140" class="comparison-axis"></line><path d="{{ revenue.year_comparison.previous_path }}" class="comparison-line comparison-line--previous"></path><path d="{{ revenue.year_comparison.current_path }}" class="comparison-line comparison-line--current"></path>{% for item in revenue.year_comparison.months %}<circle cx="{{ item.x }}" cy="{{ item.previous_y }}" r="2.2" class="comparison-point comparison-point--previous"></circle><circle cx="{{ item.x }}" cy="{{ item.current_y }}" r="2.5" class="comparison-point comparison-point--current"></circle>{% endfor %}</svg><div class="comparison-labels">{% for item in revenue.year_comparison.months %}<span title="{{ item.label }}: {{ revenue.year_comparison.current_year }} ₹{{ '{:,.2f}'.format(item.current) }}, {{ revenue.year_comparison.previous_year }} ₹{{ '{:,.2f}'.format(item.previous) }}">{{ item.label }}</span>{% endfor %}</div></div><details class="dash-chart-table"><summary>Show figures</summary><div class="table-wrap"><table class="data-table"><thead><tr><th scope="col">Month</th><th scope="col">{{ revenue.year_comparison.current_year }}</th><th scope="col">{{ revenue.year_comparison.previous_year }}</th></tr></thead><tbody>{% for item in revenue.year_comparison.months %}<tr><th scope="row">{{ item.label }}</th><td>₹{{ "{:,.0f}".format(item.current) }}</td><td>₹{{ "{:,.0f}".format(item.previous) }}</td></tr>{% endfor %}</tbody></table></div></details></section>
     </div>
-  </section>
-  <section class="revenue-dashboard" aria-labelledby="pending-payments-title">
-    <div class="revenue-heading">
-      <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title">Bills awaiting receipt</h2><p>Sent bills not yet marked received in History. Internal debit-head bills are listed separately.</p></div>
-      <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
-    </div>
-    <div class="revenue-cards">
-      <div class="revenue-card"><span>Bills awaiting payment</span><strong>{{ pending_payments.payment_count }} bills</strong></div>
-      <div class="revenue-card"><span>Unpaid bill total</span><strong>₹{{ "{:,.2f}".format(pending_payments.payment_amount) }}</strong></div>
-      <div class="revenue-card"><span>Debit-head bills awaiting confirmation</span><strong>{{ pending_payments.debit_head_count }} bills</strong></div>
-    </div>
-    {% if pending_payments.rows %}
-    <div class="table-wrap">
-      <table class="data-table">
-        <thead><tr><th>Service</th><th>User / PI</th><th>Origin</th><th>Completed</th><th>Bill</th><th>Status</th><th>Bill total</th><th>Reminder</th></tr></thead>
-        <tbody>
-          {% for item in pending_payments.rows %}
-          <tr>
-            <td>{{ item.service_label }}</td>
-            <td><strong>{{ item.user_name }}</strong><br><small>PI: {{ item.pi_name }}</small></td>
-            <td>{{ item.origin }}</td>
-            <td>{{ item.completion_value or '—' }}</td>
-            <td>{{ item.charge_sheet_id or 'Not issued' }}</td>
-            <td><span class="status-badge waiting">{{ item.tracking_label }}</span></td>
-            <td>₹{{ "{:,.2f}".format(item.total_billed or item.grand_total or 0) }}</td>
-            <td><form class="payment-reminder-form" method="post" action="{{ url_for('admin.send_payment_reminder', service_key=item.service_key, booking_id=item.id) }}"><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><button class="button small secondary payment-reminder-button" type="submit">Send reminder mail</button><small class="reminder-count">{{ item.reminder_count }} sent</small></form></td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    <p class="empty-message">No sent bills are currently awaiting receipt.</p>
-    {% endif %}
   </section>
   <section class="admin-slot-panel" id="create-slot" data-known-user-url="{{ url_for('admin.known_slot_user') }}" data-slot-type="{{ slot_form_state.get('slot_type', '') }}" data-slot-saved="{{ 'true' if slot_form_state.get('saved') else 'false' }}">
     <div class="admin-slot-panel__heading"><span class="chart-kicker">Quick actions</span><span class="admin-slot-panel__title">Create a slot</span></div>

@@ -282,7 +282,7 @@ a { color: inherit; }
 .page-header h1 { color: #fff; font-family: Inter, sans-serif; font-size: clamp(30px, 3.4vw, 40px); margin: 0; letter-spacing: -.03em; }
 .page-header p { color: #c5d8e8; margin: 7px 0 0; max-width: 720px; }
 .page-header--portal { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .52)), url("../images/web/science.webp"); background-position: center 55%; }
-.page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/schedule-header.webp"); background-position: center 50%; }
+.page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/cover-schedule-960w.webp"); background-position: center 45%; }
 .page-header--admin { background-image: linear-gradient(90deg, rgba(3, 20, 43, .76) 0%, rgba(6, 34, 62, .48) 52%, rgba(6, 34, 62, .20) 100%), url("../images/admin-header-1600w.webp"); background-position: center 50%; }
 .site-shell > main:not(.portal-page) > .page-content { padding-top: 0; }
 .site-shell > main:not(.portal-page) > .page-content > .page-header { margin: 0 -42px 28px; }
@@ -1908,7 +1908,7 @@ body:not(.admin-area) .site-shell > main { flex: 1 0 auto; }
 /* Lighter page-header banners on phones and small tablets (800w variants). */
 @media (max-width: 800px) {
   .page-header--portal { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .52)), url("../images/web/science-800w.webp"); }
-  .page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/schedule-header-800w.webp"); }
+  .page-header--schedule { background-image: linear-gradient(90deg, rgba(3, 20, 43, .88), rgba(6, 34, 62, .48)), url("../images/cover-schedule-640w.webp"); }
   .page-header--admin { background-image: linear-gradient(90deg, rgba(3, 20, 43, .76) 0%, rgba(6, 34, 62, .48) 52%, rgba(6, 34, 62, .20) 100%), url("../images/admin-header-800w.webp"); }
 }
 
@@ -3405,3 +3405,101 @@ html.lightbox-open { overflow: hidden; }
 .footer-credits { margin: 6px 0 0; color: rgba(197, 216, 232, .55); font-size: 11.5px; }
 .footer-credits a { color: inherit; text-decoration: underline; text-decoration-color: rgba(197, 216, 232, .3); text-underline-offset: 2px; }
 .footer-credits a:hover, .footer-credits a:focus-visible { color: #fff; }
+
+/* === Admin dashboard v2 — START === */
+/* Scoped to the admin dashboard (templates/admin_panel.html). Overrides older
+   dashboard rules by specificity instead of editing them. */
+.dash-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* "Needs attention" strip */
+.dash-attention { margin-top: 4px; padding: 22px 24px 24px; border: 1px solid #d7e5eb; border-radius: 20px; background: #fff; box-shadow: 0 14px 32px rgba(8, 30, 55, .08); }
+.dash-attention__heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 6px 16px; margin-bottom: 14px; }
+.dash-attention__heading h2 { margin: 3px 0 0; color: var(--navy); font-size: 20px; letter-spacing: -.02em; }
+.dash-attention__updated { margin: 0; color: var(--text-secondary); font-size: 12px; }
+.dash-attention__grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.dash-tile a { display: flex; height: 100%; flex-direction: column; gap: 4px; padding: 14px 15px 13px; border: 1px solid #dfebef; border-top: 3px solid #167da5; border-radius: 13px; background: linear-gradient(145deg, #fff, #f8fbfd); color: var(--ink); text-decoration: none; transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.dash-tile a:hover { border-color: #9fcde0; box-shadow: 0 8px 20px rgba(8, 30, 55, .09); transform: translateY(-1px); }
+.dash-tile a:focus-visible { outline: 3px solid #167da5; outline-offset: 2px; }
+.dash-tile__label { display: flex; align-items: center; gap: 7px; color: #38576a; font-size: 12px; font-weight: 700; }
+.dash-tile__label i { color: #167da5; font-size: 13px; }
+.dash-tile__value { display: flex; align-items: baseline; gap: 6px; color: var(--text-secondary); font-size: 12px; }
+.dash-tile__value strong { color: var(--navy); font-size: 28px; line-height: 1.1; letter-spacing: -.03em; }
+.dash-tile__detail { flex: 1; color: var(--text-secondary); font-size: 11.5px; line-height: 1.4; }
+.dash-tile__action { margin-top: 4px; color: #0f6a8d; font-size: 12px; font-weight: 700; }
+.dash-tile--alert a { border-top-color: #c46b1c; background: linear-gradient(145deg, #fffaf3, #fff); }
+.dash-tile--alert .dash-tile__label i { color: #b35d12; }
+.dash-tile--freezing.dash-tile--alert a { border-top-color: #b4232f; background: linear-gradient(145deg, #fff5f5, #fff); }
+.dash-tile--clear a { border-top-color: #32a889; }
+.dash-tile--clear .dash-tile__value strong { color: #2b7a5f; }
+
+/* Bills awaiting receipt sits directly under the attention strip */
+.admin-area .dash-pending { margin-top: 18px; }
+.admin-area .dash-pending h2:focus { outline: none; }
+.admin-area .dash-pending .status-badge { white-space: normal; }
+
+/* Donut legends (names were only visible on hover before) */
+.admin-area .dash-donut-layout { display: grid; grid-template-columns: 128px minmax(0, 1fr); align-items: center; justify-content: stretch; gap: 22px; min-height: 170px; }
+.admin-area .dash-donut-layout .donut-track { stroke-width: 16; }
+.dash-legend { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; text-align: left; }
+.dash-legend li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; line-height: 1.35; }
+.dash-legend li i { width: 10px; height: 10px; border-radius: 3px; }
+.dash-legend li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-legend li strong { color: var(--navy); font-variant-numeric: tabular-nums; }
+.dash-legend .dash-legend__empty { display: block; }
+
+/* Revenue: show the actual dates and invalid-range feedback */
+.dash-range-dates { margin-left: 6px; color: var(--text-secondary); font-weight: 600; }
+.dash-range-error { margin: 8px 0 0; padding: 9px 12px; border: 1px solid #f0c7a0; border-radius: 10px; background: #fff7ef; color: #7a3f0c; font-size: 12px; }
+
+/* Revenue bar chart: bars share the width so recent periods are not pushed
+   out of view; long ranges scroll (admin.js starts at the latest period). */
+.admin-area .revenue-bars { gap: 4px; padding-left: 6px; padding-right: 6px; scrollbar-width: thin; }
+.admin-area .revenue-bars.is-scrollable:focus-visible { outline: 3px solid #167da5; outline-offset: 2px; }
+.admin-area .revenue-bar-item { flex: 1 0 46px; min-width: 46px; }
+.admin-area .revenue-bar-item strong { font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.admin-area .revenue-bar-item span { max-width: 100%; color: var(--text-secondary); font-size: 10.5px; }
+.admin-area .revenue-bar { width: min(42px, 72%); }
+
+/* Comparison chart figures */
+.dash-chart-table { margin-top: 12px; font-size: 12px; }
+.dash-chart-table summary { color: #0f6a8d; font-weight: 700; cursor: pointer; }
+.dash-chart-table .data-table { margin-top: 8px; }
+.dash-chart-table .data-table th[scope="row"] { padding: 8px 14px; background: #fff; color: var(--navy); font-size: 11px; text-align: left; }
+.dash-chart-table .data-table td { font-variant-numeric: tabular-nums; }
+
+@media (min-width: 1280px) {
+  .dash-attention__grid { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+}
+
+@media (max-width: 1200px) {
+  .admin-area .dash-donut-layout { grid-template-columns: minmax(0, 1fr); justify-items: center; }
+  .admin-area .dash-donut-layout .dash-legend { width: min(100%, 300px); }
+}
+
+@media (max-width: 640px) {
+  .dash-attention { padding: 16px 14px; border-radius: 14px; }
+  .dash-attention__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+  .dash-tile a { padding: 11px 11px 10px; }
+  .dash-tile__value strong { font-size: 24px; }
+  .dash-tile__detail { font-size: 11px; }
+  .dash-range-dates { display: block; margin: 2px 0 0; }
+}
+
+/* Pending bills become cards instead of a sideways-scrolling table whose
+   reminder button sat off-screen (tablet: 4 fields per row; phone: 1). */
+@media (max-width: 1180px) {
+  .admin-area .dash-pending .table-wrap { overflow: visible; }
+  .admin-area .dash-pending__table, .admin-area .dash-pending__table tbody { display: block; width: 100%; }
+  .admin-area .dash-pending__table { border: 0; border-radius: 0; }
+  .admin-area .dash-pending__table thead { display: none; }
+  .admin-area .dash-pending__table tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 10px; border: 1px solid #dfeaf0; border-radius: 12px; background: #fff; overflow: hidden; }
+  .admin-area .dash-pending__table tbody td, .admin-area .dash-pending__table tbody tr:nth-child(even) td { display: block; min-width: 0; padding: 9px 12px; background: #fff; border-bottom: 1px solid #f0f4f7; }
+  .admin-area .dash-pending__table td::before { content: attr(data-label); display: block; margin-bottom: 2px; color: #5b7183; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+  .admin-area .dash-pending__table .payment-reminder-form { align-items: flex-start; }
+}
+@media (max-width: 640px) {
+  .admin-area .dash-pending__table tr { grid-template-columns: minmax(0, 1fr); }
+  .admin-area .dash-pending__table tbody td, .admin-area .dash-pending__table tbody tr:nth-child(even) td { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; padding: 5px 12px; }
+  .admin-area .dash-pending__table td::before { margin: 0; }
+}
+/* === Admin dashboard v2 — END === */

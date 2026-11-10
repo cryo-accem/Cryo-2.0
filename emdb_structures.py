@@ -52,6 +52,15 @@ ACCEM_GROUPS = (
     {"name": "Tanweer Hussain", "depositor": "Hussain T",
      "orcid": None, "rule": "talos_india"},
 )
+# Individual entries the facility owner approved after the IISc PI survey
+# (Nov 2026). They are counted like admin-approved entries.
+#   EMD-35216, EMD-35233: Hussain T, Talos Arctica, Biochemistry 2024
+#       (10.1021/acs.biochem.4c00489); the preprint acknowledges the IISc
+#       cryo-EM facility.
+#   EMD-36619, EMD-36620: Hussain T, Talos Arctica, Proteins 2024
+#       (10.1002/prot.26655); IISc affiliation, Wellcome-funded (so the
+#       India-funding rule misses them).
+OWNER_APPROVED_IDS = ("EMD-35216", "EMD-35233", "EMD-36619", "EMD-36620")
 FIELDS = (
     "emdb_id,title,release_date,microscope_name,grant_country,xref_DOI,xref_PUBMED,"
     "primary_citation_title,primary_citation_year,primary_citation_author_string,dep_author_name"
@@ -184,7 +193,7 @@ def compute_structures(site_publications, finder_candidates=None, approved_ids=(
         report = {}
     report["queries"] = []
     entries = {}
-    approved_ids = set(approved_ids or ())
+    approved_ids = set(approved_ids or ()) | set(OWNER_APPROVED_IDS)
     dismissed_ids = set(dismissed_ids or ())
 
     def run(label, query, source, keep=lambda row: True, group=None):

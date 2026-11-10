@@ -36,6 +36,7 @@ from revenue import (
     is_non_billable_booking, is_payment_received_booking, parse_csic_final_amount,
     parse_number_of_grids, pricing_category,
 )
+from revenue import grid_breakdown_json, stored_prebilled_grids
 from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing
 from blueprints.imaging import register_imaging
 from blueprints.screening import register_screening
@@ -57,6 +58,11 @@ from inventory_service import (
     list_grid_types, load_screening_booking, register_completed_freezing,
     _begin, _lock_clause,
 )
+from inventory_service import (
+    booking_billing_context, booking_billing_context_for, delete_booking_grid_links,
+    load_data_collection_booking,
+)
+from revenue import normalize_service_stage
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
 BACKUP_EMAIL = "cryoem.iisc@gmail.com"
@@ -67,6 +73,7 @@ _CHARGE_SHEET_CATEGORY_CODES = {
 }
 
 _ALLOWED_ADMIN_ENDPOINTS = {
+    "admin.login",
     "admin.panel",
     "admin.add_slot",
     "admin.known_slot_user",
@@ -193,7 +200,13 @@ def check_admin_session():
             request.endpoint.startswith(("admin.", "inventory."))
             and request.endpoint not in _ALLOWED_ADMIN_ENDPOINTS
         ):
-            session.pop("admin_logged_in", None)
+            # Unknown admin endpoint: end the admin session and refuse the
+            # request instead of serving it.
+            for key in ("admin_logged_in", "admin_user_id", "must_change_password"):
+                session.pop(key, None)
+            if expects_json:
+                return jsonify({"error": "Your admin session has ended. Please sign in again."}), 401
+            return redirect(url_for("admin.login"))
 
 
 # ── Login / Logout ───────────────────────────────────────────────────────────
@@ -239,6 +252,9 @@ def _clear_login_failures(key):
 
 @admin_bp.route("/", methods=["GET", "POST"])
 def login():
+    if request.method == "GET" and session.get("admin_logged_in"):
+        # check_admin_session has already validated the session here.
+        return redirect(url_for("admin.panel"))
     if request.method == "POST":
         username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
@@ -328,24 +344,72 @@ def logout():
     return redirect(url_for("public.index"))
 
 
+def _whole_positive_slots(value):
+    """Return slots as a whole Decimal of at least one, as completion requires."""
+    try:
+        slots = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise ValueError("Actual slots must be a positive whole number.") from None
+    if not slots.is_finite() or slots < 1 or slots != slots.to_integral_value():
+        raise ValueError("Actual slots must be a positive whole number.")
+    return slots
+
+
+def _linked_grid_billing(context, actual_grids, clipped_grids):
+    """Apply inventory history of a booking's linked grids to its bill.
+
+    Returns (prebilled_grids, clipped_grids): linked grids already billed at
+    freezing are not charged a grid charge again, and linked grids already
+    clipped count as clipped for the C-clip/base-ring charge.  Both are
+    capped at the actual grids.
+    """
+    prebilled = min(context["prebilled"], actual_grids)
+    clipped_text = str(clipped_grids or "0").strip()
+    if not clipped_text.isdigit():
+        raise ValueError("Clipped grids must be zero or a positive integer.")
+    clipped = max(int(clipped_text), min(context["clipped"], actual_grids))
+    return prebilled, clipped
+
+
 @admin_bp.route("/billing/preview", methods=["GET", "POST"])
 def billing_preview():
     """Return an authoritative preview for the admin billing form."""
     if not session.get("admin_logged_in"):
         return jsonify({"error": "Unauthorized"}), 401
+    processing_requested = request.values.get("processing_requested") == "1"
     try:
+        service_stage = normalize_service_stage(request.values.get("service_stage", ""))
+        # Validate like the completion routes: whole slots of at least one,
+        # and no data processing on a freezing bill.
+        actual_slots = _whole_positive_slots(request.values.get("actual_slots", "1") or "1")
+        if processing_requested and service_stage == "Freezing / Grid Registration":
+            raise ValueError("Data processing / image analysis is not billed at freezing.")
+        number_of_grids = request.values.get(
+            "number_of_grids", request.values.get("actual_grids", "")
+        )
+        clipped_grids = request.values.get("clipped_grids", "0") or "0"
+        prebilled_grids = 0
+        preview_service = request.values.get("preview_service", "").strip()
+        preview_booking_id = request.values.get("preview_booking_id", "").strip()
+        if preview_service in {"screening", "data_collection"} and preview_booking_id.isdigit():
+            grids_value = parse_number_of_grids(number_of_grids)
+            prebilled_grids, clipped_grids = _linked_grid_billing(
+                booking_billing_context_for(preview_service, int(preview_booking_id)),
+                grids_value, clipped_grids,
+            )
         charges = calculate_charge_sheet(
             request.values.get("user_category", ""),
-            request.values.get("service_stage", ""),
-            request.values.get("number_of_grids", request.values.get("actual_grids", "")),
+            service_stage,
+            number_of_grids,
             request.values.get("grid_source", ""),
             request.values.get("grid_type", ""),
-            request.values.get("actual_slots", "1") or "1",
-            request.values.get("processing_requested") == "1",
-            request.values.get("clipped_grids", "0") or "0",
+            actual_slots,
+            processing_requested,
+            clipped_grids,
             request.values.get("normal_grids") or None,
             request.values.get("gold_grids") or None,
             request.values.get("clip_base_source", "facility") or "facility",
+            prebilled_grids=prebilled_grids,
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
@@ -353,6 +417,155 @@ def billing_preview():
 
 
 # ── Main Dashboard ───────────────────────────────────────────────────────────
+
+# Inventory grids that exist physically but have no active storage location.
+_UNSTORED_GRID_STATUSES = ("Frozen", "Clipped")
+
+
+def _dashboard_attention(cur, today, pending_payments):
+    """Counts for the dashboard's "Needs attention today" strip.
+
+    Every figure is a single aggregate query (no per-row lookups), so the
+    dashboard stays fast as the booking tables grow.
+    """
+    today_text = today.isoformat()
+    queues = {}
+    for table, key in (("bookings", "datacollecting"), ("screening_bookings", "screening")):
+        cur.execute(
+            f"""SELECT
+                   COALESCE(SUM(CASE WHEN status='waiting' THEN 1 ELSE 0 END), 0) AS waiting,
+                   COALESCE(SUM(CASE WHEN status='ongoing' THEN 1 ELSE 0 END), 0) AS ongoing
+                FROM {table}"""
+        )
+        row = cur.fetchone()
+        queues[key] = {"waiting": int(row["waiting"] or 0), "ongoing": int(row["ongoing"] or 0)}
+
+    cur.execute(
+        """SELECT
+               COALESCE(SUM(CASE WHEN freezing_date = ? THEN 1 ELSE 0 END), 0) AS due_today,
+               COALESCE(SUM(CASE WHEN freezing_date < ? THEN 1 ELSE 0 END), 0) AS overdue,
+               COALESCE(SUM(CASE WHEN freezing_date > ? THEN 1 ELSE 0 END), 0) AS upcoming
+           FROM freezing_bookings WHERE status='active'""",
+        [today_text, today_text, today_text],
+    )
+    row = cur.fetchone()
+    freezing = {
+        "due_today": int(row["due_today"] or 0),
+        "overdue": int(row["overdue"] or 0),
+        "upcoming": int(row["upcoming"] or 0),
+    }
+
+    # Completed, billable bookings whose charge sheet has not been sent yet.
+    unsent_bills = 0
+    for table, where in (
+        ("bookings", "status='completed' AND "),
+        ("screening_bookings", "status='completed' AND "),
+        ("completed_freezing", ""),
+    ):
+        cur.execute(
+            f"""SELECT pi_name FROM {table}
+                WHERE {where}(charge_sheet_sent_at IS NULL OR charge_sheet_sent_at = '')"""
+        )
+        unsent_bills += sum(1 for item in cur.fetchall() if is_billable_booking(item))
+
+    grids_unstored = None
+    try:
+        cur.execute(
+            """SELECT COUNT(*) AS count FROM inventory_grids g
+               WHERE g.current_status IN (?, ?)
+                 AND NOT EXISTS (
+                     SELECT 1 FROM storage_locations sl
+                     WHERE sl.grid_id = g.grid_id AND sl.removed_at IS NULL
+                 )""",
+            list(_UNSTORED_GRID_STATUSES),
+        )
+        grids_unstored = int(cur.fetchone()["count"] or 0)
+    except (sqlite3.Error, pymysql.err.Error):
+        # Grid inventory tables are optional on older databases.
+        current_app.logger.warning("Grid inventory counts unavailable on the dashboard.", exc_info=True)
+
+    unpaid = pending_payments["payment_count"] + pending_payments["debit_head_count"]
+    items = [
+        {
+            "key": "datacollecting",
+            "icon": "fa-database",
+            "label": "Data collection",
+            "value": queues["datacollecting"]["waiting"],
+            "unit": "waiting",
+            "detail": f"{queues['datacollecting']['ongoing']} ongoing on the microscope",
+            "url": url_for("admin.datacollecting"),
+            "action": "Open schedule",
+            "alert": False,
+        },
+        {
+            "key": "screening",
+            "icon": "fa-microscope",
+            "label": "Screening",
+            "value": queues["screening"]["waiting"],
+            "unit": "waiting",
+            "detail": f"{queues['screening']['ongoing']} ongoing",
+            "url": url_for("admin.screening_admin"),
+            "action": "Open schedule",
+            "alert": False,
+        },
+        {
+            "key": "freezing",
+            "icon": "fa-snowflake",
+            "label": "Freezing",
+            "value": freezing["due_today"],
+            "unit": "due today",
+            "detail": (
+                f"{freezing['overdue']} past date, not completed · {freezing['upcoming']} upcoming"
+                if freezing["overdue"]
+                else f"{freezing['upcoming']} upcoming"
+            ),
+            "url": url_for("admin.freezing_admin"),
+            "action": "Open schedule",
+            "alert": bool(freezing["overdue"]),
+        },
+        {
+            "key": "unsent_bills",
+            "icon": "fa-paper-plane",
+            "label": "Bills to send",
+            "value": unsent_bills,
+            "unit": "completed, not sent",
+            "detail": "Completed billable bookings without a sent charge sheet",
+            "url": url_for("admin.history"),
+            "action": "Open Billing",
+            "alert": bool(unsent_bills),
+        },
+        {
+            "key": "unpaid",
+            "icon": "fa-file-invoice-dollar",
+            "label": "Awaiting payment",
+            "value": unpaid,
+            "unit": "sent bills",
+            "detail": f"₹{pending_payments['payment_amount']:,.2f} unpaid · {pending_payments['debit_head_count']} debit head",
+            "url": "#pending-payments-title",
+            "action": "See list",
+            "alert": bool(unpaid),
+        },
+    ]
+    if grids_unstored is not None:
+        items.append({
+            "key": "grids_unstored",
+            "icon": "fa-boxes-stacked",
+            "label": "Grids to store",
+            "value": grids_unstored,
+            "unit": "without a location",
+            "detail": "Frozen or clipped grids not yet in a box",
+            "url": url_for("inventory.dashboard"),
+            "action": "Open inventory",
+            "alert": bool(grids_unstored),
+        })
+    return {
+        "items": items,
+        "queues": queues,
+        "freezing": freezing,
+        "unsent_bills": unsent_bills,
+        "grids_unstored": grids_unstored,
+    }
+
 
 @admin_bp.route("/panel")
 def panel():
@@ -374,9 +587,12 @@ def panel():
     freezing_active = cur.fetchone()["count"]
     pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
+    attention = _dashboard_attention(cur, today_ist(), pending_payments)
     cur.close()
     conn.close()
-    pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd"]
+    # Six PI colours plus a neutral grey for the aggregated "Other PIs" slice,
+    # so it never repeats the first PI's colour next to it on the ring.
+    pi_colors = ["#167da5", "#32a889", "#d58b42", "#7d6bb5", "#c15c73", "#5d86bd", "#9aa9b5"]
     pi_total = sum(item["value"] for item in pi_counts)
     pi_chart = []
     pi_start = 0
@@ -403,11 +619,30 @@ def panel():
         waiting_total=waiting_total,
         pending_payments=pending_payments,
         revenue=revenue,
+        attention=attention,
+        admin_name=_signed_in_admin_name(),
         updated_at=now_ist().strftime("%d %b %Y, %H:%M"),
         today=today_ist().isoformat(),
         freezing_grid_limit=GRID_LIMIT_PER_DAY,
         slot_form_state=slot_form_state,
     )
+
+
+def _signed_in_admin_name():
+    """Display name for the dashboard greeting (the signed-in admin's username)."""
+    user_id = session.get("admin_user_id")
+    if user_id is None:
+        return ""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT username FROM users WHERE id=?", [user_id])
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    name = str(row["username"] or "").strip() if row else ""
+    return name[:1].upper() + name[1:] if name else ""
 
 
 @admin_bp.route("/panel/known-user", methods=["POST"])
@@ -1615,7 +1850,13 @@ def _dashboard_pending_payments(cur):
         ("completed_freezing", "Freezing", "completed_at", None),
     )
     for table, service, completion_column, booking_status in sources:
-        where = " WHERE status='completed'" if booking_status else ""
+        # Only sent bills can be awaiting payment; filter in SQL so the
+        # dashboard does not load every completed booking ever recorded.
+        where = (
+            " WHERE status='completed' AND charge_sheet_sent_at IS NOT NULL"
+            if booking_status
+            else " WHERE charge_sheet_sent_at IS NOT NULL"
+        )
         cur.execute(
             f"SELECT * FROM {table}{where} ORDER BY {completion_column} DESC"
         )
@@ -2373,6 +2614,46 @@ def _smooth_chart_path(points):
     return path
 
 
+_REVENUE_MIN_YEAR = 1990
+_REVENUE_MAX_YEARS_AHEAD = 10
+_REVENUE_PRESET_LABELS = {
+    "all": "All time",
+    "this_month": "This month",
+    "last_month": "Last month",
+    "last_3_months": "Last 3 months",
+    "this_year": "This year",
+    "last_year": "Last year",
+    "custom": "Custom dates",
+}
+
+
+def _historical_period_key(month, period):
+    """Chart bucket for a historical "YYYY-MM" revenue entry.
+
+    Weekly charts use ISO week labels ("2026-W05") for live bookings, so a
+    historical month is placed in the ISO week of its first day instead of a
+    "YYYY-MM-01" label that would sort before every week of that year.
+    """
+    year, month_number = int(month[:4]), int(month[5:7])
+    if period == "annual":
+        return _fiscal_year_label(year, month_number)
+    if period == "weekly":
+        return datetime.date(year, month_number, 1).strftime("%G-W%V")
+    return month
+
+
+def _chart_short_label(key, period):
+    """Compact axis label: "2026-02" -> "Feb 26", "2026-W05" -> "W05 26"."""
+    try:
+        if period == "monthly":
+            return datetime.date(int(key[:4]), int(key[5:7]), 1).strftime("%b %y")
+        if period == "weekly":
+            return f"{key[5:]} {key[2:4]}"
+    except (TypeError, ValueError):
+        pass
+    return key
+
+
 def _revenue_dashboard(cur, preset_override=None):
     today = today_ist()
     preset = preset_override or request.args.get("range", "this_year")
@@ -2380,6 +2661,7 @@ def _revenue_dashboard(cur, preset_override=None):
     if period not in {"weekly", "monthly", "annual"}:
         period = "monthly"
     start = end = None
+    range_error = ""
     if preset == "this_month":
         start = today.replace(day=1)
         end = today
@@ -2399,9 +2681,23 @@ def _revenue_dashboard(cur, preset_override=None):
     elif preset == "custom":
         start = _parse_date(request.args.get("start"))
         end = _parse_date(request.args.get("end"))
-        if not start or not end or start > end:
+        if (
+            not start or not end or start > end
+            # Year 1 cannot be shifted back a year for the comparison chart
+            # (500 error) and absurd spans build huge month tables.
+            or start.year < _REVENUE_MIN_YEAR
+            or end.year > today.year + _REVENUE_MAX_YEARS_AHEAD
+        ):
             start = end = None
             preset = "all"
+            range_error = (
+                "The custom dates were not valid (the start must be on or before the end, "
+                f"between {_REVENUE_MIN_YEAR} and {today.year + _REVENUE_MAX_YEARS_AHEAD}), "
+                "so all available revenue is shown."
+            )
+    elif preset != "all":
+        # Unknown ?range= values behave as "all"; say so instead of echoing them.
+        preset = "all"
 
     comparison_start = start or today.replace(month=1, day=1)
     comparison_end = end or today
@@ -2570,7 +2866,12 @@ def _revenue_dashboard(cur, preset_override=None):
 
     historical_included = Decimal("0")
     historical_categorised = Decimal("0")
+    current_month_key = today.strftime("%Y-%m")
     for month, amount in HISTORICAL_REVENUE:
+        if month > current_month_key:
+            # The supplied table pre-fills future months with zero; do not
+            # plot months that have not happened yet.
+            continue
         historical_year = int(month[:4])
         historical_month = int(month[5:7])
         historical_month_date = datetime.date(historical_year, historical_month, 1)
@@ -2593,12 +2894,7 @@ def _revenue_dashboard(cur, preset_override=None):
         totals["net"] += amount
         totals["gross"] += amount
         totals["billed"] += amount
-        if period == "annual":
-            period_key = _fiscal_year_label(int(month[:4]), int(month[5:7]))
-        elif period == "weekly":
-            period_key = f"{month}-01"
-        else:
-            period_key = month
+        period_key = _historical_period_key(month, period)
         monthly.setdefault(period_key, {"net": Decimal("0"), "slots": Decimal("0")})
         monthly[period_key]["net"] += amount
     if not start and not end:
@@ -2627,7 +2923,8 @@ def _revenue_dashboard(cur, preset_override=None):
         by_service["CSIC Revenue"] += net
 
     monthly_items = [
-        {"label": key, "value": values["net"].quantize(Decimal("0.01")),
+        {"label": key, "short_label": _chart_short_label(key, period),
+         "value": values["net"].quantize(Decimal("0.01")),
          "slots": values["slots"].quantize(Decimal("0.01"))}
         for key, values in sorted(monthly.items())
     ]
@@ -2697,11 +2994,20 @@ def _revenue_dashboard(cur, preset_override=None):
             item["y"] = 160 - float(item["value"] / monthly_max * 140)
     return {
         "preset": preset,
+        "preset_label": _REVENUE_PRESET_LABELS.get(preset, "All time"),
         "period": period,
         "start": start.isoformat() if start else "",
         "end": end.isoformat() if end else "",
+        "range_label": (
+            f"{start.strftime('%d %b %Y')} – {end.strftime('%d %b %Y')}"
+            if start and end
+            else "All recorded revenue"
+        ),
+        "range_error": range_error,
+        "today": today.strftime("%d %b %Y"),
         "totals": {key: value.quantize(Decimal("0.01")) for key, value in totals.items()},
         "completed_bookings": len(rows),
+        "csic_bookings": len(csic_rows),
         "by_category": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_category.items()],
         "by_service": [{"label": key, "value": value.quantize(Decimal("0.01"))} for key, value in by_service.items()],
         "monthly": monthly_items,
@@ -2813,24 +3119,12 @@ def load_dc(booking_id):
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
-    conn = get_db()
-    cur  = conn.cursor()
     # Only a waiting booking can be loaded; never reopen ongoing/completed ones.
-    cur.execute(
-        "UPDATE bookings SET status='ongoing' WHERE id=? AND status='waiting'",
-        [booking_id],
-    )
-    loaded = cur.rowcount == 1
-    reg = None
-    if loaded:
-        cur.execute("SELECT * FROM bookings WHERE id=?", [booking_id])
-        reg = cur.fetchone()
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    if not loaded:
-        flash("That data collection booking is no longer waiting.")
+    # Like screening, loading takes the booking's linked grids out of storage.
+    try:
+        reg = load_data_collection_booking(booking_id, session.get("admin_user_id"))
+    except InventoryError as exc:
+        flash(str(exc))
         return redirect(url_for("admin.datacollecting"))
     if reg:
         send_email(
@@ -2858,9 +3152,6 @@ def complete_dc(booking_id):
     if not grid_source:
         flash("Please select the grid source before generating the bill.")
         return redirect(url_for("admin.datacollecting"))
-    if not grid_type and not (normal_grids or gold_grids) and grid_source.casefold() in {"facility", "facility provided"}:
-        flash("Please select the grid type for facility-provided grids.")
-        return redirect(url_for("admin.datacollecting"))
     if not actual_slots or not actual_grids:
         flash("Actual slots and grids are required.")
         return redirect(url_for("admin.datacollecting"))
@@ -2879,8 +3170,10 @@ def complete_dc(booking_id):
         return redirect(url_for("admin.datacollecting"))
     try:
         actual_grids_value = parse_number_of_grids(actual_grids)
+        if actual_grids_value > 12:
+            raise ValueError
     except ValueError:
-        flash("Number of grids must be at least 1.")
+        flash("Actual data-collection grids must be between 1 and 12.")
         return redirect(url_for("admin.datacollecting"))
     try:
         clipped_grids_value = int(clipped_grids)
@@ -2905,10 +3198,18 @@ def complete_dc(booking_id):
         flash("That data collection booking is no longer ongoing.")
         return redirect(url_for("admin.datacollecting"))
     try:
+        # Linked grids billed at freezing are not charged again, and linked
+        # grids already clipped (e.g. at screening) count as clipped.
+        prebilled_grids, clipped_grids_value = _linked_grid_billing(
+            booking_billing_context(cur, "data_collection", booking_id),
+            actual_grids_value, clipped_grids_value,
+        )
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Data Collection", user_category,
             clipped_grids_value, clip_base_source,
+            normal_grids=normal_grids, gold_grids=gold_grids,
+            prebilled_grids=prebilled_grids,
         )
     except (ValueError, InvalidOperation) as exc:
         conn.rollback()
@@ -2936,7 +3237,8 @@ def complete_dc(booking_id):
         cur.execute(
             """UPDATE bookings SET status='completed', completion_date=?,
                actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-               grid_source=?, grid_type=?, clip_base_source=?, grid_charge=?, handling_charge=?,
+               grid_source=?, grid_type=?, grid_breakdown=?, clip_base_source=?,
+               grid_charge=?, handling_charge=?,
                clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
                processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
                clipped_grids=?,
@@ -2944,7 +3246,7 @@ def complete_dc(booking_id):
                WHERE id=?""",
             (today_ist().isoformat(), str(charges["actual_slots"]), charges["actual_grids"],
              charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-             charges["grid_type"], charges["clip_base_source"],
+             charges["grid_type"], grid_breakdown_json(charges), charges["clip_base_source"],
              str(charges["grid_charge"]), str(charges["handling_charge"]),
              str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
              str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
@@ -2986,14 +3288,41 @@ def delete_dc(booking_id):
 
     conn = get_db()
     cur  = conn.cursor()
+    # Loading a data-collection booking takes its inventory grids out of
+    # storage, so an ongoing booking with linked grids must be completed
+    # (store or discard each grid) instead of deleted.
     cur.execute(
-        "DELETE FROM bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
+        """SELECT COUNT(*) FROM bookings b
+           JOIN data_collection_booking_grids l ON l.booking_id=b.id
+           WHERE b.id=? AND b.status='ongoing'""",
         [booking_id],
     )
-    deleted = cur.rowcount
-    conn.commit()
-    cur.close()
-    conn.close()
+    if cur.fetchone()[0]:
+        cur.close()
+        conn.close()
+        flash(
+            "This data-collection booking is loaded and its grids are out of storage. "
+            "Complete it (store or discard each grid) instead of deleting it.",
+            "registration",
+        )
+        return redirect(url_for("admin.datacollecting"))
+    try:
+        cur.execute(
+            "DELETE FROM bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
+            [booking_id],
+        )
+        deleted = cur.rowcount
+        if deleted:
+            # SQLite runs without foreign-key cascades, so remove the link
+            # rows explicitly in the same transaction.
+            delete_booking_grid_links(cur, "data_collection", booking_id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
     flash(
         "Data-collection slot deleted." if deleted else "That slot could not be found or is already completed.",
         "success" if deleted else "registration",
@@ -3099,6 +3428,14 @@ def complete_freezing(booking_id):
             normal_grids, gold_grids,
         )
         if booking and grid_management == "1":
+            # The same inputs complete_freezing_booking just billed; the
+            # per-grid inventory types must match the billed normal/gold split.
+            billed = calculate_charge_sheet(
+                user_category or booking["origin"], "Freezing / Grid Registration",
+                actual_grids_value, grid_source, grid_type,
+                normal_grids=normal_grids, gold_grids=gold_grids,
+            )
+            billed_facility = billed["grid_source"] == "facility"
             register_completed_freezing(
                 cur,
                 booking_id,
@@ -3106,6 +3443,10 @@ def complete_freezing(booking_id):
                 int(actual_grids_value),
                 request.form,
                 session.get("admin_user_id"),
+                billed_split=(
+                    (billed["normal_grids"], billed["gold_grids"]) if billed_facility else None
+                ),
+                billed_at_freezing=billed_facility,
             )
     except (ValueError, sqlite3.IntegrityError, pymysql.err.IntegrityError) as exc:
         conn.rollback()
@@ -3214,10 +3555,12 @@ def complete_sc(booking_id):
     processing_requested = request.form.get("processing_requested") == "1"
     clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
     clip_base_source = request.form.get("clip_base_source", "facility").strip() or "facility"
+    normal_grids = request.form.get("normal_grids", "").strip() or None
+    gold_grids = request.form.get("gold_grids", "").strip() or None
     if not grid_source:
         return fail("Please select the grid source before generating the bill.")
-    if not grid_type and grid_source.casefold() in {"facility", "facility provided"}:
-        return fail("Please select the grid type for facility-provided grids.")
+    # A facility grid type (single type or normal/gold breakdown) is checked by
+    # the charge calculation, which also knows grids already billed at freezing.
     if not actual_slots or not actual_grids:
         return fail("Actual slots and grids are required.")
     try:
@@ -3254,10 +3597,18 @@ def complete_sc(booking_id):
         conn.close()
         return fail("That screening booking is no longer ongoing.")
     try:
+        # Linked grids billed at freezing are not charged again, and linked
+        # grids already clipped count as clipped.
+        prebilled_grids, clipped_grids_value = _linked_grid_billing(
+            booking_billing_context(cur, "screening", booking_id),
+            actual_grids_value, clipped_grids_value,
+        )
         charges = calculate_booking_revenue(
             booking, actual_slots_value, actual_grids_value, processing_requested,
             grid_source, grid_type, "Screening / Clipping", user_category,
             clipped_grids_value, clip_base_source,
+            normal_grids=normal_grids, gold_grids=gold_grids,
+            prebilled_grids=prebilled_grids,
         )
     except (ValueError, InvalidOperation) as exc:
         conn.rollback()
@@ -3316,7 +3667,8 @@ def complete_sc(booking_id):
         cur.execute(
             """UPDATE screening_bookings SET status='completed', completion_date=?,
                actual_slots=?, actual_grids=?, number_of_grids=?, service_stage=?,
-               grid_source=?, grid_type=?, clip_base_source=?, grid_charge=?, handling_charge=?,
+               grid_source=?, grid_type=?, grid_breakdown=?, clip_base_source=?,
+               grid_charge=?, handling_charge=?,
                clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?,
                processing_charge=?, subtotal=?, gst_amount=?, grand_total=?,
                clipped_grids=?,
@@ -3326,7 +3678,7 @@ def complete_sc(booking_id):
                WHERE id=?""",
             (today_ist().isoformat(), str(charges["actual_slots"]), charges["actual_grids"],
              charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
-             charges["grid_type"], charges["clip_base_source"],
+             charges["grid_type"], grid_breakdown_json(charges), charges["clip_base_source"],
              str(charges["grid_charge"]), str(charges["handling_charge"]),
              str(charges["clip_base_charge"]), str(charges["slot_charge"]), str(charges["freezing_charge"]),
              str(charges["clipping_charge"]), str(charges["processing_charge"]), str(charges["subtotal"]),
@@ -3417,14 +3769,23 @@ def delete_sc(booking_id):
             "registration",
         )
         return redirect(url_for("admin.screening_admin"))
-    cur.execute(
-        "DELETE FROM screening_bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
-        [booking_id],
-    )
-    deleted = cur.rowcount
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        cur.execute(
+            "DELETE FROM screening_bookings WHERE id=? AND status IN ('waiting', 'ongoing')",
+            [booking_id],
+        )
+        deleted = cur.rowcount
+        if deleted:
+            # SQLite runs without foreign-key cascades, so remove the link
+            # rows explicitly in the same transaction.
+            delete_booking_grid_links(cur, "screening", booking_id)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
     flash(
         "Screening slot deleted." if deleted else "That slot could not be found or is already completed.",
         "success" if deleted else "registration",
@@ -3846,6 +4207,7 @@ def set_csic_booking(service_key, booking_id):
             clip_base_source=row.get("clip_base_source") or "facility",
             normal_grids=normal_grids,
             gold_grids=gold_grids,
+            prebilled_grids=stored_prebilled_grids(row),
         )
     except ValueError as exc:
         cur.close()
@@ -4118,6 +4480,7 @@ def edit_completed_booking(service_key, booking_id):
             normal_grids,
             gold_grids,
             clip_base_source,
+            prebilled_grids=stored_prebilled_grids(row) if service_key != "freezing" else 0,
         )
     except ValueError as exc:
         cur.close()
@@ -4128,6 +4491,8 @@ def edit_completed_booking(service_key, booking_id):
     updated.update(charges)
     keep_csic = is_csic_booking(row)
     csic_final_amount = row["csic_final_amount"]
+    csic_original_amount = None
+    csic_adjustment = None
     if (
         keep_csic
         and (
@@ -4154,8 +4519,13 @@ def edit_completed_booking(service_key, booking_id):
             conn.close()
             flash(str(exc))
             return redirect(url_for("admin.history"))
-        updated["grand_total"] = parse_csic_final_amount(csic_final_amount)
-        updated["total_billed"] = parse_csic_final_amount(csic_final_amount)
+        # Re-apply the agreed CSIC amount so the stored subtotal, GST,
+        # adjustment and original amount stay consistent with the total.
+        csic_charges = apply_csic_final_amount(charges, csic_final_amount, origin)
+        for field in ("subtotal", "gst", "gst_amount", "grand_total", "total_billed"):
+            updated[field] = csic_charges[field]
+        csic_adjustment = csic_charges["csic_adjustment"]
+        csic_original_amount = charges["grand_total"]
 
     values = {
         "user_name": updated["user_name"],
@@ -4182,6 +4552,8 @@ def edit_completed_booking(service_key, booking_id):
         "total_billed": str(updated["total_billed"]),
         "is_csic": int(keep_csic),
         "csic_final_amount": str(csic_final_amount) if csic_final_amount is not None else None,
+        "csic_original_amount": str(csic_original_amount) if csic_original_amount is not None else None,
+        "csic_adjustment": str(csic_adjustment) if csic_adjustment is not None else None,
         "processing_requested": int(processing_requested),
         "clipped_grids": int(clipped_grids) if service_key != "freezing" else 0,
         "bill_generated_at": now_ist().isoformat(sep=" ", timespec="seconds"),
@@ -4196,15 +4568,14 @@ def edit_completed_booking(service_key, booking_id):
         })
     else:
         values.update({
+            "esm": updated["esm"],
             "freezing_date": completion_date.isoformat(),
             "service_stage": charges["service_stage"],
         })
     if "pi_email" in request.form:
         values["pi_email"] = pi_email or None
-    values["grid_breakdown"] = json.dumps({
-        "normal_holey_carbon": charges["normal_grids"],
-        "gold_carbon_graphene": charges["gold_grids"],
-    })
+    # Keeps "prebilled_grids" so later recalculations reproduce these charges.
+    values["grid_breakdown"] = grid_breakdown_json(charges)
 
     assignments = ", ".join(f"{column}=?" for column in values)
     cur.execute(
@@ -4326,6 +4697,7 @@ def send_charge_sheet(service_key, booking_id):
                 clip_base_source=row.get("clip_base_source") or "facility",
                 normal_grids=normal_grids,
                 gold_grids=gold_grids,
+                prebilled_grids=stored_prebilled_grids(row),
             )
         except ValueError as exc:
             flash(str(exc))
@@ -4389,9 +4761,14 @@ def send_charge_sheet(service_key, booking_id):
 
     table = _CHARGE_SHEET_TABLES[service_key][0]
     try:
-        if not is_resend:
-            _store_sent_charges(cur, table, booking_id, row, charges,
-                                csic_original_amount, charge_sheet_id)
+        if not is_resend and not _store_sent_charges(
+            cur, table, booking_id, row, charges, csic_original_amount, charge_sheet_id
+        ):
+            # Another request issued this booking's charge sheet first; do
+            # not email a second sheet under a different ID.
+            conn.rollback()
+            flash("This charge sheet has already been sent. Refresh the page and use resend if needed.")
+            return redirect(url_for("admin.history"))
         if pi_email:
             cur.execute(
                 f"UPDATE {table} SET pi_email=?, "
@@ -4424,6 +4801,11 @@ def send_charge_sheet(service_key, booking_id):
 
 
 def _store_sent_charges(cur, table, booking_id, row, charges, csic_original_amount, charge_sheet_id):
+    """Store a first send's charges; return False if a sheet was already issued.
+
+    The update only applies while no (other) sheet ID is stored, so two
+    simultaneous first sends cannot both allocate and store a sheet ID.
+    """
     cur.execute(
         "UPDATE {} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, clip_base_source=?, "
         "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, "
@@ -4431,7 +4813,7 @@ def _store_sent_charges(cur, table, booking_id, row, charges, csic_original_amou
         "gst_amount=?, grand_total=?, total_billed=?, csic_adjustment=?, "
         "csic_original_amount=COALESCE(csic_original_amount, ?), charge_sheet_id=?, "
         "bill_generated_at=CURRENT_TIMESTAMP "
-        "WHERE id=?".format(table),
+        "WHERE id=? AND (charge_sheet_id IS NULL OR charge_sheet_id=?)".format(table),
         [charges["number_of_grids"], charges["service_stage"], charges["grid_source"],
          charges["grid_type"], charges["clip_base_source"],
          str(charges["grid_charge"]), str(charges["handling_charge"]),
@@ -4441,8 +4823,14 @@ def _store_sent_charges(cur, table, booking_id, row, charges, csic_original_amou
          str(charges["grand_total"]), str(charges["total_billed"]),
          str(charges.get("csic_adjustment")) if is_csic_booking(row) else None,
          str(csic_original_amount) if csic_original_amount is not None else None,
-         charge_sheet_id, booking_id],
+         charge_sheet_id, booking_id, charge_sheet_id],
     )
+    if cur.rowcount == 1:
+        return True
+    # MySQL reports changed (not matched) rows, so confirm by reading back.
+    cur.execute("SELECT charge_sheet_id FROM {} WHERE id=?".format(table), [booking_id])
+    stored = cur.fetchone()
+    return bool(stored and stored["charge_sheet_id"] == charge_sheet_id)
 
 
 @admin_bp.route("/charge-sheet/<service_key>/<int:booking_id>/preview", methods=["POST"])
@@ -4474,6 +4862,7 @@ def preview_charge_sheet(service_key, booking_id):
             clip_base_source=row.get("clip_base_source") or "facility",
             normal_grids=normal_grids,
             gold_grids=gold_grids,
+            prebilled_grids=stored_prebilled_grids(row),
         )
     except ValueError as exc:
         flash(str(exc))
@@ -4565,6 +4954,7 @@ def send_combined_charge_sheet():
                 clip_base_source=clip_base_source,
                 normal_grids=normal_grids,
                 gold_grids=gold_grids,
+                prebilled_grids=stored_prebilled_grids(row),
             )
             if is_csic_booking(row) and row.get("csic_final_amount") is not None:
                 charges = apply_csic_final_amount(
@@ -4619,6 +5009,12 @@ def send_combined_charge_sheet():
     combined["combined_items"] = [row for _, _, row in items]
     for field in ("actual_slots", "number_of_grids", "subtotal", "gst_amount", "grand_total", "total_billed"):
         combined[field] = sum((Decimal(str(row.get(field) or 0)) for _, _, row in items), Decimal("0"))
+    # Freezing has no instrument slots, so it contributes none to the total.
+    combined["actual_slots"] = sum(
+        (Decimal(str(row.get("actual_slots") or 0))
+         for key, _, row in items if key != "freezing"),
+        Decimal("0"),
+    )
     combined["actual_slots"] = str(combined["actual_slots"])
     combined["number_of_grids"] = int(combined["number_of_grids"])
     try:
@@ -4631,7 +5027,15 @@ def send_combined_charge_sheet():
         conn.close()
         raise
     try:
-        _store_combined_charges(cur, items, charge_sheet_id)
+        if not _store_combined_charges(cur, items, charge_sheet_id):
+            # A concurrent send already issued a sheet for one of these
+            # bookings; never email a second sheet under a different ID.
+            conn.rollback()
+            flash(
+                "One of the selected slots was billed by another request just now. "
+                "Refresh the page and check its charge sheet before sending again."
+            )
+            return redirect(url_for("admin.history"))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -4649,6 +5053,7 @@ def send_combined_charge_sheet():
 
 
 def _store_combined_charges(cur, items, charge_sheet_id):
+    """Store each unbilled item; return False if any was billed concurrently."""
     for service_key, booking_id, row in items:
         table = _CHARGE_SHEET_TABLES[service_key][0]
         if row.get("_already_sent"):
@@ -4658,12 +5063,20 @@ def _store_combined_charges(cur, items, charge_sheet_id):
             f"UPDATE {table} SET number_of_grids=?, service_stage=?, grid_source=?, grid_type=?, clip_base_source=?, "
             "grid_charge=?, handling_charge=?, clip_base_charge=?, slot_charge=?, freezing_charge=?, clipping_charge=?, "
             "processing_charge=?, subtotal=?, gst_amount=?, grand_total=?, total_billed=?, charge_sheet_id=?, "
-            "bill_generated_at=CURRENT_TIMESTAMP, charge_sheet_sent_at=CURRENT_TIMESTAMP WHERE id=?",
+            "bill_generated_at=CURRENT_TIMESTAMP, charge_sheet_sent_at=CURRENT_TIMESTAMP "
+            "WHERE id=? AND (charge_sheet_id IS NULL OR charge_sheet_id=?)",
             [row["number_of_grids"], row["service_stage"], row["grid_source"], row["grid_type"], row["clip_base_source"],
              str(row["grid_charge"]), str(row["handling_charge"]), str(row["clip_base_charge"]), str(row["slot_charge"]),
              str(row["freezing_charge"]), str(row["clipping_charge"]), str(row["processing_charge"]), str(row["subtotal"]),
-             str(row["gst_amount"]), str(row["grand_total"]), str(row["total_billed"]), charge_sheet_id, booking_id],
+             str(row["gst_amount"]), str(row["grand_total"]), str(row["total_billed"]), charge_sheet_id, booking_id,
+             charge_sheet_id],
         )
+        if cur.rowcount != 1:
+            cur.execute(f"SELECT charge_sheet_id FROM {table} WHERE id=?", [booking_id])
+            stored = cur.fetchone()
+            if not stored or stored["charge_sheet_id"] != charge_sheet_id:
+                return False
+    return True
 
 
 @admin_bp.route("/payment/<service_key>/<int:booking_id>", methods=["POST"])

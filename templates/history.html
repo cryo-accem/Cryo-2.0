@@ -49,7 +49,7 @@
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
           <td>{{ slot.sample_name }}{% if has_days %}<br><small>{{ slot.days }} requested days / {{ slot.grids }} requested grids</small>{% else %}<br><small>{{ slot.grids }} requested grids</small>{% endif %}</td>
-          <td>{{ slot.actual_slots or 0 }} slots<br>{{ slot.actual_grids or 0 }} grids</td>
+          <td>{% if service_key != 'freezing' %}{{ slot.actual_slots or 0 }} slots<br>{% endif %}{{ slot.actual_grids or 0 }} grids</td>
           <td>{{ slot.completion_date if service_key != 'freezing' else slot.completed_at }}</td>
           <td>
             {% if slot.origin|lower in ['external', 'academic', 'external academic', 'industry', 'industrial', 'external industry'] and not is_non_billable_booking(slot) %}
@@ -98,7 +98,7 @@
                   </select>
                 </label>
                 {% if slot.origin|lower == 'internal' %}<label>PI email<input type="email" name="pi_email" value="{{ slot.pi_email or '' }}" maxlength="150"></label>{% endif %}
-                {% if service_key != 'freezing' %}<label>Institute<input name="esm" value="{{ slot.esm or '' }}" maxlength="150"></label>{% endif %}
+                <label>Institute<input name="esm" value="{{ slot.esm or '' }}" maxlength="150"></label>
                 <label>Sample name<input name="sample_name" value="{{ slot.sample_name }}" maxlength="150" required></label>
                 <label>Requested grids<input type="number" name="grids" min="1" max="{{ 8 if service_key == 'freezing' else 4 }}" value="{{ slot.grids }}" required></label>
                 {% if has_days %}<label>Requested days<input type="number" name="days" min="1" max="4" value="{{ slot.days }}" required></label>{% endif %}

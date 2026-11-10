@@ -336,3 +336,20 @@ class EmdbAdminAndHomeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OwnerApprovedEntriesTests(unittest.TestCase):
+    def test_owner_approved_ids_are_always_counted(self):
+        import emdb_structures as es
+
+        def fake_search(query, fields=es.FIELDS):
+            if query.startswith("emdb_id:("):
+                return [{"emdb_id": emdb_id, "title": "t", "microscope_name": "FEI TALOS ARCTICA",
+                         "grant_country": "", "dep_author_name": "Hussain T"}
+                        for emdb_id in es.OWNER_APPROVED_IDS if f'"{emdb_id}"' in query]
+            return []
+
+        with patch.object(es, "search", side_effect=fake_search):
+            result = es.compute_structures([], None)
+        counted = {entry["emdb_id"] for entry in result["entries"]}
+        self.assertEqual(counted, set(es.OWNER_APPROVED_IDS))

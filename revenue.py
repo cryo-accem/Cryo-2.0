@@ -6,6 +6,7 @@ they must not reimplement these formulas.
 """
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import json
 import re
 
 
@@ -199,11 +200,28 @@ def calculate_charge_sheet(
     normal_grids=None,
     gold_grids=None,
     clip_base_source="facility",
+    prebilled_grids=0,
 ):
-    """Calculate every chargeable component from validated business inputs."""
+    """Calculate every chargeable component from validated business inputs.
+
+    ``prebilled_grids`` is the number of this booking's grids whose grid
+    charge was already billed at freezing (facility grids registered in
+    inventory and later linked to screening or data collection).  They are
+    not charged a grid charge again; handling and C-clip/base-ring charges
+    still apply to every grid.
+    """
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
     grids = parse_number_of_grids(number_of_grids)
+    prebilled_text = str(prebilled_grids if prebilled_grids is not None else "").strip()
+    if prebilled_text and not prebilled_text.isdigit():
+        raise ValueError("Already-billed grids must be zero or a positive integer.")
+    prebilled = int(prebilled_text) if prebilled_text else 0
+    if prebilled and stage == "Freezing / Grid Registration":
+        raise ValueError("Already-billed grids apply only to screening and data collection.")
+    if prebilled > grids:
+        raise ValueError("Already-billed grids cannot exceed actual grids.")
+    chargeable_grids = grids - prebilled
     clipped_text = str(clipped_grids or "").strip()
     if clipped_text and not clipped_text.isdigit():
         raise ValueError("Clipped grids must be zero or a positive integer.")
@@ -213,15 +231,22 @@ def calculate_charge_sheet(
     source = normalize_grid_source(grid_source)
     selected_clip_base_source = normalize_clip_base_source(clip_base_source)
     selected_grid_type = normalize_grid_type(grid_type)
-    if source == "facility" and not selected_grid_type and normal_grids is None and gold_grids is None:
+    has_breakdown = normal_grids is not None or gold_grids is not None
+    if (source == "facility" and chargeable_grids and not selected_grid_type
+            and not has_breakdown):
         raise ValueError("Please select the grid type for facility-provided grids.")
-    if source == "facility" and (normal_grids is not None or gold_grids is not None):
+    if source == "facility" and has_breakdown:
         try:
             normal_count = int(normal_grids or 0)
             gold_count = int(gold_grids or 0)
         except (TypeError, ValueError):
             raise ValueError("Grid type quantities must be whole numbers.") from None
-        if normal_count < 0 or gold_count < 0 or normal_count + gold_count != grids:
+        if normal_count < 0 or gold_count < 0 or normal_count + gold_count != chargeable_grids:
+            if prebilled:
+                raise ValueError(
+                    f"Grid type quantities must add up to the {chargeable_grids} chargeable "
+                    f"grid(s): {prebilled} of the actual grids were already billed at freezing."
+                )
             raise ValueError("Grid type quantities must add up to the actual grids.")
         if normal_count and gold_count:
             selected_grid_type = "mixed"
@@ -229,11 +254,11 @@ def calculate_charge_sheet(
             selected_grid_type = "normal_holey_carbon"
         elif gold_count:
             selected_grid_type = "gold_carbon_graphene"
-        else:
+        elif not prebilled:
             raise ValueError("Enter at least one grid type quantity.")
     else:
-        normal_count = grids if selected_grid_type == "normal_holey_carbon" else 0
-        gold_count = grids if selected_grid_type == "gold_carbon_graphene" else 0
+        normal_count = chargeable_grids if selected_grid_type == "normal_holey_carbon" else 0
+        gold_count = chargeable_grids if selected_grid_type == "gold_carbon_graphene" else 0
 
     try:
         slots = Decimal(str(actual_slots))
@@ -273,6 +298,7 @@ def calculate_charge_sheet(
         "gold_grids": gold_count if source == "facility" else 0,
         "actual_slots": slots,
         "clipped_grids": clipped,
+        "prebilled_grids": prebilled if source == "facility" else 0,
         "grid_charge": _money(grid_charge),
         "handling_charge": _money(handling_charge),
         "clip_base_charge": _money(clip_base_charge),
@@ -316,12 +342,14 @@ def is_billable_booking(booking):
 def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_requested=False,
                               grid_source="facility", grid_type="normal_holey_carbon",
                               service_stage="Data Collection", user_category=None,
-                              clipped_grids=0, clip_base_source="facility"):
+                              clipped_grids=0, clip_base_source="facility",
+                              normal_grids=None, gold_grids=None, prebilled_grids=0):
     """Compatibility adapter for existing completion routes."""
     charges = calculate_charge_sheet(
         user_category or booking["origin"], service_stage, actual_grids, grid_source, grid_type,
         actual_slots, processing_requested, clipped_grids,
-        clip_base_source=clip_base_source,
+        normal_grids=normal_grids, gold_grids=gold_grids,
+        clip_base_source=clip_base_source, prebilled_grids=prebilled_grids,
     )
     if is_non_billable_booking(booking):
         for key in ("grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
@@ -329,3 +357,38 @@ def calculate_booking_revenue(booking, actual_slots, actual_grids, processing_re
                     "total_billed", "freezing_charge", "clipping_charge"):
             charges[key] = ZERO
     return charges
+
+
+def grid_breakdown_json(charges):
+    """Stored grid-type breakdown that lets a recalculation reproduce ``charges``.
+
+    The normal/gold counts are the chargeable grids.  ``prebilled_grids`` is
+    stored only when some grids were already billed at freezing.
+    """
+    breakdown = {
+        "normal_holey_carbon": charges.get("normal_grids", 0),
+        "gold_carbon_graphene": charges.get("gold_grids", 0),
+    }
+    if charges.get("prebilled_grids"):
+        breakdown["prebilled_grids"] = int(charges["prebilled_grids"])
+    return json.dumps(breakdown)
+
+
+def stored_prebilled_grids(row):
+    """Return the already-billed grid count stored with a completed booking."""
+    try:
+        breakdown = row["grid_breakdown"]
+    except (KeyError, IndexError, TypeError):
+        return 0
+    if isinstance(breakdown, str):
+        try:
+            breakdown = json.loads(breakdown)
+        except ValueError:
+            return 0
+    if not isinstance(breakdown, dict):
+        return 0
+    try:
+        value = int(breakdown.get("prebilled_grids") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(value, 0)

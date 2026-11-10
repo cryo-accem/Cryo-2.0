@@ -4,12 +4,16 @@ from decimal import Decimal
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
+from extensions import now_ist
 from revenue import billed_origin, calculate_charge_sheet, is_non_billable_booking
 from inventory_service import _begin, _lock_clause, facility_today
 
 freezing_bp = Blueprint("freezing", __name__)
 
 GRID_LIMIT_PER_DAY = 8
+MAX_BOOKING_DAYS_AHEAD = 365
+# Admin overrides may plan further ahead, but still reject typo dates like 9999.
+MAX_ADMIN_BOOKING_DAYS_AHEAD = 5 * 365
 
 
 def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facility",
@@ -34,15 +38,17 @@ def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facili
            charges[key] = Decimal("0.00")
     cur.execute(
         """INSERT INTO completed_freezing
-          (user_name, pi_name, email, origin, sample_name, grids, freezing_date,
+          (user_name, pi_name, email, origin, esm, sample_name, grids, freezing_date,
             actual_grids, number_of_grids, service_stage, grid_source, grid_type, grid_breakdown,
             grid_charge, handling_charge, clip_base_charge, slot_charge,
             freezing_charge, clipping_charge, processing_charge, subtotal,
             gst_amount, grand_total, total_billed, processing_requested,
-            bill_generated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+            completed_at, bill_generated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
         (booking["user_name"], booking["pi_name"], booking["email"],
-         billed_origin(booking["origin"], user_category), booking["sample_name"], booking["grids"],
+         billed_origin(booking["origin"], user_category),
+         booking["esm"] if "esm" in booking.keys() else None,
+         booking["sample_name"], booking["grids"],
          booking["freezing_date"], str(actual_grids), charges["number_of_grids"],
          charges["service_stage"], charges["grid_source"], charges["grid_type"],
          json.dumps({"normal_holey_carbon": charges["normal_grids"],
@@ -50,7 +56,11 @@ def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facili
          str(charges["grid_charge"]), str(charges["handling_charge"]), str(charges["clip_base_charge"]),
          str(charges["slot_charge"]), str(charges["freezing_charge"]), str(charges["clipping_charge"]),
          str(charges["processing_charge"]), str(charges["subtotal"]), str(charges["gst_amount"]),
-         str(charges["grand_total"]), str(charges["total_billed"]), 0),
+         str(charges["grand_total"]), str(charges["total_billed"]), 0,
+         # Stored in IST like the other completion dates: the column default
+         # (CURRENT_TIMESTAMP) is UTC, which dates 00:00-05:30 IST completions
+         # to the previous day and can shift them into the wrong month.
+         now_ist().strftime("%Y-%m-%d %H:%M:%S")),
     )
     cur.execute(
         "UPDATE freezing_bookings SET status='completed' WHERE id=?",
@@ -109,9 +119,16 @@ def freezing_availability():
     return jsonify({"limit": GRID_LIMIT_PER_DAY, "dates": availability})
 
 
+def max_freezing_date(today=None, admin_override=False):
+    """Latest date a freezing slot may be booked for (one year ahead)."""
+    today = today or facility_today()
+    days = MAX_ADMIN_BOOKING_DAYS_AHEAD if admin_override else MAX_BOOKING_DAYS_AHEAD
+    return today + datetime.timedelta(days=days)
+
+
 def register_freezing(
     user_name, pi_name, email, origin, sample_name, grids, freezing_date,
-    allow_over_capacity=False,
+    allow_over_capacity=False, esm=None,
 ):
     """
     Insert a freezing booking, optionally bypassing the normal grid cap for admins.
@@ -129,6 +146,10 @@ def register_freezing(
         return False, "Please choose a valid freezing date."
     if selected_date < facility_today():
         return False, "Freezing dates in the past cannot be booked."
+    if selected_date > max_freezing_date(admin_override=allow_over_capacity):
+        if allow_over_capacity:
+            return False, "Freezing dates can be booked at most five years in advance."
+        return False, "Freezing dates can be booked at most one year in advance."
     if selected_date.weekday() >= 5:
         return False, "Freezing slots cannot be booked on Saturdays or Sundays."
 
@@ -138,6 +159,20 @@ def register_freezing(
         # Check the daily capacity and insert inside one transaction; on MySQL
         # the locking read serialises concurrent bookings for the same date.
         _begin(conn)
+        # Reject an identical resubmission (double click / browser resend)
+        # while the first booking is still active.
+        cur.execute(
+            "SELECT id FROM freezing_bookings WHERE status='active' "
+            "AND LOWER(TRIM(email))=LOWER(TRIM(?)) AND freezing_date=? "
+            "AND TRIM(sample_name)=TRIM(?)" + _lock_clause(),
+            [email, selected_date.isoformat(), sample_name],
+        )
+        if cur.fetchone():
+            conn.rollback()
+            return False, (
+                "You already have an active freezing booking for this sample on "
+                "this date. It was not booked again."
+            )
         cur.execute(
             "SELECT COALESCE(SUM(grids),0) AS total FROM freezing_bookings "
             "WHERE freezing_date=? AND status='active'" + _lock_clause(),
@@ -152,11 +187,11 @@ def register_freezing(
 
         cur.execute(
             """INSERT INTO freezing_bookings
-               (user_name, pi_name, email, origin, sample_name,
+               (user_name, pi_name, email, origin, esm, sample_name,
                 grids, freezing_date, status, registered_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)""",
-            (user_name, pi_name, email, origin, sample_name, grids,
-             selected_date.isoformat()),
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)""",
+            (user_name, pi_name, email, origin, (esm or "").strip() or None,
+             sample_name, grids, selected_date.isoformat()),
         )
         conn.commit()
     except Exception:

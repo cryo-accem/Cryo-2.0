@@ -267,8 +267,32 @@ def register_freezing(fields, actor_id):
         connection.close()
 
 
-def register_completed_freezing(cursor, booking_id, booking, grid_count, fields, actor_id):
-    """Create linked inventory records inside the caller's freezing-completion transaction."""
+def billing_category_for_grid_type_name(name):
+    """Map an inventory grid type to its billing category, or None if unknown.
+
+    Billing has two grid categories: normal holey carbon, and gold / carbon
+    coated / graphene oxide.  Admin-defined types that match neither are
+    left unvalidated.
+    """
+    value = re.sub(r"[^a-z]+", " ", str(name or "").casefold()).strip()
+    if not value:
+        return None
+    if "gold" in value or "graphene" in value or "carbon coated" in value:
+        return "gold_carbon_graphene"
+    if "holey" in value or "quantifoil" in value:
+        return "normal_holey_carbon"
+    return None
+
+
+def register_completed_freezing(cursor, booking_id, booking, grid_count, fields, actor_id,
+                                billed_split=None, billed_at_freezing=False):
+    """Create linked inventory records inside the caller's freezing-completion transaction.
+
+    ``billed_split`` is the billed (normal, gold) facility grid counts; when
+    given, the per-grid inventory types must agree with it.  When
+    ``billed_at_freezing`` is true each grid records that its grid charge was
+    billed here, so screening and data collection do not charge it again.
+    """
     count = _positive_int(grid_count, "Grid count", MAX_GRIDS_PER_BATCH)
     sample_names = fields.getlist("inventory_grid_sample_name")
     if not sample_names:
@@ -351,6 +375,28 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
         )
         if not cursor.fetchone():
             raise InventoryError("Choose an active inventory grid type for every grid.")
+    if billed_split is not None:
+        categories = []
+        for grid_type_id in grid_type_ids:
+            cursor.execute(
+                "SELECT grid_type_name FROM grid_types WHERE grid_type_id=?",
+                [grid_type_id],
+            )
+            categories.append(
+                billing_category_for_grid_type_name(cursor.fetchone()["grid_type_name"])
+            )
+        if all(categories):
+            entered_normal = categories.count("normal_holey_carbon")
+            entered_gold = categories.count("gold_carbon_graphene")
+            billed_normal, billed_gold = billed_split
+            if (entered_normal, entered_gold) != (int(billed_normal), int(billed_gold)):
+                raise InventoryError(
+                    f"The billed grid types ({billed_normal} normal holey carbon, "
+                    f"{billed_gold} gold / carbon coated / graphene oxide) do not match "
+                    f"the per-grid inventory types ({entered_normal} normal holey carbon, "
+                    f"{entered_gold} gold / carbon coated / graphene oxide). "
+                    "Correct the billing split or the grid types."
+                )
 
     created_at = now_utc()
     frozen_at = parse_datetime(str(booking["freezing_date"]), "freezing date")
@@ -453,6 +499,11 @@ def register_completed_freezing(cursor, booking_id, booking, grid_count, fields,
                new_value=frozen_at,
                notes=f"Blot seconds: {blot_seconds}; blot force: {blot_force}.",
                event_time=created_at)
+        if billed_at_freezing:
+            _event(cursor, grid_id, "freezing_grid_billed", actor_id,
+                   new_value=f"Freezing booking #{booking_id}",
+                   notes="Facility grid charge billed at freezing completion.",
+                   operation_reference=batch_code, event_time=created_at)
         _store_grid(
             cursor,
             {"grid_id": grid_id, "grid_code": grid_code, "current_status": "Frozen"},
@@ -668,7 +719,8 @@ def _current_location(cursor, grid_id, lock=False):
 
 def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
                 session_id=None, operation_reference=None, mark_stored=False,
-                allow_microscope_return=False):
+                allow_microscope_return=False,
+                return_event_type="screening_returned_to_storage"):
     if grid["current_status"] == "Discarded":
         raise InventoryError(f"{grid['grid_code']} is discarded and cannot be stored.")
     if session_id and grid["current_status"] != "In Data Collection":
@@ -688,8 +740,9 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
     cursor.execute(
         """SELECT g.grid_code FROM storage_locations sl
            JOIN inventory_grids g ON g.grid_id=sl.grid_id
-           WHERE sl.falcon_container_id=? AND sl.grid_box_name=?
-             AND sl.grid_position=? AND sl.removed_at IS NULL
+           WHERE LOWER(sl.falcon_container_id)=LOWER(?)
+             AND LOWER(sl.grid_box_name)=LOWER(?)
+             AND LOWER(sl.grid_position)=LOWER(?) AND sl.removed_at IS NULL
              AND sl.grid_id<>? LIMIT 1""",
         [container, box, position, grid["grid_id"]],
     )
@@ -726,7 +779,7 @@ def _store_grid(cursor, grid, destination, actor_id, notes, event_time,
     if session_id:
         event_type = "returned_to_storage"
     elif allow_microscope_return:
-        event_type = "screening_returned_to_storage"
+        event_type = return_event_type
     elif (
         not old_location
         and "batch_id" in grid.keys()
@@ -1042,7 +1095,9 @@ def booking_grid_links_for_bookings(service_type, booking_ids):
         cursor.execute(
             f"""SELECT l.{booking_column} AS booking_id, g.grid_code, g.current_status,
                        s.sample_name, sl.falcon_container_id, sl.grid_box_name,
-                       sl.grid_position
+                       sl.grid_position, g.clipped,
+                       CASE WHEN {_BILLED_AT_FREEZING_SQL} THEN 1 ELSE 0 END
+                           AS billed_at_freezing
                 FROM {link_table} l
                 JOIN inventory_grids g ON g.grid_id=l.grid_id
                 JOIN inventory_samples s ON s.sample_id=g.sample_id
@@ -1090,32 +1145,56 @@ def grid_booking_links(grid_code):
         connection.close()
 
 
-def load_screening_booking(booking_id, actor_id):
+_LOAD_TARGETS = {
+    "screening": {
+        "booking_table": "screening_bookings",
+        "link_table": "screening_booking_grids",
+        "booking_column": "screening_booking_id",
+        "operation_prefix": "SCREENING",
+        "label": "screening",
+        "started_event": "screening_started",
+    },
+    "data_collection": {
+        "booking_table": "bookings",
+        "link_table": "data_collection_booking_grids",
+        "booking_column": "booking_id",
+        "operation_prefix": "DATA-COLLECTION",
+        "label": "data collection",
+        "started_event": "data_collection_booking_started",
+    },
+}
+
+
+def _load_booking(service_type, booking_id, actor_id):
+    """Mark a waiting booking ongoing and take its linked grids out of storage."""
+    target = _LOAD_TARGETS[service_type]
+    label = target["label"]
     connection = get_db()
     cursor = connection.cursor()
     try:
         _begin(connection)
         cursor.execute(
-            "SELECT id, status FROM screening_bookings WHERE id=?" + _lock_clause(),
+            f"SELECT id, status FROM {target['booking_table']} WHERE id=?" + _lock_clause(),
             [booking_id],
         )
         booking = cursor.fetchone()
         if not booking or booking["status"] != "waiting":
-            raise InventoryError("That screening booking is no longer waiting.")
+            raise InventoryError(f"That {label} booking is no longer waiting.")
 
         cursor.execute(
-            """SELECT g.grid_id, g.grid_code, g.current_status
-               FROM screening_booking_grids l
+            f"""SELECT g.grid_id, g.grid_code, g.current_status
+               FROM {target['link_table']} l
                JOIN inventory_grids g ON g.grid_id=l.grid_id
-               WHERE l.screening_booking_id=? ORDER BY g.grid_id""" + _lock_clause(),
+               WHERE l.{target['booking_column']}=? ORDER BY g.grid_id""" + _lock_clause(),
             [booking_id],
         )
         grids = cursor.fetchall()
         event_time = now_utc()
+        operation_reference = f"{target['operation_prefix']}-{booking_id}"
         for grid in grids:
             if grid["current_status"] not in {"Frozen", "Clipped", "Stored"}:
                 raise InventoryError(
-                    f"{grid['grid_code']} cannot be loaded for screening from "
+                    f"{grid['grid_code']} cannot be loaded for {label} from "
                     f"status {grid['current_status']}."
                 )
             cursor.execute(
@@ -1138,8 +1217,8 @@ def load_screening_booking(booking_id, actor_id):
                 _event(
                     cursor, grid["grid_id"], "storage_removal", actor_id,
                     old_value=previous_label,
-                    notes="Retrieved from storage for screening.",
-                    operation_reference=f"SCREENING-{booking_id}",
+                    notes=f"Retrieved from storage for {label}.",
+                    operation_reference=operation_reference,
                     event_time=event_time,
                 )
             cursor.execute(
@@ -1148,20 +1227,20 @@ def load_screening_booking(booking_id, actor_id):
                 [grid["grid_id"]],
             )
             _event(
-                cursor, grid["grid_id"], "screening_started", actor_id,
+                cursor, grid["grid_id"], target["started_event"], actor_id,
                 old_value=grid["current_status"], new_value="In Data Collection",
-                notes=f"Loaded for screening booking #{booking_id}; "
+                notes=f"Loaded for {label} booking #{booking_id}; "
                       f"previous location: {previous_label or 'not stored'}.",
-                operation_reference=f"SCREENING-{booking_id}",
+                operation_reference=operation_reference,
                 event_time=event_time,
             )
 
         cursor.execute(
-            "UPDATE screening_bookings SET status='ongoing' WHERE id=?",
+            f"UPDATE {target['booking_table']} SET status='ongoing' WHERE id=?",
             [booking_id],
         )
         cursor.execute(
-            "SELECT * FROM screening_bookings WHERE id=?",
+            f"SELECT * FROM {target['booking_table']} WHERE id=?",
             [booking_id],
         )
         loaded_booking = cursor.fetchone()
@@ -1173,6 +1252,99 @@ def load_screening_booking(booking_id, actor_id):
     finally:
         cursor.close()
         connection.close()
+
+
+def load_screening_booking(booking_id, actor_id):
+    return _load_booking("screening", booking_id, actor_id)
+
+
+def load_data_collection_booking(booking_id, actor_id):
+    return _load_booking("data_collection", booking_id, actor_id)
+
+
+# A linked inventory grid was already billed a grid charge at freezing when
+# freezing completion recorded it (event below), or, for grids registered
+# before that event existed, when its freezing booking's completed bill used
+# facility-provided grids.
+_BILLED_AT_FREEZING_SQL = """(
+    EXISTS (SELECT 1 FROM grid_events be
+            WHERE be.grid_id=g.grid_id AND be.event_type='freezing_grid_billed')
+    OR EXISTS (
+        SELECT 1 FROM freezing_booking_inventory fbi
+        JOIN freezing_bookings fb ON fb.id=fbi.booking_id
+        JOIN completed_freezing cf
+          ON cf.email=fb.email AND cf.freezing_date=fb.freezing_date
+         AND cf.sample_name=fb.sample_name AND cf.user_name=fb.user_name
+        WHERE fbi.batch_id=g.batch_id
+          AND LOWER(COALESCE(cf.grid_source, '')) IN ('facility', 'facility provided')
+    )
+)"""
+
+
+def booking_billing_context(cursor, service_type, booking_id):
+    """Return linked, already-billed and already-clipped grid counts for a booking."""
+    target = _LOAD_TARGETS.get(service_type)
+    if not target:
+        raise ValueError("Unsupported booking type.")
+    cursor.execute(
+        f"""SELECT COUNT(*) AS linked,
+                   COALESCE(SUM(CASE WHEN {_BILLED_AT_FREEZING_SQL} THEN 1 ELSE 0 END), 0)
+                       AS prebilled,
+                   COALESCE(SUM(CASE WHEN g.clipped=1 THEN 1 ELSE 0 END), 0) AS clipped
+            FROM {target['link_table']} l
+            JOIN inventory_grids g ON g.grid_id=l.grid_id
+            WHERE l.{target['booking_column']}=?""",
+        [booking_id],
+    )
+    row = cursor.fetchone()
+    return {
+        "linked": int(row["linked"] or 0),
+        "prebilled": int(row["prebilled"] or 0),
+        "clipped": int(row["clipped"] or 0),
+    }
+
+
+def booking_billing_context_for(service_type, booking_id):
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        return booking_billing_context(cursor, service_type, booking_id)
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def delete_booking_grid_links(cursor, service_type, booking_id):
+    """Remove a deleted booking's grid links (SQLite does not cascade by default)."""
+    target = _LOAD_TARGETS[service_type]
+    cursor.execute(
+        f"DELETE FROM {target['link_table']} WHERE {target['booking_column']}=?",
+        [booking_id],
+    )
+    return cursor.rowcount
+
+
+def _mark_grids_clipped(cursor, grid_ids, actor_id, event_time, notes):
+    """Record clipping on grids that are not discarded or already clipped."""
+    for grid_id in grid_ids:
+        cursor.execute(
+            "SELECT clipped, current_status FROM inventory_grids WHERE grid_id=?",
+            [grid_id],
+        )
+        grid = cursor.fetchone()
+        if not grid or grid["clipped"] or grid["current_status"] == "Discarded":
+            continue
+        next_status = "Clipped" if grid["current_status"] == "Frozen" else grid["current_status"]
+        cursor.execute(
+            """UPDATE inventory_grids SET clipped=1, clipped_at=?, clipped_by=?,
+               current_status=? WHERE grid_id=?""",
+            (event_time, actor_id, next_status, grid_id),
+        )
+        _event(
+            cursor, grid_id, "clipping_status_change", actor_id,
+            old_value="Not clipped", new_value="Clipped", notes=notes,
+            event_time=event_time,
+        )
 
 
 def complete_booking_grid_moves(
@@ -1214,11 +1386,15 @@ def complete_booking_grid_moves(
             "The mapped grids changed. Reload the booking and choose Store or Mark discarded for each linked grid."
         )
     event_time = now_utc()
+    return_event_type = (
+        "screening_returned_to_storage" if service_type == "screening"
+        else "data_collection_returned_to_storage"
+    )
     for index, grid in enumerate(grids):
-        allow_microscope_return = (
-            service_type == "screening"
-            and grid["current_status"] == "In Data Collection"
-        )
+        # Loading a screening or data-collection booking takes its linked
+        # grids out of storage ("In Data Collection"); completing the booking
+        # returns or discards them.
+        allow_microscope_return = grid["current_status"] == "In Data Collection"
         if allow_microscope_return:
             cursor.execute(
                 """SELECT 1 FROM grid_session_links
@@ -1228,7 +1404,7 @@ def complete_booking_grid_moves(
             if cursor.fetchone():
                 raise InventoryError(
                     f"Complete the active data-collection session before returning "
-                    f"{grid['grid_code']} through screening."
+                    f"{grid['grid_code']} through this booking."
                 )
         if outcomes[index] == "discard":
             _discard_grid(
@@ -1267,6 +1443,14 @@ def complete_booking_grid_moves(
             operation_reference=f"{operation_prefix}-{booking_id}",
             mark_stored=True,
             allow_microscope_return=allow_microscope_return,
+            return_event_type=return_event_type,
+        )
+    if service_type == "screening":
+        # Screening clips every screened grid, so remember it on the linked
+        # grids; later data collection must not bill the C-clip/base again.
+        _mark_grids_clipped(
+            cursor, [grid["grid_id"] for grid in grids], actor_id, event_time,
+            f"Clipped during screening booking #{booking_id}.",
         )
     add_inventory_grids = fields.get("add_inventory_grids")
     if add_inventory_grids not in {None, "", "1"}:
@@ -1368,6 +1552,11 @@ def complete_booking_grid_moves(
                     operation_reference=f"{operation_prefix}-{booking_id}",
                     mark_stored=True,
                 )
+                if service_type == "screening":
+                    _mark_grids_clipped(
+                        cursor, [grid_id], actor_id, event_time,
+                        f"Clipped during screening booking #{booking_id}.",
+                    )
         return count + additional_count
     return count
 
@@ -1428,8 +1617,9 @@ def rename_falcon_container(current_name, new_name, actor_id):
             cursor.execute(
                 """SELECT g.grid_code FROM storage_locations sl
                    JOIN inventory_grids g ON g.grid_id=sl.grid_id
-                   WHERE sl.falcon_container_id=? AND sl.grid_box_name=?
-                     AND sl.grid_position=? AND sl.removed_at IS NULL
+                   WHERE LOWER(sl.falcon_container_id)=LOWER(?)
+                     AND LOWER(sl.grid_box_name)=LOWER(?)
+                     AND LOWER(sl.grid_position)=LOWER(?) AND sl.removed_at IS NULL
                      AND sl.grid_id<>? LIMIT 1""" + _lock_clause(),
                 [
                     new_name,
@@ -1559,7 +1749,23 @@ def create_data_session(fields, actor_id):
             if grid["current_status"] == "Discarded":
                 raise InventoryError(f"Discarded grid {grid_code} cannot enter data collection.")
             if grid["current_status"] == "In Data Collection":
-                raise InventoryError(f"Grid {grid_code} is already in a data collection session.")
+                # A loaded data-collection booking has already taken its
+                # linked grids out of storage; its session may use them.
+                loaded_for_booking = False
+                if booking_id is not None:
+                    cursor.execute(
+                        """SELECT 1 FROM data_collection_booking_grids l
+                           JOIN bookings b ON b.id=l.booking_id
+                           WHERE l.grid_id=? AND l.booking_id=? AND b.status='ongoing'
+                             AND NOT EXISTS (
+                                 SELECT 1 FROM grid_session_links gsl
+                                 WHERE gsl.grid_id=l.grid_id AND gsl.outcome='in_progress'
+                             )""",
+                        [grid["grid_id"], booking_id],
+                    )
+                    loaded_for_booking = cursor.fetchone() is not None
+                if not loaded_for_booking:
+                    raise InventoryError(f"Grid {grid_code} is already in a data collection session.")
             cursor.execute(
                 """SELECT 1
                    FROM screening_booking_grids l

@@ -2,7 +2,7 @@ import re
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from blueprints.imaging import register_imaging
-from blueprints.freezing import register_freezing
+from blueprints.freezing import max_freezing_date, register_freezing
 from blueprints.screening import register_screening
 from inventory_service import InventoryError
 
@@ -133,11 +133,14 @@ def register():
             freezing_date = (request.form.get("freezing_date") or "").strip()
 
             success, message = register_freezing(
-                user_name, pi_name, email, origin, sample_name, grids, freezing_date
+                user_name, pi_name, email, origin, sample_name, grids, freezing_date,
+                esm=fields["esm"],
             )
             if not success:
                 flash(message, "registration")
                 return redirect(url_for("register.register"))
             return redirect(url_for("freezing.freezing_schedule", success="freezing"))
 
-    return render_template("register.html")
+    return render_template(
+        "register.html", freezing_max_date=max_freezing_date().isoformat()
+    )

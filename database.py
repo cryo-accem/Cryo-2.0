@@ -764,6 +764,7 @@ def init_db():
     _add_completion_columns(cur, "bookings")
     _add_completion_columns(cur, "screening_bookings")
     _add_completion_columns(cur, "completed_freezing")
+    _ensure_freezing_institute_columns(cur)
 
     if _is_sqlite_url():
         cur.execute("""
@@ -849,6 +850,25 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+
+
+def _table_columns(cur, table: str):
+    if _is_sqlite_url():
+        cur.execute(f"PRAGMA table_info({table})")
+        return {row["name"] for row in cur.fetchall()}
+    cur.execute(
+        "SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=%s",
+        [table],
+    )
+    return {row["COLUMN_NAME"] for row in cur.fetchall()}
+
+
+def _ensure_freezing_institute_columns(cur):
+    """Store the institute (esm) on freezing bookings so charge sheets show it."""
+    for table in ("freezing_bookings", "completed_freezing"):
+        if "esm" not in _table_columns(cur, table):
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN esm VARCHAR(150)")
 
 
 def _add_completion_columns(cur, table: str):

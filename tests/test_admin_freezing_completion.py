@@ -127,7 +127,10 @@ class AdminFreezingCompletionTests(unittest.TestCase):
             "actual_grids": "2",
             "grid_source": "facility",
             "grid_type": "",
-            "normal_grids": "2",
+            # Grid types 1 and 2 are Quantifoil holey carbon (normal) and
+            # carbon-coated (gold / carbon coated / graphene oxide billing).
+            "normal_grids": "1",
+            "gold_grids": "1",
             "grid_management": "1",
             "inventory_grid_sample_name": ["Managed sample", "Different sample"],
             "inventory_grid_type_id": [str(type_id) for type_id in grid_type_ids],

@@ -6,7 +6,7 @@ import datetime
 import threading
 import re
 from markupsafe import Markup, escape
-from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify, request
+from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify, request, session
 from database import _is_sqlite_url, ensure_site_stats_cache_table, get_db
 from normalization import clean_display_name
 from inventory_service import (
@@ -672,18 +672,31 @@ def sitemap_xml():
     return Response(body, mimetype="application/xml")
 
 
+def _admin_only_download():
+    """The user lists name PIs and institutions, so only signed-in staff get them."""
+    if session.get("admin_logged_in") and session.get("admin_user_id"):
+        return None
+    return redirect(url_for("admin.login"))
+
+
 @public_bp.route("/downloads/iisc-users.csv")
 def download_iisc_users():
+    if (denied := _admin_only_download()):
+        return denied
     return _user_csv("iisc-users.csv", "IISc internal", PI_USERS)
 
 
 @public_bp.route("/downloads/academic-users.csv")
 def download_academic_users():
+    if (denied := _admin_only_download()):
+        return denied
     return _user_csv("academic-external-users.csv", "Academic / external", ACADEMIC_USERS)
 
 
 @public_bp.route("/downloads/industry-users.csv")
 def download_industry_users():
+    if (denied := _admin_only_download()):
+        return denied
     return _user_csv(
         "industry-users.csv",
         "Industry",

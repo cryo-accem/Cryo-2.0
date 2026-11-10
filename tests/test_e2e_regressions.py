@@ -127,5 +127,62 @@ class WorkflowRegressionTests(unittest.TestCase):
         self.assertIsNone(row["charge_sheet_sent_at"])
 
 
+class UserListDownloadTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        db_path = os.path.join(self.temp_dir.name, "downloads.sqlite3")
+        self.database_url = patch.object(database, "DATABASE_URL", f"sqlite:///{db_path}")
+        self.database_url.start()
+        self.addCleanup(self.database_url.stop)
+        self.addCleanup(self.temp_dir.cleanup)
+        self.app = create_app()
+        self.app.testing = True
+        self.client = self.app.test_client()
+
+    def test_user_lists_require_staff_login(self):
+        for path in ("/downloads/iisc-users.csv", "/downloads/academic-users.csv",
+                     "/downloads/industry-users.csv"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 302, path)
+            self.assertIn("/admin", response.headers["Location"])
+
+    def test_signed_in_staff_can_download_user_lists(self):
+        with self.client.session_transaction() as sess:
+            sess["admin_logged_in"] = True
+            sess["admin_user_id"] = 1
+        response = self.client.get("/downloads/academic-users.csv")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response.headers["Content-Type"])
+
+
+class DashboardGreetingAndFreezingTimeTests(WorkflowRegressionTests):
+    def test_dashboard_greets_the_signed_in_admin(self):
+        conn = database.get_db()
+        name = conn.execute("SELECT username FROM users WHERE role='admin' ORDER BY id LIMIT 1").fetchone()["username"]
+        conn.close()
+        html = self.client.get("/admin/panel").get_data(as_text=True)
+        self.assertNotIn("Welcome back, Drose", html)
+        self.assertIn(f"Welcome back, {name[:1].upper() + name[1:]}", html)
+
+    def test_freezing_completion_time_is_stored_in_ist(self):
+        import datetime
+        from blueprints.freezing import complete_freezing_booking
+        booking = self._execute(
+            """INSERT INTO freezing_bookings (user_name, pi_name, email, origin, sample_name,
+               grids, freezing_date, status) VALUES ('F', 'P', 'f@example.com', 'External', 'S', 1,
+               '2026-11-10', 'active')"""
+        )
+        fixed = datetime.datetime(2026, 11, 30, 23, 45, 0)
+        with patch("blueprints.freezing.now_ist", return_value=fixed):
+            conn = database.get_db()
+            cur = conn.cursor()
+            complete_freezing_booking(cur, booking, 1, grid_source="self_owned", grid_type="")
+            conn.commit()
+            stamp = conn.execute("SELECT completed_at FROM completed_freezing ORDER BY id DESC LIMIT 1").fetchone()[0]
+            cur.close()
+            conn.close()
+        self.assertTrue(str(stamp).startswith("2026-11-30 23:45"), stamp)
+
+
 if __name__ == "__main__":
     unittest.main()

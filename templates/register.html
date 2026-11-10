@@ -71,7 +71,7 @@
           <div id="freezing_fields" class="form-grid full">
             <div class="form-field full">
               <label for="freezing_date">Date for Registration</label>
-              <input type="hidden" id="freezing_date" name="freezing_date">
+              <input type="hidden" id="freezing_date" name="freezing_date"{% if freezing_max_date %} max="{{ freezing_max_date }}"{% endif %}>
               <button type="button" class="date-picker-trigger" id="date-picker-trigger" aria-expanded="false" aria-controls="freezing-calendar" aria-describedby="freezing_date-hint">
                 <span class="date-picker-trigger__icon" aria-hidden="true"><i class="fa-regular fa-calendar"></i></span>
                 <span class="date-picker-trigger__copy">
@@ -80,7 +80,7 @@
                 </span>
                 <i class="fa-solid fa-chevron-down date-picker-trigger__chevron" aria-hidden="true"></i>
               </button>
-              <small class="field-hint" id="freezing_date-hint">Weekdays only. Freezing slots cannot be booked on Saturdays or Sundays.</small>
+              <small class="field-hint" id="freezing_date-hint">Weekdays only, up to one year ahead. Freezing slots cannot be booked on Saturdays or Sundays.</small>
               <div class="freezing-calendar hidden" id="freezing-calendar" aria-label="Freezing slot availability">
                 <div class="freezing-calendar__toolbar">
                   <button type="button" class="calendar-nav" id="calendar-previous" aria-label="Previous month">&lsaquo;</button>
@@ -344,6 +344,7 @@ toggleRegType(); toggleEsmField();
   let viewDate = new Date(today.getFullYear(), today.getMonth(), 1);
   let availability = {};
   let limit = 8;
+  const maxKey = dateInput.getAttribute('max') || '';
 
   function keyForDate(date) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -370,12 +371,13 @@ toggleRegType(); toggleEsmField();
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'calendar-day';
-      if (key < todayKey) button.classList.add('calendar-day--past');
+      const beyondMax = Boolean(maxKey) && key > maxKey;
+      if (key < todayKey || beyondMax) button.classList.add('calendar-day--past');
       if (isWeekend) button.classList.add('calendar-day--unavailable');
       if (details.booked > 0 && details.remaining > 0) button.classList.add('calendar-day--partial');
       if (details.remaining === 0) button.classList.add('calendar-day--full');
       if (key === dateInput.value) button.classList.add('calendar-day--selected');
-      button.disabled = key < todayKey || isWeekend || details.remaining === 0;
+      button.disabled = key < todayKey || beyondMax || isWeekend || details.remaining === 0;
       button.setAttribute('aria-label', isWeekend
         ? `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: Weekend unavailable`
         : `${date.toLocaleDateString(undefined, { dateStyle: 'full' })}: ${details.booked} of ${details.limit} grids booked`);
@@ -402,7 +404,9 @@ toggleRegType(); toggleEsmField();
     }
   });
   document.getElementById('calendar-next').addEventListener('click', () => {
-    viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+    const next = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1);
+    if (maxKey && keyForDate(next) > maxKey) return;
+    viewDate = next;
     renderCalendar();
   });
 

@@ -69,6 +69,9 @@ class StaticCachingAndCompressionTests(unittest.TestCase):
             "/static/images/cryo.webp", headers={"Accept-Encoding": "gzip, br"}
         )
         self.assertNotIn("Content-Encoding", response.headers)
+        with self.client.session_transaction() as sess:
+            sess["admin_logged_in"] = True
+            sess["admin_user_id"] = 1
         csv_response = self.client.get(
             "/downloads/iisc-users.csv", headers={"Accept-Encoding": "gzip"}
         )

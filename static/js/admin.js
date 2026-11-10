@@ -50,3 +50,13 @@ document.querySelectorAll('form[data-busy-label]').forEach((form) => {
     label.textContent = form.dataset.busyLabel;
   });
 });
+
+// Dashboard revenue bar chart: when there are more bars than fit, start the
+// scrollable chart at the most recent period instead of the oldest one, and
+// let keyboard users scroll it.
+document.querySelectorAll('.revenue-bars').forEach((chart) => {
+  if (chart.scrollWidth <= chart.clientWidth) return;
+  chart.classList.add('is-scrollable');
+  chart.tabIndex = 0;
+  chart.scrollLeft = chart.scrollWidth;
+});

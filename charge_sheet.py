@@ -1,5 +1,6 @@
 from decimal import Decimal
 from io import BytesIO
+import json
 import os
 from xml.sax.saxutils import escape
 
@@ -82,7 +83,82 @@ def _decimal(value):
 def _display_date(value):
     if not value:
         return ""
-    return value.strftime("%d-%m-%Y") if hasattr(value, "strftime") else str(value)[:10]
+    if hasattr(value, "strftime"):
+        return value.strftime("%d-%m-%Y")
+    text = str(value).strip()[:10]
+    # SQLite returns ISO strings (YYYY-MM-DD[ HH:MM:SS]); show them as dd-mm-yyyy.
+    parts = text.split("-")
+    if len(parts) == 3 and len(parts[0]) == 4 and all(part.isdigit() for part in parts):
+        return f"{parts[2]}-{parts[1]}-{parts[0]}"
+    return text
+
+
+_SERVICE_PREFIXES = (
+    ("freezing", "FRZ"),
+    ("grid registration", "FRZ"),
+    ("screening", "SCR"),
+    ("clipping", "SCR"),
+    ("data collection", "DC"),
+    ("imaging", "DC"),
+)
+
+
+def _service_prefix(service):
+    normalized = str(service or "").strip().casefold()
+    for name, prefix in _SERVICE_PREFIXES:
+        if normalized.startswith(name):
+            return prefix
+    return ""
+
+
+def _prefixed_id(booking_id, service):
+    prefix = _service_prefix(service)
+    return f"{prefix}-{booking_id}" if prefix else str(booking_id)
+
+
+def _booking_label(row, service):
+    """Booking IDs with a service prefix, since IDs come from different tables."""
+    items = _value(row, "combined_items", []) or []
+    labels = [
+        _prefixed_id(item.get("id"), item.get("combined_service", service))
+        for item in items if item.get("id")
+    ]
+    return ", ".join(labels) or _prefixed_id(row["id"], service)
+
+
+def _is_freezing_sheet(row, service):
+    """A single freezing sheet: freezing has no 24-hour instrument slots."""
+    items = _value(row, "combined_items", []) or []
+    if items:
+        return all(_service_prefix(item.get("combined_service", "")) == "FRZ" for item in items)
+    return _service_prefix(service) == "FRZ" or _service_prefix(_value(row, "service_stage", "")) == "FRZ"
+
+
+def _grid_count_label(row):
+    """Grid count; combined sheets list each stage instead of summing them."""
+    items = _value(row, "combined_items", []) or []
+    if items:
+        counts = []
+        for item in items:
+            grids = _value(item, "number_of_grids", _value(item, "actual_grids", 0)) or 0
+            counts.append(f"{_prefixed_id(item.get('id'), item.get('combined_service', ''))}: {grids}")
+        return "; ".join(counts)
+    return str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0)
+
+
+def _line_gst(lines, total_gst):
+    """Split the sheet's GST across lines in proportion to their amounts.
+
+    Any rounding remainder goes on the last line so the per-line GST always
+    adds up to the sheet's GST.
+    """
+    base = sum((amount for _, _, amount in lines), Decimal("0"))
+    total_gst = _decimal(total_gst)
+    if not lines or not base or not total_gst:
+        return [Decimal("0.00") for _ in lines]
+    shares = [_decimal(amount * total_gst / base) for _, _, amount in lines]
+    shares[-1] += total_gst - sum(shares, Decimal("0"))
+    return shares
 
 
 def _amount_words(number):
@@ -165,6 +241,23 @@ def _value(row, key, default=None):
     return default if value is None else value
 
 
+def _prebilled_grids(row):
+    """Grids whose grid charge was already billed at freezing (0 if none)."""
+    value = _value(row, "prebilled_grids")
+    if value is None:
+        breakdown = _value(row, "grid_breakdown")
+        if isinstance(breakdown, str):
+            try:
+                breakdown = json.loads(breakdown)
+            except ValueError:
+                breakdown = None
+        value = breakdown.get("prebilled_grids") if isinstance(breakdown, dict) else 0
+    try:
+        return max(int(value or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _billing_lines(row, service):
     if _value(row, "combined_items"):
         lines = []
@@ -187,7 +280,11 @@ def _billing_lines(row, service):
     lines = []
     # A self-owned grid is intentionally shown as a zero-valued line.
     if stage == "Freezing / Grid Registration" or source in {"facility", "self_owned"}:
-        lines.append(("Grid Charge", f"{grids or 0} grid(s)", _decimal(grid_amount)))
+        prebilled = _prebilled_grids(row)
+        quantity = f"{grids or 0} grid(s)"
+        if prebilled:
+            quantity = f"{max(int(grids or 0) - prebilled, 0)} grid(s); {prebilled} billed at freezing"
+        lines.append(("Grid Charge", quantity, _decimal(grid_amount)))
     if stage in {"Freezing / Grid Registration", "Screening / Clipping", "Data Collection"}:
         lines.append(("Handling Charge", f"{grids or 0} grid(s)", _decimal(handling_amount)))
     if stage in {"Screening / Clipping", "Data Collection"}:
@@ -310,15 +407,11 @@ def _external_pdf(row, service, category, is_industry):
 
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
-    booking_label = ", ".join(
-        str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
-    ) or str(row["id"])
+    booking_label = _booking_label(row, service)
     date_value = _value(row, "completion_date", _value(row, "completed_at"))
     institution_name = _value(row, "esm", "") or "Not provided"
-    booking_label = ", ".join(
-        str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
-    ) or str(row["id"])
-    date_value = _value(row, "completion_date", _value(row, "completed_at"))
+    grid_count = _grid_count_label(row)
+    is_freezing = _is_freezing_sheet(row, service)
     info = [
         [_paragraph("<b>Charge Sheet No:</b>", styles["Small"]),
          str(_value(row, "charge_sheet_id", f"CS-{row['id']}")),
@@ -329,7 +422,7 @@ def _external_pdf(row, service, category, is_industry):
         [_paragraph("<b>Booking ID(s):</b>", styles["Small"]), booking_label,
          _paragraph("<b>Service:</b>", styles["Small"]), service],
         [_paragraph("<b>User Category:</b>", styles["Small"]), category, "", ""],
-        [_paragraph("<b>Number of Grids:</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0),
+        [_paragraph("<b>Number of Grids:</b>", styles["Small"]), _paragraph(grid_count, styles["Small"]),
          _paragraph("<b>Grid Source:</b>", styles["Small"]), source_label],
     ]
     grid_type = _value(row, "grid_type", "")
@@ -350,8 +443,11 @@ def _external_pdf(row, service, category, is_industry):
     rows = [[_paragraph("<b>S.No</b>", styles["Small"]), _paragraph("<b>Particulars</b>", styles["Small"]),
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
              _paragraph("<b>GST (18%)</b>", styles["Small"]), _paragraph("<b>Total</b>", styles["Small"])]]
-    for index, (description, quantity, amount) in enumerate(_billing_lines(row, service), 1):
-        rows.append([str(index), description, quantity, f"INR {amount:,.2f}", "", f"INR {amount:,.2f}"])
+    lines = _billing_lines(row, service)
+    line_gst = _line_gst(lines, _value(row, "gst_amount", 0))
+    for index, ((description, quantity, amount), gst) in enumerate(zip(lines, line_gst), 1):
+        rows.append([str(index), description, quantity, f"INR {amount:,.2f}",
+                     f"INR {gst:,.2f}", f"INR {amount + gst:,.2f}"])
     if len(rows) == 1:
         rows.append(["", "No billable services recorded", "", "INR 0.00", "", "INR 0.00"])
     billing = Table(rows, colWidths=[11 * mm, 58 * mm, 25 * mm, 29 * mm, 27 * mm, 30 * mm], repeatRows=1)
@@ -368,9 +464,13 @@ def _external_pdf(row, service, category, is_industry):
     if not subtotal:
         subtotal = sum((_decimal(_value(row, field, 0)) for field in ("slot_charge", "freezing_charge", "clipping_charge", "processing_charge")), Decimal("0"))
     amount_in_words = _amount_words(_value(row, 'grand_total', _value(row, 'total_billed', 0)))
+    slots_label, slots_value = (
+        ("", "") if is_freezing
+        else ("Actual 24-hour slots", str(_value(row, "actual_slots", 0) or 0))
+    )
     summary = [
-        ["Actual 24-hour slots", str(row["actual_slots"] or 0), "Subtotal", f"INR {subtotal:,.2f}"],
-        ["Actual grids", str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0), "GST", f"INR {_decimal(_value(row, 'gst_amount', 0)):,.2f}"],
+        [slots_label, slots_value, "Subtotal", f"INR {subtotal:,.2f}"],
+        ["Actual grids", _paragraph(grid_count, styles["Small"]), "GST", f"INR {_decimal(_value(row, 'gst_amount', 0)):,.2f}"],
         ["", "", "Grand Total", f"INR {_decimal(_value(row, 'grand_total', _value(row, 'total_billed', 0))):,.2f}"],
         ["", "", _paragraph("<b>Amount in words</b>", styles["Small"]), _paragraph(amount_in_words, styles["Small"])],
     ]
@@ -423,15 +523,15 @@ def _internal_pdf(row, service):
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     grid_type = _value(row, "grid_type", "")
     charge_sheet_number = _value(row, "charge_sheet_id", f"CS-{row['id']}")
-    booking_label = ", ".join(
-        str(item.get("id")) for item in _value(row, "combined_items", []) if item.get("id")
-    ) or str(row["id"])
+    booking_label = _booking_label(row, service)
+    grid_count = _grid_count_label(row)
+    is_freezing = _is_freezing_sheet(row, service)
     date_value = _value(row, "completion_date", _value(row, "completed_at"))
     story.append(_paragraph(f"<b>Charge Sheet No:</b> {charge_sheet_number}<br/>"
                             f"<b>Date:</b> {_display_date(date_value)}<br/>"
                             f"<b>TO:</b> {row['user_name']}<br/>Department/Unit: Indian Institute of Science<br/>Email: {row['email']}<br/>"
                             f"<b>Booking ID(s):</b> {booking_label} &nbsp;&nbsp; <b>Service:</b> {service}<br/><b>User Category:</b> Internal<br/>"
-                            f"<b>Number of Grids:</b> {_value(row, 'number_of_grids', _value(row, 'actual_grids', 0)) or 0}<br/>"
+                            f"<b>Number of Grids:</b> {grid_count}<br/>"
                             f"<b>Grid Source:</b> {source_label}"
                             f"{'<br/><b>Grid Type:</b> ' + str(grid_type).replace('_', ' ').title() if source != 'self_owned' and grid_type else ''}", styles["Small"]))
     story.append(Spacer(1, 8))
@@ -457,8 +557,9 @@ def _internal_pdf(row, service):
     total = _decimal(_value(row, "grand_total", _value(row, "total_billed", 0)))
     amount_in_words = _amount_words(total)
     summary = [
-        [_paragraph("<b>Actual 24-hour slots</b>", styles["Small"]), str(_value(row, "actual_slots", 0) or 0),
-         _paragraph("<b>Actual grids</b>", styles["Small"]), str(_value(row, "number_of_grids", _value(row, "actual_grids", 0)) or 0)],
+        [_paragraph("" if is_freezing else "<b>Actual 24-hour slots</b>", styles["Small"]),
+         "" if is_freezing else str(_value(row, "actual_slots", 0) or 0),
+         _paragraph("<b>Actual grids</b>", styles["Small"]), _paragraph(grid_count, styles["Small"])],
         [_paragraph("<b>Subtotal</b>", styles["Small"]), f"INR {subtotal:,.2f}",
          _paragraph("<b>GST</b>", styles["Small"]), f"INR {gst:,.2f}"],
         [_paragraph("<b>Grand Total</b>", styles["Small"]), f"INR {total:,.2f}",
