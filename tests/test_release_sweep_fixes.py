@@ -150,6 +150,30 @@ class SweepFixTests(unittest.TestCase):
         # The draft is used once, then cleared.
         self.assertNotIn('"user_name": "Asha Rao"', guest.get("/register").get_data(as_text=True))
 
+    def test_bills_to_send_card_opens_billing_filtered_to_not_sent(self):
+        conn = database.get_db()
+        for name, sent in (("Unsent One", None), ("Unsent Two", None), ("Sent One", "2026-11-01 10:00:00")):
+            conn.execute(
+                """INSERT INTO screening_bookings (user_name, pi_name, email, origin, sample_name,
+                   grids, status, completion_date, charge_sheet_sent_at)
+                   VALUES (?, 'Some PI', 'x@example.com', 'External', 'S', 1, 'completed', '2026-11-01', ?)""",
+                (name, sent),
+            )
+        conn.execute(
+            """INSERT INTO screening_bookings (user_name, pi_name, email, origin, sample_name,
+               grids, status, completion_date) VALUES ('Free', 'Somnath Dutta', 'f@example.com',
+               'Internal', 'S', 1, 'completed', '2026-11-01')"""
+        )
+        conn.commit()
+        conn.close()
+        panel = self.client.get("/admin/panel").get_data(as_text=True)
+        self.assertIn('href="/admin/history?sheet=unsent"', panel)
+        page = self.client.get("/admin/history?sheet=unsent").get_data(as_text=True)
+        self.assertIn("data-sheet-filter", page)
+        self.assertEqual(page.count('data-sheet="unsent"'), 2)
+        self.assertEqual(page.count('data-sheet="sent"'), 1)
+        self.assertEqual(page.count('data-sheet="none"'), 1)  # non-billable PI
+
     def _csrf(self):
         page = self.client.get("/admin/maintenance").data
         return re.search(rb'name="_csrf_token"\s+value="([^"]+)"', page).group(1).decode()

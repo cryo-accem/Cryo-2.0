@@ -56,7 +56,7 @@
     <div class="table-wrap"><table class="data-table">
       <thead><tr><th>Position</th><th>User</th><th>Origin</th><th>Service details</th><th>Actual usage</th><th>Completed</th><th>Charge Sheet</th><th>Receipt status</th></tr></thead>
       <tbody>{% for slot in rows %}
-        <tr data-origin="{{ slot.origin }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}" data-bill-to="{{ slot.bill_to|tojson|forceescape }}">
+        <tr data-origin="{{ slot.origin }}" data-sheet="{{ ('sent' if slot.charge_sheet_sent_at else 'unsent') if is_billable_booking(slot) else 'none' }}" data-user-name="{{ slot.user_name|lower }}" data-user-email="{{ slot.email|lower }}" data-bill-to="{{ slot.bill_to|tojson|forceescape }}">
           <td>{% if is_billable_booking(slot) %}<input type="checkbox" data-slot-select data-service-key="{{ service_key }}" data-booking-id="{{ slot.id }}" aria-label="Select {{ slot.user_name }} {{ service_label }} slot">{% endif %} {{ loop.index }}</td>
           <td><strong>{{ slot.user_name }}</strong><br><small>{{ slot.email }}</small><br><small>PI: {{ slot.pi_name }}</small></td>
           <td>{{ slot.origin }}</td>
@@ -212,6 +212,12 @@
         <option value="External">External</option>
         <option value="Industry">Industrial</option>
       </select>
+      <select data-sheet-filter aria-label="Filter by charge sheet">
+        <option value="">All charge sheets</option>
+        <option value="unsent">Not sent</option>
+        <option value="sent">Sent</option>
+      </select>
+      <span class="history-filter-count" data-filter-count role="status" aria-live="polite"></span>
     </div>
     {{ completed_table('Completed imaging slots', completed_imaging, 'imaging', 'Data Collection', True) }}
     {{ completed_table('Completed freezing slots', completed_freezing, 'freezing', 'Freezing') }}

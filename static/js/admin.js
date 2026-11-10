@@ -5,18 +5,41 @@ document.querySelectorAll('[data-admin-filter]').forEach((filter) => {
   const scope = filter.closest('.data-stack');
   const search = filter.querySelector('[data-table-search]');
   const origin = filter.querySelector('[data-origin-filter]');
+  const sheet = filter.querySelector('[data-sheet-filter]');
+  const count = filter.querySelector('[data-filter-count]');
   const rows = scope ? scope.querySelectorAll('.data-table tbody tr') : [];
+  // "Open Billing" from the dashboard's "Bills to send" card arrives with
+  // ?sheet=unsent, so only bookings still waiting for a charge sheet show.
+  const requestedSheet = new URLSearchParams(window.location.search).get('sheet');
+  if (sheet && ['unsent', 'sent'].includes(requestedSheet)) sheet.value = requestedSheet;
   const applyFilters = () => {
     const query = (search?.value || '').trim().toLowerCase();
     const selectedOrigin = (origin?.value || '').toLowerCase();
+    const selectedSheet = sheet?.value || '';
+    let shown = 0;
     rows.forEach((row) => {
       const matchesText = !query || row.textContent.toLowerCase().includes(query);
       const matchesOrigin = !selectedOrigin || (row.dataset.origin || '').toLowerCase() === selectedOrigin;
-      row.hidden = !(matchesText && matchesOrigin);
+      const matchesSheet = !selectedSheet || row.dataset.sheet === selectedSheet;
+      row.hidden = !(matchesText && matchesOrigin && matchesSheet);
+      if (!row.hidden) shown += 1;
     });
+    // Hide service sections left with no matching rows while filtering.
+    const filtering = Boolean(selectedSheet || query || selectedOrigin);
+    scope?.querySelectorAll('[data-history-panel]').forEach((panel) => {
+      const visible = [...panel.querySelectorAll('.data-table tbody tr')].some((row) => !row.hidden);
+      panel.classList.toggle('is-filtered-empty', filtering && !visible);
+    });
+    if (count) {
+      count.textContent = selectedSheet || query || selectedOrigin
+        ? `${shown} booking${shown === 1 ? '' : 's'} shown${selectedSheet === 'unsent' ? ' · charge sheet not sent' : ''}`
+        : '';
+    }
   };
   search?.addEventListener('input', applyFilters);
   origin?.addEventListener('change', applyFilters);
+  sheet?.addEventListener('change', applyFilters);
+  if (sheet?.value) applyFilters();
 });
 
 // Billing history service tabs.

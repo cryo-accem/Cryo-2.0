@@ -3771,3 +3771,5 @@ html.lightbox-open { overflow: hidden; }
   .pubfinder .pubfinder-table td:nth-child(5) { order: 5; }
   .pubfinder .pubfinder-table td.pubfinder-action { order: 6; }
 }
+.history-filter-count { align-self: center; color: #31566b; font-size: 12px; font-weight: 600; }
+[data-history-panel].is-filtered-empty { display: none; }

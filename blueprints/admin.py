@@ -578,7 +578,7 @@ def _dashboard_attention(cur, today, pending_payments):
             "value": unsent_bills,
             "unit": "completed, not sent",
             "detail": "Completed billable bookings without a sent charge sheet",
-            "url": url_for("admin.history"),
+            "url": url_for("admin.history", sheet="unsent"),
             "action": "Open Billing",
             "alert": bool(unsent_bills),
         },

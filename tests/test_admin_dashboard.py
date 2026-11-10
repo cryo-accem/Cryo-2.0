@@ -182,7 +182,7 @@ class AdminDashboardTests(unittest.TestCase):
             ("datacollecting", "/admin/datacollecting"),
             ("screening", "/admin/screening"),
             ("freezing", "/admin/freezing"),
-            ("unsent_bills", "/admin/history"),
+            ("unsent_bills", "/admin/history?sheet=unsent"),  # opens filtered to Not sent
             ("unpaid", "#pending-payments-title"),
             ("grids_unstored", "/admin/inventory/"),
         ):
