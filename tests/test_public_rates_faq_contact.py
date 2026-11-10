@@ -149,7 +149,7 @@ class PublicRatesFaqContactTests(unittest.TestCase):
         footer = html[html.index('<footer class="site-footer">'):html.index("</footer>")]
         for href in ('href="/faq"', 'href="/rates"', 'href="/contact"'):
             self.assertIn(href, footer)
-        self.assertIn("Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST", footer)
+        self.assertIn("Supported by the DBT-BUILDER Program (BT/INF/22/SP22844/2017) and DST-FIST (SR/FST/LSII-039/2015).", footer)
 
     def test_sitemap_lists_new_pages(self):
         xml = self._html("/sitemap.xml")

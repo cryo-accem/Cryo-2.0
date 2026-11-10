@@ -78,7 +78,7 @@ class InstructionsAndHomeStatsTests(unittest.TestCase):
             "Industrial samples will receive preferential consideration",
         ):
             self.assertIn(fact, checklist)
-        self.assertIn('<blockquote id="ack-text">The data was collected at the ADVANCED CENTER', html)
+        self.assertIn('<blockquote id="ack-text">We acknowledge DBT-BUILDER Program (BT/INF/22/SP22844/2017) and DST-FIST (SR/FST/LSII-039/2015) for the Advanced Center for Cryo Electron Microscopy Facility at IISc, Bangalore.</blockquote>', html)
         self.assertRegex(html, r'<button class="ins-ack__copy" type="button" data-copy-target="ack-text">')
         self.assertIn("Copy acknowledgement", html)
         self.assertRegex(html, r'role="status" aria-live="polite" data-copy-status')

@@ -45,7 +45,8 @@ from normalization import normalize_pi_name, clean_display_name, preferred_pi_la
 from blueprints.public import (
     EMDB_REVIEW_CACHE_KEY, EMDB_STRUCTURES_CACHE_KEY, PI_USERS,
     PUBLICATION_FINDER_CACHE_KEY, get_site_publications, load_cache_payload,
-    load_emdb_review_state, refresh_emdb_structures, save_cache_payload,
+    load_emdb_review_state, load_finder_dismissed, refresh_emdb_structures,
+    save_cache_payload, save_finder_dismissed,
 )
 import emdb_structures
 import publication_finder
@@ -119,6 +120,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.publication_finder",
     "admin.run_publication_finder",
     "admin.add_finder_publication",
+    "admin.dismiss_finder_publication",
     "admin.download_publication_finder_csv",
     "admin.check_emdb_structures",
     "admin.review_emdb_entry",
@@ -2200,9 +2202,7 @@ def delete_publication(publication_id):
 # ── Publication finder ───────────────────────────────────────────────────────
 
 def _candidate_key(candidate):
-    if candidate.get("doi"):
-        return candidate["doi"]
-    return "title:" + publication_finder.normalize_title(candidate.get("title"))[:120]
+    return publication_finder.candidate_key(candidate)
 
 
 def _load_publication_finder_run():
@@ -2214,6 +2214,9 @@ def _load_publication_finder_run():
         return None
     if not isinstance(run, dict) or not isinstance(run.get("candidates"), list):
         return None
+    # Results marked "Not ours" are hidden everywhere (page, add, CSV), and stay
+    # hidden after the next search because the dismissals are stored separately.
+    run["candidates"] = publication_finder.without_dismissed(run["candidates"], load_finder_dismissed())
     return run
 
 
@@ -2234,6 +2237,11 @@ def publication_finder_page():
     return render_template(
         "admin_publication_finder.html",
         just_added=session.pop("finder_added", None),
+        just_dismissed=session.pop("finder_dismissed", None),
+        dismissed=sorted(
+            ({"key": key, **(item if isinstance(item, dict) else {})} for key, item in load_finder_dismissed().items()),
+            key=lambda item: str(item.get("dismissed_at") or ""), reverse=True,
+        ),
         run=run,
         comparison=comparison,
         emdb=emdb,
@@ -2311,6 +2319,44 @@ def add_finder_publication():
         "title": str(candidate.get("title") or "")[:300],
         "year": str(candidate.get("year") or ""),
     }
+    return redirect(url_for("admin.publication_finder", _anchor="finder-added"))
+
+
+@admin_bp.route("/publications/finder/dismiss", methods=["POST"])
+def dismiss_finder_publication():
+    """Mark a finder result "Not ours" (kept hidden across searches), or restore it."""
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    key = request.form.get("key", "").strip()[:300]
+    action = request.form.get("action", "dismiss")
+    dismissed = load_finder_dismissed()
+    if action == "restore":
+        item = dismissed.pop(key, None)
+        if item is None:
+            flash("That publication is not in the dismissed list.", "error")
+            return redirect(url_for("admin.publication_finder", _anchor="dismissed"))
+        save_finder_dismissed(dismissed)
+        flash(f"Restored to the results: {item.get('title') or key}", "success")
+        return redirect(url_for("admin.publication_finder", _anchor="not-on-website"))
+    if action != "dismiss" or not key:
+        flash("Unknown action.", "error")
+        return redirect(url_for("admin.publication_finder"))
+    run = _load_publication_finder_run()
+    candidate = next(
+        (item for item in (run or {}).get("candidates", []) if _candidate_key(item) == key),
+        None,
+    )
+    if candidate is None:
+        flash("That search result is no longer available. Run the search again.", "error")
+        return redirect(url_for("admin.publication_finder"))
+    dismissed[key] = {
+        "title": str(candidate.get("title") or "")[:300],
+        "year": str(candidate.get("year") or ""),
+        "doi_url": str(candidate.get("doi_url") or ""),
+        "dismissed_at": now_ist().strftime("%Y-%m-%d %H:%M"),
+    }
+    save_finder_dismissed(dismissed)
+    session["finder_dismissed"] = {"key": key, "title": dismissed[key]["title"], "year": dismissed[key]["year"]}
     return redirect(url_for("admin.publication_finder", _anchor="finder-added"))
 
 

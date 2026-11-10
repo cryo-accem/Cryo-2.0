@@ -48,6 +48,19 @@ class PublicPagesPhase2Tests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertGreaterEqual(html.count('<details class="faq-item">'), 6)
         self.assertIn("first and last grid positions", html)
+        self.assertIn(
+            "We acknowledge DBT-BUILDER Program (BT/INF/22/SP22844/2017) and DST-FIST "
+            "(SR/FST/LSII-039/2015) for the Advanced Center for Cryo Electron Microscopy "
+            "Facility at IISc, Bangalore.",
+            html,
+        )
+        self.assertNotIn("The data was collected at the ADVANCED CENTER", html)
+
+    def test_about_page_names_both_grants(self):
+        html = self.client.get("/about").get_data(as_text=True)
+        self.assertIn("DBT-BUILDER Program (BT/INF/22/SP22844/2017)", html)
+        self.assertIn("DST-FIST grant (SR/FST/LSII-039/2015)", html)
+        self.assertNotIn("DBT-SAHAJ", html)
 
     def test_footer_has_directions_and_funding_acknowledgement(self):
         html = self.client.get("/faq").get_data(as_text=True)
@@ -56,7 +69,7 @@ class PublicPagesPhase2Tests(unittest.TestCase):
             ' target="_blank" rel="noopener"',
             html,
         )
-        self.assertIn("Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST", html)
+        self.assertIn("Supported by the DBT-BUILDER Program (BT/INF/22/SP22844/2017) and DST-FIST (SR/FST/LSII-039/2015).", html)
         self.assertIn('href="/faq">FAQ</a>', html)
 
     def test_sitemap_includes_new_pages(self):

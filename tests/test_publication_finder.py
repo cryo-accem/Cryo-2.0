@@ -269,7 +269,7 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
 
     def test_search_tags_drive_the_queries(self):
         queries = {q["id"]: q for q in pf.build_queries()}
-        self.assertEqual(set(pf.SEARCH_TAGS), {"A", "B"})
+        self.assertEqual(set(pf.SEARCH_TAGS), {"A", "B", "C"})  # C = DBT-BUILDER grant code
         ack_a = queries["A:acknowledgement"]["query"]
         self.assertIn('ACK_FUND:("cryo-EM facility" OR "cryo-electron microscopy facility"', ack_a)
         self.assertIn('ACK_FUND:(IISc OR "Indian Institute of Science")', ack_a)
@@ -328,7 +328,7 @@ class AdminPublicationFinderTests(NoNetworkMixin, unittest.TestCase):
         return row["n"]
 
     def test_endpoints_are_in_admin_allowlist(self):
-        for endpoint in ("admin.publication_finder", "admin.run_publication_finder",
+        for endpoint in ("admin.publication_finder", "admin.run_publication_finder", "admin.dismiss_finder_publication",
                          "admin.add_finder_publication", "admin.download_publication_finder_csv"):
             self.assertIn(endpoint, admin_module._ALLOWED_ADMIN_ENDPOINTS)
         self.login()
@@ -433,6 +433,58 @@ class AdminPublicationFinderTests(NoNetworkMixin, unittest.TestCase):
         html = self.client.get("/admin/publications/finder").get_data(as_text=True)
         self.assertIn('class="inline-form" data-busy-label="Adding…"', html)
 
+    def _not_on_website(self):
+        html = self.client.get("/admin/publications/finder").get_data(as_text=True)
+        return html, html.split('id="not-on-website"', 1)[1].split('id="on-website"', 1)[0]
+
+    def test_not_ours_hides_a_result_and_it_stays_hidden_after_a_new_search(self):
+        self.login()
+        _, _, token = self.run_search()
+        _, section = self._not_on_website()
+        self.assertIn("A brand new facility paper", section)
+        self.assertIn("Not ours", section)
+        response = self.client.post("/admin/publications/finder/dismiss",
+                                    data={"_csrf_token": token, "key": "10.1000/new-paper", "action": "dismiss"})
+        self.assertTrue(response.headers["Location"].endswith("#finder-added"))
+        html, section = self._not_on_website()
+        self.assertNotIn("A brand new facility paper", section)
+        banner = html.split('id="finder-added"', 1)[1].split('id="not-on-website"', 1)[0]
+        self.assertIn("Removed from the results", banner)
+        self.assertIn('value="restore"', banner)  # Undo
+        dismissed = html.split('id="dismissed"', 1)[1]
+        self.assertIn("A brand new facility paper", dismissed)
+        # Running the search again does not bring it back.
+        self.run_search()
+        _, section = self._not_on_website()
+        self.assertNotIn("A brand new facility paper", section)
+        # It cannot be added while dismissed, and is left out of the CSV.
+        self.client.post("/admin/publications/finder/add",
+                         data={"_csrf_token": token, "key": "10.1000/new-paper"})
+        self.assertEqual(self.managed_count(), 0)
+        self.assertNotIn("10.1000/new-paper", self.client.get("/admin/publications/finder.csv").get_data(as_text=True))
+
+    def test_restore_brings_a_dismissed_result_back(self):
+        self.login()
+        _, _, token = self.run_search()
+        self.client.post("/admin/publications/finder/dismiss",
+                         data={"_csrf_token": token, "key": "10.1000/new-paper", "action": "dismiss"})
+        self.client.post("/admin/publications/finder/dismiss",
+                         data={"_csrf_token": token, "key": "10.1000/new-paper", "action": "restore"})
+        html, section = self._not_on_website()
+        self.assertIn("A brand new facility paper", section)
+        self.assertNotIn('id="dismissed"', html)
+
+    def test_dismissed_papers_do_not_feed_the_emdb_count(self):
+        self.login()
+        _, _, token = self.run_search()
+        self.client.post("/admin/publications/finder/dismiss",
+                         data={"_csrf_token": token, "key": "10.1000/new-paper", "action": "dismiss"})
+        with self.app.app_context(), patch("emdb_structures.compute_structures",
+                                           return_value={"entries": [], "needs_review": [], "excluded": {}}) as compute:
+            public.refresh_emdb_structures()
+        dois = {c.get("doi") for c in compute.call_args.kwargs["finder_candidates"]}
+        self.assertNotIn("10.1000/new-paper", dois)
+
     def test_add_rejects_unknown_key(self):
         self.login()
         _, _, token = self.run_search()
@@ -499,3 +551,16 @@ class AdminPublicationFinderTests(NoNetworkMixin, unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GrantCodeSearchTests(unittest.TestCase):
+    def test_dbt_builder_grant_code_is_searched_with_high_confidence(self):
+        import publication_finder as pf
+        queries = [q for q in pf.build_queries() if q["tag"] == "C"]
+        self.assertEqual({q["field"] for q in queries}, {"acknowledgement", "fulltext"})
+        self.assertTrue(all(q["confidence"] == "high" for q in queries))
+        ack = next(q for q in queries if q["field"] == "acknowledgement")
+        self.assertEqual(ack["query"], "ACK_FUND:(SP22844)")
+        # The MBU-wide DST-FIST grant is deliberately not a search term.
+        self.assertFalse(any("LSII" in q["query"] for q in pf.build_queries()))
+

@@ -3513,3 +3513,16 @@ html.lightbox-open { overflow: hidden; }
 .pubfinder-added:focus { outline: 2px solid #22a35a; outline-offset: 2px; }
 @keyframes pubfinder-added-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .pubfinder-added { animation: none; } }
+
+/* Publication finder: "Not ours" button, dismissed banner and list */
+.pubfinder-action { white-space: nowrap; }
+.pubfinder-action .inline-form + .inline-form { margin-left: 6px; }
+.pubfinder-added--dismissed { border-color: #f1c4c4; background: #fff5f5; color: #6b1d1d; }
+.pubfinder-added--dismissed > i { background: #c0392b; }
+.pubfinder-added--dismissed .inline-form { margin-top: 8px; }
+#dismissed details > summary { cursor: pointer; list-style: none; }
+#dismissed details > summary::-webkit-details-marker { display: none; }
+#dismissed details > summary h2 { display: inline-flex; align-items: center; gap: 8px; margin: 0; }
+#dismissed details > summary h2::before { content: "▸"; color: #64748b; font-size: 14px; transition: transform .15s ease; }
+#dismissed details[open] > summary h2::before { transform: rotate(90deg); }
+@media (max-width: 700px) { .pubfinder-action { white-space: normal; } .pubfinder-action .inline-form + .inline-form { margin: 6px 0 0; display: block; } }

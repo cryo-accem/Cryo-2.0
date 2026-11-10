@@ -37,9 +37,10 @@ class PublicPagesPhase2bTests(unittest.TestCase):
         # this test guards the wording carried over from the original page.
         self.assertIn("Before you come", html)
         self.assertIn(
-            "The data was collected at the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY "
-            "FACILITY FOR BIOLOGICAL SCIENCES AT IISc, Bengaluru, India funded by Department "
-            "of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST.",
+            # The facility's official acknowledgement statement, word for word.
+            "We acknowledge DBT-BUILDER Program (BT/INF/22/SP22844/2017) and DST-FIST "
+            "(SR/FST/LSII-039/2015) for the Advanced Center for Cryo Electron Microscopy "
+            "Facility at IISc, Bangalore.",
             html,
         )
         self.assertRegex(html, r'<button[^>]*data-copy-target="ack-text"')

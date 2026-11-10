@@ -68,6 +68,17 @@ SEARCH_TAGS = {
         # Optional for tag B: the centre name plus the institute is specific.
         "city": (),
     },
+    # The facility's official acknowledgement cites this DBT-BUILDER grant.
+    # The code is unique to ACCEM, so no institution or city words are needed
+    # and every match is "high" confidence. (The DST-FIST grant
+    # SR/FST/LSII-039/2015 is not searched: it funds the whole Molecular
+    # Biophysics Unit, not only the facility.)
+    "C": {
+        "label": "DBT-BUILDER Program (BT/INF/22/SP22844/2017)",
+        "phrases": ("SP22844",),
+        "institution": (),
+        "city": (),
+    },
 }
 
 # A different facility (NCBS, Bengaluru; also a US NCI facility of the same
@@ -212,12 +223,16 @@ def build_queries(tags=None):
     queries = []
     for tag, spec in tags.items():
         for field, code in field_codes.items():
-            parts = [_group(spec["phrases"], code), _group(spec["institution"], code)]
+            if not spec["institution"] and field == "affiliation":
+                continue  # a grant code never appears in author affiliations
+            parts = [_group(spec["phrases"], code)]
+            if spec["institution"]:
+                parts.append(_group(spec["institution"], code))
             if spec.get("city"):
                 # City words: same section for affiliations (one string per
                 # author), anywhere otherwise (see the SEARCH_TAGS comment).
                 parts.append(_group(spec["city"], code if field == "affiliation" else None))
-            confidence = "high" if tag == "B" or field == "acknowledgement" else "medium"
+            confidence = "high" if tag in ("B", "C") or field == "acknowledgement" else "medium"
             queries.append({
                 "id": f"{tag}:{field}",
                 "tag": tag,
@@ -578,6 +593,28 @@ def find_candidates(report=None):
         national_entry.update(hit_count=None, kept=0, error=str(exc)[:200])
     report["queries"].append(national_entry)
     return candidates
+
+
+# ── Dismissed candidates ─────────────────────────────────────────────────────
+
+def candidate_key(candidate):
+    """Stable identity of a search result: its DOI, else its normalised title."""
+    if candidate.get("doi"):
+        return candidate["doi"]
+    return "title:" + normalize_title(candidate.get("title"))[:120]
+
+
+def without_dismissed(candidates, dismissed_keys):
+    """Drop candidates an admin marked "Not ours" (also matched via preprint DOIs)."""
+    dismissed_keys = set(dismissed_keys or ())
+    if not dismissed_keys:
+        return list(candidates or [])
+    kept = []
+    for candidate in candidates or []:
+        keys = {candidate_key(candidate)} | _candidate_dois(candidate)
+        if not keys & dismissed_keys:
+            kept.append(candidate)
+    return kept
 
 
 # ── Comparison with the website ──────────────────────────────────────────────

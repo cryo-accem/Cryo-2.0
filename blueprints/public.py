@@ -15,6 +15,7 @@ from inventory_service import (
 from curated_publications import CURATED_PUBLICATIONS
 from publication_finder import normalize_doi, normalize_title
 import emdb_structures
+import publication_finder
 
 public_bp = Blueprint("public", __name__)
 
@@ -239,6 +240,10 @@ STRUCTURES_FALLBACK = "85+"  # shown only until the first EMDB check is stored
 PUBLICATION_FINDER_CACHE_KEY = "publication_finder"
 EMDB_STRUCTURES_CACHE_KEY = "emdb_structures"
 EMDB_REVIEW_CACHE_KEY = "emdb_structures_review"
+# Finder results an admin marked "Not ours" (e.g. papers that used the NCBS
+# National Cryo-EM Facility). Kept across searches so they are not suggested
+# again: {"items": {key: {"title", "year", "doi_url", "dismissed_at"}}}.
+PUBLICATION_FINDER_DISMISSED_KEY = "publication_finder_dismissed"
 
 
 def get_facility_metrics():
@@ -262,6 +267,21 @@ def get_structures_metric():
     return STRUCTURES_FALLBACK
 
 
+def load_finder_dismissed():
+    """{candidate key: details} of finder results marked "Not ours"."""
+    try:
+        state = load_cache_payload(PUBLICATION_FINDER_DISMISSED_KEY) or {}
+    except Exception as exc:
+        current_app.logger.warning("Dismissed publications read failed: %s", exc)
+        return {}
+    items = state.get("items") if isinstance(state, dict) else None
+    return dict(items) if isinstance(items, dict) else {}
+
+
+def save_finder_dismissed(items):
+    save_cache_payload(PUBLICATION_FINDER_DISMISSED_KEY, {"items": items})
+
+
 def load_emdb_review_state():
     state = load_cache_payload(EMDB_REVIEW_CACHE_KEY) or {}
     return {
@@ -280,7 +300,10 @@ def refresh_emdb_structures():
     report = {}
     result = emdb_structures.compute_structures(
         get_site_publications(),
-        finder_candidates=finder_run.get("candidates"),
+        # Papers marked "Not ours" never contribute structures.
+        finder_candidates=publication_finder.without_dismissed(
+            finder_run.get("candidates"), load_finder_dismissed()
+        ),
         approved_ids=review["approved"],
         dismissed_ids=review["dismissed"],
         report=report,

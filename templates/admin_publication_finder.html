@@ -26,6 +26,12 @@
         <input type="hidden" name="key" value="{{ candidate_key(c) }}">
         <button class="btn btn-load" type="submit"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add to website</button>
       </form>
+      <form method="post" action="{{ url_for('admin.dismiss_finder_publication') }}" class="inline-form" data-busy-label="Removing…">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="key" value="{{ candidate_key(c) }}">
+        <input type="hidden" name="action" value="dismiss">
+        <button class="btn btn-delete" type="submit" title="Not an ACCEM paper (e.g. it used the NCBS National Cryo-EM Facility). Hidden from future searches; can be restored below."><i class="fa-solid fa-xmark" aria-hidden="true"></i> Not ours</button>
+      </form>
     </td>
     {% endif %}
   </tr>
@@ -48,8 +54,8 @@
             <span class="pubfinder-tags__id">Tag {{ tag.tag }}</span>
             <strong>“{{ tag.label }}”</strong>
             <span class="pubfinder-tags__detail">Any of {% for phrase in tag.phrases %}<code>{{ phrase }}</code>{% if not loop.last %} / {% endif %}{% endfor %}
-              with {% for word in tag.institution %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% if tag.city %} and {% for word in tag.city %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}.
-              {% if tag.tag == 'A' %}High confidence in acknowledgements, medium in full text or affiliations.{% else %}High confidence anywhere; centre-name phrases are also searched in OpenAlex full text.{% endif %}</span>
+              {% if tag.institution %}with {% for word in tag.institution %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% if tag.city %} and {% for word in tag.city %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}{% else %}(the grant code is unique to ACCEM){% endif %}.
+              {% if tag.tag == 'A' %}High confidence in acknowledgements, medium in full text or affiliations.{% elif tag.tag == 'C' %}High confidence; searched in acknowledgement/funding text and full text.{% else %}High confidence anywhere; centre-name phrases are also searched in OpenAlex full text.{% endif %}</span>
           </li>
           {% endfor %}
         </ul>
@@ -81,6 +87,21 @@
     <div><strong>{{ comparison.on_website_not_found_online|length }}</strong><span>On website, not found online</span></div>
   </div>
 
+  {% if just_dismissed %}
+  <div class="pubfinder-added pubfinder-added--dismissed" id="finder-added" role="status" tabindex="-1">
+    <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+    <div>
+      <strong>Removed from the results</strong>
+      <p>“{{ just_dismissed.title }}”{% if just_dismissed.year %} ({{ just_dismissed.year }}){% endif %} is marked “Not ours” and will not come back in future searches or count towards EMDB structures.</p>
+      <form method="post" action="{{ url_for('admin.dismiss_finder_publication') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="key" value="{{ just_dismissed.key }}">
+        <input type="hidden" name="action" value="restore">
+        <button class="btn" type="submit">Undo</button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
   {% if just_added %}
   <div class="pubfinder-added" id="finder-added" role="status" tabindex="-1">
     <i class="fa-solid fa-check" aria-hidden="true"></i>
@@ -115,6 +136,28 @@
   </section>
   {% else %}
   <p class="empty-message">Run the search to see which papers acknowledging ACCEM are missing from the Publications page.</p>
+  {% endif %}
+
+  {% if dismissed %}
+  <section class="data-panel pubfinder-group" id="dismissed">
+    <details>
+      <summary><h2>Marked “Not ours” <span class="pubfinder-count">{{ dismissed|length }}</span></h2></summary>
+      <p class="pubfinder-muted">Hidden from every search and never counted for EMDB structures. Restore one if it was removed by mistake.</p>
+      <div class="table-wrap"><table class="data-table pubfinder-table"><thead><tr><th>Year</th><th>Publication</th><th>Removed</th><th>Action</th></tr></thead><tbody>
+        {% for d in dismissed %}<tr>
+          <td class="pubfinder-year">{{ d.year or '—' }}</td>
+          <td class="pubfinder-pub"><strong>{{ d.title or d.key }}</strong>{% if d.doi_url %} <a href="{{ d.doi_url }}" target="_blank" rel="noopener noreferrer">DOI <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}</td>
+          <td>{{ d.dismissed_at or '—' }}</td>
+          <td class="pubfinder-action"><form method="post" action="{{ url_for('admin.dismiss_finder_publication') }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="key" value="{{ d.key }}">
+            <input type="hidden" name="action" value="restore">
+            <button class="btn btn-load" type="submit">Restore</button>
+          </form></td>
+        </tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+  </section>
   {% endif %}
 
   <section class="data-panel pubfinder-group emdb-panel" id="emdb">
