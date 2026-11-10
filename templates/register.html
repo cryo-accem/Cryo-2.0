@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Register{% endblock %}
 {% block content %}
+<script src="{{ url_for('static', filename='js/grid-picker.js') }}"></script>
 <main class="portal-page booking-view">
   <section class="page-content booking-page">
     <header class="page-header page-header--portal"><div><div class="eyebrow">User portal</div><h1>Register for a Cryo-EM slot</h1><p>Tell us about your sample and preferred service. The facility team will follow up by email.</p></div></header>
@@ -8,7 +9,7 @@
     <div class="form-card booking-card">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% set registration_messages = messages | selectattr('0', 'equalto', 'registration') | map(attribute='1') | list %}
-        {% if registration_messages %}<div class="flash booking-flash" role="alert"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><div>{% for msg in registration_messages %}<p>{{ msg }}</p>{% endfor %}</div></div>{% endif %}
+        {% if registration_messages %}<div class="flash booking-flash" role="alert"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><div>{% for msg in registration_messages %}<p>{{ msg|humanize_grids }}</p>{% endfor %}</div></div>{% endif %}
       {% endwith %}
       <form class="booking-form" action="{{ url_for('register.register') }}" method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -58,7 +59,7 @@
                    data-search-url="{{ url_for('public.search_public_inventory') }}"
                    data-inventory-url="{{ url_for('public.grid_inventory') }}">
             <legend class="booking-picker__legend"><span class="booking-picker__icon" aria-hidden="true"><i class="fa-solid fa-boxes-stacked"></i></span><span>Choose your grids from inventory <span class="form-hint booking-tag">Optional · up to four grids</span></span></legend>
-            <p class="form-hint">Available grids associated with your username appear below. The sample name is shown for each grid. Leave grids unselected to use your own.</p>
+            <p class="form-hint">Your available grids appear below, grouped by freezing date and sample. Open a freezing to pick grids by type. Leave grids unselected to use your own.</p>
             <div class="public-grid-selection" id="public-grid-results" role="group" aria-label="Matching available inventory grids" aria-live="polite">
               <p class="empty-message">Enter your name above to check for matching grids.</p>
             </div>
@@ -208,37 +209,10 @@ function renderAvailableGrids(grids) {
     showGridSearchMessage('No available grids are recorded for this username. Search the full inventory below to see whether other grids are recorded.');
     return;
   }
-  grids.forEach(grid => {
-    const choice = document.createElement('label');
-    choice.className = 'public-grid-choice';
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.name = 'inventory_grid_codes';
-    checkbox.value = grid.grid_code;
-    checkbox.addEventListener('change', () => {
-      const selectedCount = inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]:checked').length;
-      if (selectedCount > 4) {
-        checkbox.checked = false;
-        return;
-      }
-      updateGridCount();
-    });
-    const copy = document.createElement('span');
-    const code = document.createElement('strong');
-    code.textContent = grid.grid_code;
-    const sample = document.createElement('small');
-    sample.textContent = `${grid.sample_code} · ${grid.sample_name}`;
-    copy.append(code, sample);
-    const status = document.createElement('span');
-    status.className = `inventory-storage-code inventory-storage-code--${grid.status_code.toLowerCase()}`;
-    status.textContent = grid.status_code;
-    const location = document.createElement('small');
-    location.className = 'public-grid-choice__location';
-    location.textContent = grid.falcon_container_id
-      ? `${grid.falcon_container_id}${grid.grid_box_name ? ` · ${grid.grid_box_name} / ${grid.grid_position}` : ''}`
-      : 'Not lifted';
-    choice.append(checkbox, copy, status, location);
-    inventoryGridResults.append(choice);
+  window.AccemGridPicker.render(inventoryGridResults, grids, {
+    inputName: 'inventory_grid_codes',
+    limit: 4,
+    onChange: updateGridCount,
   });
 }
 async function searchMatchingGrids() {

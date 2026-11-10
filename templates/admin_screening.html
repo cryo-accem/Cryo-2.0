@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Screening management{% endblock %}
 {% block content %}
+<script src="{{ url_for('static', filename='js/used-grids.js') }}"></script>
 <main class="portal-page"><section class="page-content">
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Screening management</h1><p>Review screening requests and update their progress.</p></div></header>
   <div class="data-stack">
@@ -131,7 +132,7 @@
       const card = document.createElement("fieldset");
       card.className = "completion-mapped-grid";
       const legend = document.createElement("legend");
-      legend.textContent = `${grid.grid_code} · ${grid.sample_name}`;
+      legend.textContent = grid.gl_label || grid.sample_name || "Inventory grid";
       card.append(legend);
       const code = document.createElement("input");
       code.type = "hidden";
@@ -150,9 +151,9 @@
       const returnFields = document.createElement("div");
       returnFields.className = "completion-grid-return-fields";
       for (const [name, label, value, maxLength] of [
-        ["inventory_falcon", "Falcon", grid.falcon_container_id, 100],
-        ["inventory_box", "Grid box", grid.grid_box_name, 100],
-        ["inventory_position", "Grid position", grid.grid_position, 40],
+        ["inventory_falcon", "Falcon", grid.falcon_container_id || grid.last_falcon, 100],
+        ["inventory_box", "Grid box", grid.grid_box_name || grid.last_box, 100],
+        ["inventory_position", "Grid position", grid.grid_position || grid.last_position, 40],
       ]) {
         const wrapper = document.createElement("label");
         wrapper.textContent = label;
@@ -194,6 +195,9 @@
       };
       outcome.addEventListener("change", syncOutcome);
       syncOutcome();
+      window.AccemUsedGrids.attach(card, {
+        grid, outcome, syncOutcome, container: storageFields, actualInput: form.actual_grids, form,
+      });
       storageFields.append(card);
     });
     updateAdditionalGridStorage();
@@ -359,6 +363,9 @@
   }));
   document.querySelector("[data-close-completion]").addEventListener("click", () => { modal.hidden = true; });
   form.actual_grids.addEventListener("input", updateAdditionalGridStorage);
+  form.actual_grids.addEventListener("input", () => window.AccemUsedGrids.refresh(storageFields, form.actual_grids));
+  // Only the grids actually used count towards "already billed / clipped".
+  form.addEventListener("used-grids-change", (event) => applyInventoryBillingHistory(event.detail.grids));
   addInventoryGrids.addEventListener("change", updateAdditionalGridStorage);
   form.addEventListener("input", updatePreview);
   form.addEventListener("change", updatePreview);

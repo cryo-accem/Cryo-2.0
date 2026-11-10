@@ -10,7 +10,7 @@ from flask import Blueprint, render_template, current_app, redirect, url_for, Re
 from database import _is_sqlite_url, ensure_site_stats_cache_table, get_db
 from normalization import clean_display_name
 from inventory_service import (
-    PUBLIC_LOOKUP_MIN_LENGTH, InventoryError, public_inventory_grids,
+    PUBLIC_LOOKUP_MIN_LENGTH, InventoryError, group_by_freezing_session, public_inventory_grids,
 )
 from curated_publications import CURATED_PUBLICATIONS
 from publication_finder import normalize_doi, normalize_title
@@ -75,6 +75,7 @@ def grid_inventory():
     return render_template(
         "public_inventory.html",
         grids=grids,
+        grid_sessions=group_by_freezing_session(grids),
         username=username,
         sample_name=sample_name,
         searched=searched,
@@ -110,6 +111,13 @@ def search_public_inventory():
                 "falcon_container_id": grid["falcon_container_id"],
                 "grid_box_name": grid["grid_box_name"],
                 "grid_position": grid["grid_position"],
+                "grid_type_name": grid.get("gl_grid_type_name", ""),
+                "label": grid.get("gl_label", grid["sample_name"]),
+                "session_key": grid.get("gl_session_key", ""),
+                "session_label": grid.get("gl_session_label", grid["sample_name"]),
+                "frozen_label": grid.get("gl_frozen_label", ""),
+                "grid_number": grid.get("gl_grid_number"),
+                "session_total": grid.get("gl_session_total"),
             }
             for grid in grids
         ]

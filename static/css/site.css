@@ -3552,20 +3552,64 @@ html.lightbox-open { overflow: hidden; }
 #dismissed details[open] > summary h2::before { transform: rotate(90deg); }
 @media (max-width: 700px) { .pubfinder-action { white-space: normal; } .pubfinder-action .inline-form + .inline-form { margin: 6px 0 0; display: block; } }
 
-/* Drop-down toggles: the faint chevron reads as empty space, so trim the
-   padding after it; word-to-word spacing then matches the plain links. */
+/* Drop-down toggles: space the words as if the arrows were not there.
+   The arrow (5px gap + 9px glyph) stays inside the hover pill, but the
+   pill's right padding is 4px shorter and a -10px margin hands the rest
+   back, so word-to-word spacing equals the plain links' (2 x padding + gap). */
 @media (min-width: 801px) {
   .nav-group__toggle { gap: 5px; }
+  .site-nav .nav-group__toggle { margin-right: -10px; }
 }
 @media (min-width: 1001px) {
-  .site-nav .nav-group__toggle { padding-right: 8px; }
+  .site-nav .nav-group__toggle { padding-right: 9px; }
 }
 @media (min-width: 1001px) and (max-width: 1200px) {
-  .site-nav .nav-group__toggle { padding-right: 6px; }
-}
-@media (min-width: 1001px) and (max-width: 1100px) {
-  .site-nav .nav-group__toggle { padding-right: 5px; }
-}
-@media (min-width: 801px) and (max-width: 1000px) {
   .site-nav .nav-group__toggle { padding-right: 7px; }
 }
+@media (min-width: 1001px) and (max-width: 1100px) {
+  /* Tightest range (22px between words): a smaller arrow leaves clear space
+     between a highlighted pill and the next word. 3 + 8 + 4 - 5 = 10 + 0. */
+  .nav-group__toggle { gap: 3px; }
+  .nav-group__toggle i { font-size: 8px; }
+  .site-nav .nav-group__toggle { padding-right: 4px; margin-right: -5px; }
+}
+@media (min-width: 801px) and (max-width: 1000px) {
+  .site-nav .nav-group__toggle { padding-right: 8px; }
+}
+
+/* ── Grid picker: grids grouped by freezing session ────────────────────────── */
+.grid-picker { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.grid-session { border: 1px solid #dce7ed; border-radius: 10px; background: #fff; overflow: hidden; }
+.grid-session + .grid-session { margin-top: 0; }
+.grid-session__summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 10px 12px; cursor: pointer; list-style: none; background: #f6fafc; }
+.grid-session__summary::-webkit-details-marker { display: none; }
+.grid-session__summary { position: relative; padding-right: 32px; }
+.grid-session__summary::after { content: "▾"; position: absolute; right: 12px; top: 50%; margin-top: -8px; color: #167da5; font-size: 12px; line-height: 16px; transition: transform .15s ease; }
+.grid-session:not([open]) .grid-session__summary::after { transform: rotate(-90deg); }
+.grid-session__title { display: inline-flex; align-items: center; gap: 7px; color: #17324d; font-size: 13px; }
+.grid-session__title i { color: #46a0bc; font-size: 12px; }
+.grid-session__meta { color: #5c7280; font-size: 11px; }
+.grid-session__grids { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 8px; padding: 10px 12px 12px; border-top: 1px solid #e6eef2; }
+.grid-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px 9px; padding: 9px 10px; border: 1px solid #dce7ed; border-radius: 8px; background: #fff; cursor: pointer; }
+.grid-choice:has(input:checked) { border-color: #46a0bc; background: #f1fafc; box-shadow: 0 0 0 2px rgba(70, 160, 188, .12); }
+.grid-choice > input { accent-color: #167da5; }
+.grid-choice__copy { display: grid; gap: 2px; min-width: 0; }
+.grid-choice__copy strong { color: #17324d; font-size: 12.5px; }
+.grid-choice__copy small, .grid-choice__location { color: #5c7280; font-size: 11px; }
+.grid-choice__location { grid-column: 2; }
+.grid-choice--unavailable { border-style: dashed; background: #fffaf0; }
+.public-grid-selection.grid-picker { display: grid; grid-template-columns: 1fr; max-height: 460px; }
+.grid-session--lookup { margin-bottom: 12px; }
+.grid-session--lookup .table-wrap { margin: 0; border: 0; border-top: 1px solid #e6eef2; border-radius: 0; }
+.inventory-storage-table th:last-child, .inventory-storage-table td:last-child { width: 1%; white-space: nowrap; text-align: right; }
+
+/* Completion modal: mark which reserved grids were used */
+.completion-used-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: #17324d; cursor: pointer; }
+.completion-used-toggle input { width: 18px; height: 18px; accent-color: #167da5; }
+.completion-mapped-grid.is-unused { background: #f7f9fa; border-style: dashed; }
+.completion-mapped-grid.is-unused legend { color: #6b7f8c; }
+.completion-unused-note { margin: 4px 0 0; padding: 8px 10px; border-radius: 8px; background: #eef6f9; color: #31566b; font-size: 12px; }
+.completion-used-status { margin: 0 0 10px; padding: 9px 12px; border-radius: 8px; background: #eef6f9; color: #31566b; font-size: 12.5px; font-weight: 600; }
+.completion-used-status.is-error { background: #fff4e5; color: #8a5300; }
+.completion-mapped-grid > label.completion-used-toggle { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #eef6f9; }
+.completion-mapped-grid > .completion-unused-note { grid-column: 1 / -1; }

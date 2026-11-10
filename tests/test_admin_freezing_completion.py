@@ -185,7 +185,7 @@ class AdminFreezingCompletionTests(unittest.TestCase):
             f"/admin/inventory/grids?q={link['batch_code']}"
         )
         self.assertEqual(inventory_search.status_code, 200)
-        self.assertIn(f"Freezing batch {link['batch_code']}".encode(), inventory_search.data)
+        self.assertIn(b"Frozen ", inventory_search.data)
         self.assertIn(b"2 grids", inventory_search.data)
         self.assertIn(b"Managed sample", inventory_search.data)
         self.assertIn(b"Different sample", inventory_search.data)

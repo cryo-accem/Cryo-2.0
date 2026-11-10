@@ -587,7 +587,7 @@ def discard_grids(grid_codes, notes, actor_id):
             )
             grid = cursor.fetchone()
             if not grid:
-                raise InventoryError(f"Grid {code} was not found.")
+                raise InventoryError("One of the selected grids was not found.")
             _ensure_grid_not_reserved(cursor, grid["grid_id"], code)
             _discard_grid(
                 cursor,
@@ -1096,6 +1096,12 @@ def booking_grid_links_for_bookings(service_type, booking_ids):
             f"""SELECT l.{booking_column} AS booking_id, g.grid_code, g.current_status,
                        s.sample_name, sl.falcon_container_id, sl.grid_box_name,
                        sl.grid_position, g.clipped,
+                       (SELECT p.falcon_container_id FROM storage_locations p WHERE p.grid_id=g.grid_id
+                        ORDER BY p.stored_at DESC, p.storage_location_id DESC LIMIT 1) AS last_falcon,
+                       (SELECT p.grid_box_name FROM storage_locations p WHERE p.grid_id=g.grid_id
+                        ORDER BY p.stored_at DESC, p.storage_location_id DESC LIMIT 1) AS last_box,
+                       (SELECT p.grid_position FROM storage_locations p WHERE p.grid_id=g.grid_id
+                        ORDER BY p.stored_at DESC, p.storage_location_id DESC LIMIT 1) AS last_position,
                        CASE WHEN {_BILLED_AT_FREEZING_SQL} THEN 1 ELSE 0 END
                            AS billed_at_freezing
                 FROM {link_table} l
@@ -1108,8 +1114,8 @@ def booking_grid_links_for_bookings(service_type, booking_ids):
             ids,
         )
         linked = {}
-        for row in cursor.fetchall():
-            linked.setdefault(row["booking_id"], []).append(dict(row))
+        for row in with_grid_labels(cursor.fetchall()):
+            linked.setdefault(row["booking_id"], []).append(row)
         return linked
     finally:
         cursor.close()
@@ -1281,11 +1287,37 @@ _BILLED_AT_FREEZING_SQL = """(
 )"""
 
 
-def booking_billing_context(cursor, service_type, booking_id):
-    """Return linked, already-billed and already-clipped grid counts for a booking."""
+def screened_grid_codes(fields):
+    """Codes of the linked grids ticked as screened/used, or None if not stated.
+
+    The completion form sends one ``inventory_screened`` value ("1"/"0") per
+    ``inventory_grid_code``; older forms send none, meaning all were used.
+    """
+    codes = fields.getlist("inventory_grid_code")
+    flags = fields.getlist("inventory_screened")
+    if not flags:
+        return None
+    if len(flags) != len(codes):
+        raise InventoryError("Reload the booking and tick which linked grids were screened.")
+    return [code for code, flag in zip(codes, flags) if flag == "1"]
+
+
+def booking_billing_context(cursor, service_type, booking_id, grid_codes=None):
+    """Return linked, already-billed and already-clipped grid counts for a booking.
+
+    ``grid_codes`` limits the counts to the linked grids actually used, so a
+    grid that went back to storage unused does not affect the bill.
+    """
     target = _LOAD_TARGETS.get(service_type)
     if not target:
         raise ValueError("Unsupported booking type.")
+    code_filter = ""
+    values = [booking_id]
+    if grid_codes is not None:
+        if not grid_codes:
+            return {"linked": 0, "prebilled": 0, "clipped": 0}
+        code_filter = " AND g.grid_code IN (" + ", ".join("?" for _ in grid_codes) + ")"
+        values.extend(grid_codes)
     cursor.execute(
         f"""SELECT COUNT(*) AS linked,
                    COALESCE(SUM(CASE WHEN {_BILLED_AT_FREEZING_SQL} THEN 1 ELSE 0 END), 0)
@@ -1293,8 +1325,8 @@ def booking_billing_context(cursor, service_type, booking_id):
                    COALESCE(SUM(CASE WHEN g.clipped=1 THEN 1 ELSE 0 END), 0) AS clipped
             FROM {target['link_table']} l
             JOIN inventory_grids g ON g.grid_id=l.grid_id
-            WHERE l.{target['booking_column']}=?""",
-        [booking_id],
+            WHERE l.{target['booking_column']}=?""" + code_filter,
+        values,
     )
     row = cursor.fetchone()
     return {
@@ -1304,11 +1336,11 @@ def booking_billing_context(cursor, service_type, booking_id):
     }
 
 
-def booking_billing_context_for(service_type, booking_id):
+def booking_billing_context_for(service_type, booking_id, grid_codes=None):
     connection = get_db()
     cursor = connection.cursor()
     try:
-        return booking_billing_context(cursor, service_type, booking_id)
+        return booking_billing_context(cursor, service_type, booking_id, grid_codes)
     finally:
         cursor.close()
         connection.close()
@@ -1385,6 +1417,17 @@ def complete_booking_grid_moves(
         raise InventoryError(
             "The mapped grids changed. Reload the booking and choose Store or Mark discarded for each linked grid."
         )
+    screened = screened_grid_codes(fields)
+    screened = set(expected_codes if screened is None else screened)
+    if count and fields.get("actual_grids"):
+        actual = _positive_int(fields.get("actual_grids"), "Actual grids")
+        needed = min(actual, count)
+        if len(screened) != needed:
+            raise InventoryError(
+                f"Actual grids is {actual}: tick the {needed} linked grid"
+                f"{'' if needed == 1 else 's'} that were used ({len(screened)} ticked). "
+                "Unticked grids go back to storage unused."
+            )
     event_time = now_utc()
     return_event_type = (
         "screening_returned_to_storage" if service_type == "screening"
@@ -1406,6 +1449,26 @@ def complete_booking_grid_moves(
                     f"Complete the active data-collection session before returning "
                     f"{grid['grid_code']} through this booking."
                 )
+        used = grid["grid_code"] in screened
+        if not used and outcomes[index] != "discard":
+            # Reserved but not screened: back to storage, not clipped or billed.
+            _store_grid(
+                cursor,
+                grid,
+                {
+                    "falcon_container_id": containers[index],
+                    "grid_box_name": boxes[index],
+                    "grid_position": positions[index],
+                },
+                actor_id,
+                f"Not used in booking #{booking_id}; returned to storage unchanged.",
+                event_time,
+                operation_reference=f"{operation_prefix}-{booking_id}",
+                mark_stored=True,
+                allow_microscope_return=allow_microscope_return,
+                return_event_type=return_event_type,
+            )
+            continue
         if outcomes[index] == "discard":
             _discard_grid(
                 cursor,
@@ -1449,7 +1512,8 @@ def complete_booking_grid_moves(
         # Screening clips every screened grid, so remember it on the linked
         # grids; later data collection must not bill the C-clip/base again.
         _mark_grids_clipped(
-            cursor, [grid["grid_id"] for grid in grids], actor_id, event_time,
+            cursor, [grid["grid_id"] for grid in grids if grid["grid_code"] in screened],
+            actor_id, event_time,
             f"Clipped during screening booking #{booking_id}.",
         )
     add_inventory_grids = fields.get("add_inventory_grids")
@@ -1459,7 +1523,7 @@ def complete_booking_grid_moves(
         if booking is None:
             raise RuntimeError("The booking details are required to register new inventory grids.")
         actual_grid_count = _positive_int(fields.get("actual_grids"), "Actual grids")
-        additional_count = max(0, actual_grid_count - count)
+        additional_count = max(0, actual_grid_count - len(screened))
         if additional_count > MAX_GRIDS_PER_BATCH:
             raise InventoryError(
                 f"No more than {MAX_GRIDS_PER_BATCH} additional grids can be added to inventory at once."
@@ -2250,7 +2314,7 @@ def search_grid_box_groups(args, page=1, page_size=40):
                 str(item["grid_code"]),
             )
         )
-        return rows, total_grids, total_boxes, page_size, page
+        return with_grid_labels(rows), total_grids, total_boxes, page_size, page
     finally:
         cursor.close()
         connection.close()
@@ -2293,7 +2357,7 @@ def dashboard_data():
                LEFT JOIN users u ON u.id=e.operator_id
                ORDER BY e.event_time DESC, e.event_id DESC LIMIT 12"""
         )
-        recent = cursor.fetchall()
+        recent = with_grid_labels(cursor.fetchall())
         return counts, by_type, by_status, recent
     finally:
         cursor.close()
@@ -2344,7 +2408,7 @@ def dashboard_storage():
             else:
                 stored.append(item)
         stored.sort(key=_storage_position_sort_key)
-        return stored, not_stored
+        return with_grid_labels(stored), with_grid_labels(not_stored)
     finally:
         cursor.close()
         connection.close()
@@ -2431,6 +2495,13 @@ def public_inventory_grids(researcher_name, sample_name=None, available_only=Fal
                 item["status_code"] = "F"
             if not available_only or item["available"]:
                 rows.append(item)
+        rows = with_grid_labels(rows)
+        # Newest freezing session first; grids in session order within it.
+        rows.sort(key=lambda item: item.get("gl_grid_number") or 0)
+        rows.sort(  # stable: keeps grid order inside each session
+            key=lambda item: (str(item.get("gl_frozen_at") or ""), item.get("gl_session_key") or ""),
+            reverse=True,
+        )
         return rows
     finally:
         cursor.close()
@@ -2465,6 +2536,7 @@ def grid_details(grid_code):
         grid = cursor.fetchone()
         if not grid:
             return None
+        grid = with_grid_labels([grid])[0]
         cursor.execute(
             """SELECT sl.*, storage_user.username AS stored_by_name,
                       removed_user.username AS removed_by_name
@@ -2540,7 +2612,7 @@ def search_storage(args):
             " ORDER BY sl.falcon_container_id, sl.grid_box_name, sl.grid_position",
             values,
         )
-        return sorted(cursor.fetchall(), key=_storage_position_sort_key)
+        return with_grid_labels(sorted(cursor.fetchall(), key=_storage_position_sort_key))
     finally:
         cursor.close()
         connection.close()
@@ -2606,7 +2678,7 @@ def available_session_grids(limit=200):
                ORDER BY s.researcher_name, s.sample_name, g.grid_id DESC LIMIT ?""",
             [limit],
         )
-        return cursor.fetchall()
+        return with_grid_labels(cursor.fetchall())
     finally:
         cursor.close()
         connection.close()
@@ -2650,7 +2722,7 @@ def session_details(session_id):
                WHERE l.session_id=? ORDER BY g.grid_code""",
             [session_id],
         )
-        return session_row, cursor.fetchall()
+        return session_row, with_grid_labels(cursor.fetchall())
     finally:
         cursor.close()
         connection.close()
@@ -2676,7 +2748,7 @@ def activity_page(page=1, page_size=50):
                ORDER BY e.event_time DESC, e.event_id DESC LIMIT ? OFFSET ?""",
             [page_size, (page - 1) * page_size],
         )
-        return cursor.fetchall(), total, page
+        return with_grid_labels(cursor.fetchall()), total, page
     finally:
         cursor.close()
         connection.close()
@@ -2751,3 +2823,152 @@ def iter_export_events(batch_size=500):
             connection.close()
 
     return generate()
+
+
+# ── Human-readable grid labels ────────────────────────────────────────────────
+# Grids are identified to people by sample, grid type and their place in the
+# freezing session ("Spike RBD · Gold Quantifoil · grid 2 of 4"), never by the
+# internal ACCEM-G-… code, which stays only in URLs and form values.
+
+def facility_date(value):
+    """'12 Oct 2026' in facility time, or '' when unknown."""
+    if not value:
+        return ""
+    if isinstance(value, dt.date) and not isinstance(value, dt.datetime):
+        return value.strftime("%d %b %Y")
+    if isinstance(value, dt.datetime):
+        parsed = value
+    else:
+        try:
+            parsed = dt.datetime.fromisoformat(str(value))
+        except ValueError:
+            return str(value)[:10]
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(FACILITY_TIMEZONE).strftime("%d %b %Y")
+
+
+def _session_key(batch_id, sample_id):
+    return f"b{batch_id}" if batch_id is not None else f"s{sample_id}"
+
+
+def grid_label_info(codes):
+    """Map grid codes to their sample, type, freezing session and position in it."""
+    codes = [code for code in dict.fromkeys(codes) if code]
+    if not codes:
+        return {}
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        rows = []
+        for offset in range(0, len(codes), 400):
+            chunk = codes[offset:offset + 400]
+            cursor.execute(
+                """SELECT g.grid_code, g.grid_id, g.batch_id, g.sample_id,
+                          s.sample_name, s.researcher_name, gt.grid_type_name,
+                          fb.frozen_at
+                   FROM inventory_grids g
+                   JOIN inventory_samples s ON s.sample_id=g.sample_id
+                   JOIN grid_types gt ON gt.grid_type_id=g.grid_type_id
+                   LEFT JOIN freezing_batches fb ON fb.batch_id=g.batch_id
+                   WHERE g.grid_code IN (""" + ", ".join("?" for _ in chunk) + ")",
+                chunk,
+            )
+            rows.extend(dict(row) for row in cursor.fetchall())
+        batch_ids = sorted({row["batch_id"] for row in rows if row["batch_id"] is not None})
+        loose_samples = sorted({row["sample_id"] for row in rows if row["batch_id"] is None})
+        siblings = {}
+        for column, ids in (("batch_id", batch_ids), ("sample_id", loose_samples)):
+            for offset in range(0, len(ids), 400):
+                chunk = ids[offset:offset + 400]
+                extra = " AND batch_id IS NULL" if column == "sample_id" else ""
+                cursor.execute(
+                    f"SELECT grid_id, batch_id, sample_id FROM inventory_grids "
+                    f"WHERE {column} IN (" + ", ".join("?" for _ in chunk) + ")" + extra,
+                    chunk,
+                )
+                for sibling in cursor.fetchall():
+                    key = _session_key(sibling["batch_id"], sibling["sample_id"])
+                    siblings.setdefault(key, []).append(sibling["grid_id"])
+        info = {}
+        for row in rows:
+            key = _session_key(row["batch_id"], row["sample_id"])
+            members = sorted(siblings.get(key, [row["grid_id"]]))
+            number = members.index(row["grid_id"]) + 1 if row["grid_id"] in members else 1
+            frozen_label = facility_date(row["frozen_at"])
+            info[row["grid_code"]] = {
+                "sample_name": row["sample_name"],
+                "researcher_name": row["researcher_name"],
+                "grid_type_name": row["grid_type_name"],
+                "frozen_at": row["frozen_at"],
+                "frozen_label": frozen_label,
+                "session_key": key,
+                "grid_number": number,
+                "session_total": len(members),
+                "label": f"{row['sample_name']} · {row['grid_type_name']} · grid {number} of {len(members)}",
+                "session_label": (
+                    f"Frozen {frozen_label} · {row['sample_name']}" if frozen_label
+                    else f"Not frozen yet · {row['sample_name']}"
+                ),
+            }
+        return info
+    finally:
+        cursor.close()
+        connection.close()
+
+
+def with_grid_labels(rows, code_key="grid_code"):
+    """Copy rows to dicts carrying the grid_label_info fields (prefixed 'gl_')."""
+    items = [dict(row) for row in rows]
+    info = grid_label_info([item.get(code_key) for item in items])
+    for item in items:
+        for key, value in info.get(item.get(code_key), {}).items():
+            item[f"gl_{key}"] = value
+        item.setdefault("gl_label", item.get("sample_name") or "Grid")
+    return items
+
+
+def group_by_freezing_session(rows):
+    """Group labelled rows (see with_grid_labels) by freezing session, keeping order."""
+    sessions = {}
+    for row in rows:
+        key = row.get("gl_session_key") or row.get("sample_name") or ""
+        session = sessions.get(key)
+        if session is None:
+            session = sessions[key] = {
+                "key": key,
+                "frozen_label": row.get("gl_frozen_label", ""),
+                "sample_name": row.get("sample_name") or row.get("gl_sample_name", ""),
+                "total": row.get("gl_session_total") or 0,
+                "grids": [],
+            }
+        session["grids"].append(row)
+    for session in sessions.values():
+        counts = {}
+        for grid in session["grids"]:
+            name = grid.get("gl_grid_type_name") or "Grid"
+            counts[name] = counts.get(name, 0) + 1
+        session["type_summary"] = ", ".join(f"{name} × {count}" for name, count in counts.items())
+        session["total"] = session["total"] or len(session["grids"])
+    return list(sessions.values())
+
+
+_GRID_CODE_PATTERN = re.compile(r"ACCEM-G-\d{4,}")
+
+
+def humanize_grid_codes(text):
+    """Replace internal grid codes in a message with the grid's readable label."""
+    text = "" if text is None else str(text)
+    codes = _GRID_CODE_PATTERN.findall(text)
+    if not codes:
+        return text
+    try:
+        info = grid_label_info(codes)
+    except Exception:  # a message must still render if the lookup fails
+        info = {}
+    return _GRID_CODE_PATTERN.sub(
+        lambda match: (
+            f"“{info[match.group(0)]['label']}”" if match.group(0) in info else "an unknown grid"
+        ),
+        text,
+    )

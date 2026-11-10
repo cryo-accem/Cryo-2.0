@@ -275,11 +275,11 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
         self.assertIn(
-            f'aria-label="Researcher, no linked username, Test sample, position 1, {stored}, Stored"',
+            'aria-label="Test sample, Quantifoil holey carbon, position 1, Stored"',
             content,
         )
         self.assertIn(
-            f'aria-label="Researcher, no linked username, Test sample, position 2, {clipped}, Clipped"',
+            'aria-label="Test sample, Quantifoil holey carbon, position 2, Clipped"',
             content,
         )
         self.assertIn(f'class="inventory-storage-code inventory-storage-code--s">S</span>', content)
@@ -327,12 +327,14 @@ class GridInventoryTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         content = response.data.decode()
-        self.assertIn("<summary>Falcon-A", content)
-        self.assertIn("<summary><span>GridBox-1</span><span>2 grid(s)</span></summary>", content)
-        self.assertIn("Researcher", content)
+        self.assertIn("</i> Falcon-A <span>", content)
+        self.assertIn("<summary><span>GridBox-1</span><span>2 grids</span></summary>", content)
         self.assertIn(first, content)
         self.assertIn(second, content)
-        self.assertLess(content.index("<th>Researcher</th>"), content.index("<th>Grid reference</th>"))
+        # Inside a grid box: sample name, then grid type, then position only.
+        self.assertIn("<th>Sample name</th><th>Grid type</th><th>Position</th>", content)
+        self.assertNotIn("<th>Grid reference</th>", content)
+        self.assertNotIn("<th>Researcher</th>", content)
         self.assertIn(
             first.encode(),
             self.client.get("/admin/inventory/storage?q=Test+sample").data,
@@ -347,11 +349,12 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.data.decode()
         self.assertIn("<th>Researcher</th><th>Username</th><th>Sample</th>", content)
-        self.assertIn("<th>Grid reference</th>", content)
+        self.assertNotIn("<th>Grid reference</th>", content)
+        self.assertIn("Grid 1 of 1", content)
         self.assertIn("Dr Example", content)
         self.assertIn("Sample Alpha", content)
         self.assertIn(grid_code, content)
-        self.assertLess(content.index("<th>Researcher</th>"), content.index("<th>Grid reference</th>"))
+        self.assertLess(content.index("<th>Sample</th>"), content.index("<th>Grid type</th>"))
 
     def test_grid_storage_positions_sort_numerically(self):
         codes = self.create_batch(10)
@@ -405,7 +408,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn(b"Falcon-Ashmitha", storage.data)
         self.assertIn(b"Update Falcon name for all grids", storage.data)
         self.assertNotIn(b"Falcon-Ashmita", storage.data)
-        self.assertEqual(storage.data.count(b"<summary>Falcon-Ashmitha"), 1)
+        self.assertEqual(storage.data.count(b"</i> Falcon-Ashmitha <span>"), 1)
 
         conn = database.get_db()
         active = conn.execute(
@@ -606,7 +609,7 @@ class GridInventoryTests(unittest.TestCase):
         content = storage.data.decode()
         self.assertIn("TRIAL-FALCON", content)
         self.assertIn("TRIAL-BOX", content)
-        self.assertIn("10 grid(s)", content)
+        self.assertIn("10 grids", content)
         for position in range(1, 11):
             self.assertIn(f"<strong>{position}</strong>", content)
         conn = database.get_db()
@@ -1177,7 +1180,8 @@ class GridInventoryTests(unittest.TestCase):
         self.assertIn(selected_grid.encode(), username_lookup.data)
         self.assertIn(other_grid.encode(), username_lookup.data)
         self.assertNotIn(unrelated_grid.encode(), username_lookup.data)
-        self.assertNotIn(b"Test sample", username_lookup.data)
+        # Grids are grouped by freezing session, headed by the sample name.
+        self.assertIn(b"Test sample", username_lookup.data)
         self.assertNotIn(b'name="sample_name"', username_lookup.data)
         selection_view = guest.get(
             "/inventory?username=Researcher&select=1&slot_type=screening"
@@ -2506,7 +2510,7 @@ class GridInventoryTests(unittest.TestCase):
         )
         self.assertEqual(bulk.status_code, 200)
         self.assertIn(first.encode(), bulk.data)
-        self.assertIn(b"ACCEM-G-9999", bulk.data)
+        self.assertIn(b"an unknown grid was not found", bulk.data)
         activity = self.client.get("/admin/inventory/activity?format=csv")
         self.assertIn(b"clipping_status_change", activity.data)
         conn = database.get_db()

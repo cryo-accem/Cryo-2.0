@@ -11,6 +11,7 @@ from werkzeug.datastructures import MultiDict
 
 import database
 from inventory_service import (
+    booking_billing_context,
     InventoryError, billing_category_for_grid_type_name, booking_grid_links_for_bookings,
     create_data_session, store_grid,
 )
@@ -374,6 +375,73 @@ class InventoryBillingWorkflowTests(unittest.TestCase):
         self.assertIsNotNone(after, response.get_data(as_text=True)[-1500:])
         self.assertEqual(after["current_status"], "Stored")
         self.assertEqual(after["grid_box_name"], "DC-BOX")
+
+    # ── Reserved grids that were not all used ─────────────────────────────
+
+    def _load_screening(self, codes):
+        booking_id = self._booking("screening", "waiting", codes, "partial@example.test")
+        with patch("blueprints.admin.send_email"):
+            self.client.post(
+                f"/admin/screening/load/{booking_id}",
+                data={"_csrf_token": self._csrf("/admin/screening")},
+            )
+        return booking_id
+
+    def test_only_the_grids_ticked_as_used_are_clipped_others_go_back(self):
+        _, codes, _ = self._freeze(4, normal=4)
+        booking_id = self._load_screening(codes)
+        data = self._completion(codes, 2, box="AFTER")
+        data["inventory_screened"] = ["1", "0", "1", "0"]
+        response = self._complete("screening", booking_id, data)
+        self.assertEqual(
+            self._one("SELECT status FROM screening_bookings WHERE id=?", (booking_id,))["status"],
+            "completed", response.get_data(as_text=True)[-1500:],
+        )
+        grids = {
+            row["grid_code"]: row for row in database.get_db().execute(
+                """SELECT g.grid_code, g.clipped, g.current_status, sl.grid_box_name
+                   FROM inventory_grids g
+                   JOIN storage_locations sl ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL"""
+            ).fetchall()
+        }
+        self.assertEqual([grids[code]["clipped"] for code in codes], [1, 0, 1, 0])
+        for code in codes:
+            self.assertEqual(grids[code]["current_status"], "Stored")
+            self.assertEqual(grids[code]["grid_box_name"], "AFTER")
+        row = self._one("SELECT number_of_grids FROM screening_bookings WHERE id=?", (booking_id,))
+        self.assertEqual(row["number_of_grids"], 2)
+
+    def test_used_grid_count_must_match_actual_grids(self):
+        _, codes, _ = self._freeze(4, normal=4)
+        booking_id = self._load_screening(codes)
+        data = self._completion(codes, 2)
+        data["inventory_screened"] = ["1", "1", "1", "0"]
+        response = self._complete("screening", booking_id, data)
+        self.assertIn(b"tick the 2 linked grids that were used", response.data)
+        self.assertEqual(
+            self._one("SELECT status FROM screening_bookings WHERE id=?", (booking_id,))["status"],
+            "ongoing",
+        )
+
+    def test_billing_counts_only_used_grids(self):
+        _, billed, _ = self._freeze(2, normal=2, position_prefix="A")
+        _, unbilled, _ = self._freeze(2, grid_source="self_owned", position_prefix="B")
+        booking_id = self._booking("screening", "ongoing", billed + unbilled, "mix@example.test")
+        conn = database.get_db()
+        cur = conn.cursor()
+        everything = booking_billing_context(cur, "screening", booking_id)
+        used = booking_billing_context(cur, "screening", booking_id, [unbilled[0], billed[0]])
+        cur.close()
+        conn.close()
+        self.assertEqual(everything["prebilled"], 2)
+        self.assertEqual(used, {"linked": 2, "prebilled": 1, "clipped": 0})
+
+    def test_completion_box_offers_used_toggle_and_last_location(self):
+        _, codes, _ = self._freeze(2, normal=2)
+        self._load_screening(codes)
+        page = self.client.get("/admin/screening").get_data(as_text=True)
+        self.assertIn("js/used-grids.js", page)
+        self.assertIn("last_falcon", page)
 
     def test_loaded_data_collection_with_grids_cannot_be_deleted(self):
         _, codes, _ = self._freeze(1, normal=1)

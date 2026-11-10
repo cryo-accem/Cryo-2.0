@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Admin dashboard{% endblock %}
 {% block content %}
+<script src="{{ url_for('static', filename='js/grid-picker.js') }}"></script>
 <main class="portal-page"><section class="page-content">
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back{% if admin_name %}, {{ admin_name }}{% endif %}</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
   {% if attention %}
@@ -377,39 +378,15 @@
         : "";
     };
 
-    const addGridChoice = (grid, unavailable = false) => {
-      const label = document.createElement("label");
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.name = "inventory_grid_codes";
-      checkbox.value = grid.grid_code;
-      checkbox.checked = selectedCodes.has(grid.grid_code);
-      checkbox.addEventListener("change", updateCount);
-
-      const details = document.createElement("span");
-      const code = document.createElement("strong");
-      code.textContent = grid.grid_code;
-      const description = document.createElement("small");
-      description.textContent = unavailable
-        ? "Previously selected; no longer available for this username."
-        : `${grid.sample_name || grid.sample_code || "Inventory grid"} · ${grid.status_code || "Available"}`
-          + (grid.falcon_container_id
-            ? ` · ${grid.falcon_container_id}${grid.grid_box_name ? ` / ${grid.grid_box_name}` : ""}${grid.grid_position ? ` / ${grid.grid_position}` : ""}`
-            : "");
-      details.append(code, description);
-      label.append(checkbox, details);
-      results.append(label);
-    };
-
     const renderResults = (grids) => {
-      results.replaceChildren();
-      const availableCodes = new Set();
-      grids.forEach((grid) => {
-        availableCodes.add(grid.grid_code);
-        addGridChoice(grid);
-      });
-      selectedCodes.forEach((code) => {
-        if (!availableCodes.has(code)) addGridChoice({ grid_code: code }, true);
+      const availableCodes = new Set(grids.map((grid) => grid.grid_code));
+      const unavailable = [...selectedCodes].filter((code) => !availableCodes.has(code));
+      window.AccemGridPicker.render(results, grids, {
+        inputName: "inventory_grid_codes",
+        limit: null,
+        selected: selectedCodes,
+        unavailable,
+        onChange: updateCount,
       });
       if (!results.children.length) {
         const empty = document.createElement("p");

@@ -14,6 +14,7 @@ from inventory_service import (
     available_session_grids, booking_grid_links_for_bookings,
     complete_session_grid, create_data_session, create_grid_type, dashboard_data,
     dashboard_storage, facility_time, grid_booking_links, grid_details,
+    humanize_grid_codes,
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
     list_samples, list_sessions, link_grid_to_booking, matching_inventory_samples, recent_bookings,
     discard_grid_from_storage, register_freezing, rename_falcon_container,
@@ -25,6 +26,17 @@ from inventory_service import (
 
 inventory_bp = Blueprint("inventory", __name__, url_prefix="/admin/inventory")
 inventory_bp.add_app_template_filter(facility_time, "facility_time")
+inventory_bp.add_app_template_filter(humanize_grid_codes, "humanize_grids")
+
+
+def _container_label(name, word):
+    """'Falcon A' for 'A', but keep 'Falcon-A' as it is (no 'Falcon Falcon-A')."""
+    text = str(name or "").strip()
+    return text if word.casefold() in text.casefold() else f"{word} {text}".strip()
+
+
+inventory_bp.add_app_template_filter(lambda name: _container_label(name, "Falcon"), "falcon_label")
+inventory_bp.add_app_template_filter(lambda name: _container_label(name, "box"), "box_label")
 
 
 @inventory_bp.before_request
@@ -370,7 +382,7 @@ def bulk_clipping():
         try:
             update_clipping(code, clipped, request.form.get("notes"), _actor_id())
         except InventoryError as exc:
-            failed.append(f"{code}: {exc}")
+            failed.append(f"{code}: {exc}" if exc.args and str(exc) != "Grid not found." else f"{code} was not found")
         else:
             succeeded.append(code)
     if succeeded:

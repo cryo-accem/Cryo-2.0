@@ -23,17 +23,22 @@
     {% elif searched %}
       {% if grids %}
         <p class="public-inventory-result-count" role="status"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>{{ grids|length }} grid{{ '' if grids|length == 1 else 's' }} found for username <strong>{{ username }}</strong>.</span></p>
-        <div class="table-wrap"><table class="data-table lookup-table"><thead><tr>{% if selection_mode %}<th scope="col">Select</th>{% endif %}<th scope="col">Status</th><th scope="col">Grid</th><th scope="col">Current storage</th><th scope="col">Booking availability</th></tr></thead><tbody>
-          {% for grid in grids %}
-            <tr{% if grid.available %} class="is-available"{% endif %}>
+        {% for session in grid_sessions %}
+        <details class="grid-session grid-session--lookup"{% if loop.index <= 2 or grid_sessions|length <= 3 %} open{% endif %}>
+          <summary class="grid-session__summary"><span class="grid-session__title"><i class="fa-solid fa-snowflake" aria-hidden="true"></i><strong>{{ 'Frozen ' ~ session.frozen_label if session.frozen_label else 'Not frozen yet' }}</strong> · {{ session.sample_name }}</span><span class="grid-session__meta">{{ session.total }} grid{{ '' if session.total == 1 else 's' }} · {{ session.type_summary }}</span></summary>
+          <div class="table-wrap"><table class="data-table lookup-table"><thead><tr>{% if selection_mode %}<th scope="col">Select</th>{% endif %}<th scope="col">Grid</th><th scope="col">Status</th><th scope="col">Current storage</th><th scope="col">Booking availability</th></tr></thead><tbody>
+          {% for grid in session.grids %}
+            <tr data-grid="{{ grid.grid_code }}"{% if grid.available %} class="is-available"{% endif %}>
               {% if selection_mode %}<td data-label="Select">{% if grid.available %}<label class="inventory-select-grid"><input type="checkbox" value="{{ grid.grid_code }}" data-inventory-grid><span>Select</span></label>{% else %}<span class="form-hint">Unavailable</span>{% endif %}</td>{% endif %}
+              <td data-label="Grid"><strong>{{ grid.gl_grid_type_name or 'Grid' }}</strong><br><small>Grid {{ grid.gl_grid_number }} of {{ grid.gl_session_total }}</small></td>
               <td data-label="Status"><span class="lookup-status"><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span> {{ grid.current_status }}</span></td>
-              <td data-label="Grid" class="lookup-table__code">{{ grid.grid_code }}</td>
-              <td data-label="Current storage">{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} · {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}<span class="lookup-muted">Not currently in storage</span>{% endif %}</td>
+              <td data-label="Current storage">{% if grid.falcon_container_id %}{{ grid.falcon_container_id|falcon_label }} · {{ grid.grid_box_name|box_label }} · position {{ grid.grid_position }}{% else %}<span class="lookup-muted">Not currently in storage</span>{% endif %}</td>
               <td data-label="Booking availability">{% if grid.available %}<span class="public-grid-availability">Available for booking</span>{% elif grid.current_status == 'In Data Collection' %}<span class="lookup-availability lookup-availability--busy">In data collection</span>{% elif grid.current_status == 'Discarded' %}<span class="lookup-availability lookup-availability--off">Discarded</span>{% else %}<span class="lookup-availability lookup-availability--busy">Already reserved</span>{% endif %}</td>
             </tr>
           {% endfor %}
-        </tbody></table></div>
+          </tbody></table></div>
+        </details>
+        {% endfor %}
         {% if selection_mode %}<div class="inventory-selection-actions"><span data-inventory-selection-count role="status" aria-live="polite">No grids selected.</span><button class="button" type="button" data-use-selected-grids disabled>Use selected grids</button></div>{% endif %}
         <p class="public-inventory-result-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>This lookup matches the username associated with your grid records. To book an available grid, use that same username on the booking form.</span></p>
       {% else %}

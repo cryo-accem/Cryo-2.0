@@ -66,6 +66,7 @@ from inventory_service import (
 )
 from inventory_service import (
     booking_billing_context, booking_billing_context_for, delete_booking_grid_links,
+    screened_grid_codes,
     load_data_collection_booking,
 )
 from revenue import normalize_service_stage
@@ -401,7 +402,9 @@ def billing_preview():
         if preview_service in {"screening", "data_collection"} and preview_booking_id.isdigit():
             grids_value = parse_number_of_grids(number_of_grids)
             prebilled_grids, clipped_grids = _linked_grid_billing(
-                booking_billing_context_for(preview_service, int(preview_booking_id)),
+                booking_billing_context_for(
+                    preview_service, int(preview_booking_id), screened_grid_codes(request.values)
+                ),
                 grids_value, clipped_grids,
             )
         charges = calculate_charge_sheet(
@@ -3271,7 +3274,9 @@ def complete_dc(booking_id):
         # Linked grids billed at freezing are not charged again, and linked
         # grids already clipped (e.g. at screening) count as clipped.
         prebilled_grids, clipped_grids_value = _linked_grid_billing(
-            booking_billing_context(cur, "data_collection", booking_id),
+            booking_billing_context(
+                cur, "data_collection", booking_id, screened_grid_codes(request.form)
+            ),
             actual_grids_value, clipped_grids_value,
         )
         charges = calculate_booking_revenue(
@@ -3670,7 +3675,9 @@ def complete_sc(booking_id):
         # Linked grids billed at freezing are not charged again, and linked
         # grids already clipped count as clipped.
         prebilled_grids, clipped_grids_value = _linked_grid_billing(
-            booking_billing_context(cur, "screening", booking_id),
+            booking_billing_context(
+                cur, "screening", booking_id, screened_grid_codes(request.form)
+            ),
             actual_grids_value, clipped_grids_value,
         )
         charges = calculate_booking_revenue(
