@@ -355,3 +355,20 @@ class DashboardResilienceTests(unittest.TestCase):
             response = self.client.get("/admin/panel")
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(b"Needs attention", response.data)
+
+
+class RevenueComparisonAxisTests(unittest.TestCase):
+    def test_axis_max_rounds_up_to_even_steps(self):
+        from blueprints.admin import _nice_axis_max
+        self.assertEqual(_nice_axis_max(167000), 200000)
+        self.assertEqual(_nice_axis_max(345000), 400000)
+        self.assertEqual(_nice_axis_max(0), 0)
+
+    def test_ticks_share_one_unit(self):
+        from blueprints.admin import _inr_compact
+        labels = [_inr_compact(200000 * step / 4, 200000) for step in range(5)]
+        self.assertEqual(labels, ["₹0", "₹0.5L", "₹1L", "₹1.5L", "₹2L"])
+
+    def test_line_path_is_straight_segments(self):
+        from blueprints.admin import _line_path
+        self.assertEqual(_line_path([(5, 100), (15, 20)]), "M5.00 100.00 L15.00 20.00")

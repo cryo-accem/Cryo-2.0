@@ -3,6 +3,7 @@ import hashlib
 import csv
 import io
 import base64
+import math
 import json
 import os
 import sqlite3
@@ -2639,47 +2640,40 @@ def _date_one_year_earlier(value):
         return value.replace(year=value.year - 1, day=28)
 
 
-def _smooth_chart_path(points):
-    if len(points) < 2:
-        return ""
+def _inr_compact(value, unit_of=None):
+    """Short Indian-rupee axis label (₹0, ₹50k, ₹1.5L, ₹2Cr).
 
-    secants = [
-        (points[index + 1][1] - points[index][1])
-        / (points[index + 1][0] - points[index][0])
-        for index in range(len(points) - 1)
-    ]
-    tangents = [secants[0]]
-    for previous, following in zip(secants, secants[1:]):
-        tangents.append(
-            0 if previous * following <= 0 else (previous + following) / 2
-        )
-    tangents.append(secants[-1])
+    ``unit_of`` picks the unit from another value (the axis maximum) so every
+    tick on one axis uses the same unit.
+    """
+    value = float(value)
+    reference = float(unit_of if unit_of is not None else value)
+    if value == 0:
+        return "₹0"
+    for limit, suffix in ((1e7, "Cr"), (1e5, "L"), (1e3, "k")):
+        if reference >= limit:
+            text = f"{value / limit:.2f}".rstrip("0").rstrip(".")
+            return f"₹{text}{suffix}"
+    return f"₹{value:,.0f}"
 
-    for index, secant in enumerate(secants):
-        if secant == 0:
-            tangents[index] = tangents[index + 1] = 0
-            continue
-        alpha = tangents[index] / secant
-        beta = tangents[index + 1] / secant
-        magnitude = alpha * alpha + beta * beta
-        if magnitude > 9:
-            scale = 3 / magnitude ** 0.5
-            tangents[index] = scale * alpha * secant
-            tangents[index + 1] = scale * beta * secant
 
-    path = f"M {points[0][0]:.2f} {points[0][1]:.2f}"
-    for index, secant in enumerate(secants):
-        start = points[index]
-        end = points[index + 1]
-        one_third_dx = (end[0] - start[0]) / 3
-        control_1 = (start[0] + one_third_dx, start[1] + tangents[index] * one_third_dx)
-        control_2 = (end[0] - one_third_dx, end[1] - tangents[index + 1] * one_third_dx)
-        path += (
-            f" C {control_1[0]:.2f} {control_1[1]:.2f},"
-            f" {control_2[0]:.2f} {control_2[1]:.2f},"
-            f" {end[0]:.2f} {end[1]:.2f}"
-        )
-    return path
+def _nice_axis_max(value, ticks=4):
+    """Round a chart maximum up so each of ``ticks`` steps is a round number."""
+    value = float(value)
+    if value <= 0:
+        return 0.0
+    raw_step = value / ticks
+    magnitude = 10 ** math.floor(math.log10(raw_step))
+    for multiple in (1, 2, 2.5, 5, 10):
+        if multiple * magnitude >= raw_step:
+            return multiple * magnitude * ticks
+    return 10 * magnitude * ticks
+
+
+def _line_path(points):
+    return " ".join(
+        f"{'M' if index == 0 else 'L'}{x:.2f} {y:.2f}" for index, (x, y) in enumerate(points)
+    )
 
 
 _REVENUE_MIN_YEAR = 1990
@@ -3050,11 +3044,18 @@ def _revenue_dashboard(cur, preset_override=None):
         (max(item["current"], item["previous"]) for item in comparison_items),
         default=Decimal("0"),
     )
+    # Percent coordinates (0-100 both ways, y from the top) so the page can
+    # stretch the plot without distorting dots, labels or stroke widths.
+    axis_max = _nice_axis_max(comparison_max)
+    comparison_ticks = [
+        {"y": 100 - step * 25, "label": _inr_compact(axis_max * step / 4, axis_max)}
+        for step in range(5)
+    ] if axis_max else [{"y": 100, "label": "₹0"}]
+    count = len(comparison_items)
     for index, item in enumerate(comparison_items):
-        x = 5 + (index * 90 / max(len(comparison_items) - 1, 1))
-        item["x"] = x
-        item["current_y"] = 140 - float(item["current"] / comparison_max * 120) if comparison_max else 140
-        item["previous_y"] = 140 - float(item["previous"] / comparison_max * 120) if comparison_max else 140
+        item["x"] = (index + 0.5) * 100 / count if count else 50
+        item["current_y"] = 100 - float(item["current"]) / axis_max * 100 if axis_max else 100
+        item["previous_y"] = 100 - float(item["previous"]) / axis_max * 100 if axis_max else 100
     monthly_max = max((item["value"] for item in monthly_items), default=Decimal("0"))
     if monthly_max:
         for index, item in enumerate(monthly_items):
@@ -3090,10 +3091,11 @@ def _revenue_dashboard(cur, preset_override=None):
             "change_label": comparison_change_label,
             "change_direction": comparison_change_direction,
             "months": comparison_items,
-            "current_path": _smooth_chart_path(
+            "ticks": comparison_ticks,
+            "current_path": _line_path(
                 [(item["x"], item["current_y"]) for item in comparison_items]
             ),
-            "previous_path": _smooth_chart_path(
+            "previous_path": _line_path(
                 [(item["x"], item["previous_y"]) for item in comparison_items]
             ),
         },
