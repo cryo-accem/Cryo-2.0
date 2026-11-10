@@ -3692,3 +3692,5 @@ html.lightbox-open { overflow: hidden; }
 .grid-picker-names button small { color: #167da5; font-weight: 600; }
 .grid-picker-owner { margin: 0 0 6px; color: #31566b; font-size: 12px; }
 .grid-picker-owner button { margin-left: 6px; border: 0; background: none; color: #167da5; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.grid-session__dot { color: #8aa1af; }
+.grid-session__sample { padding: 2px 9px; border-radius: 999px; background: #dff1f7; color: #0f5f80; font-weight: 800; }

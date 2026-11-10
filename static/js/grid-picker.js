@@ -73,7 +73,9 @@
       const icon = el("i", "fa-solid fa-snowflake");
       icon.setAttribute("aria-hidden", "true");
       const date = el("strong", "", first.frozen_label ? `Frozen ${first.frozen_label}` : "Not frozen yet");
-      title.append(icon, date, document.createTextNode(` · ${first.sample_name || "Sample"}`));
+      const dot = el("span", "grid-session__dot", "·");
+      dot.setAttribute("aria-hidden", "true");
+      title.append(icon, date, dot, el("strong", "grid-session__sample", first.sample_name || "Sample"));
       const total = first.session_total || sessionGrids.length;
       const meta = el(
         "span", "grid-session__meta",
