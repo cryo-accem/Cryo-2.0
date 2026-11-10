@@ -3,6 +3,7 @@
 {% block content %}
 <main class="portal-page"><section class="page-content">
   <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back{% if admin_name %}, {{ admin_name }}{% endif %}</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
+  {% if attention %}
   <section class="dash-attention" aria-labelledby="dash-attention-title">
     <div class="dash-attention__heading">
       <div><span class="chart-kicker">Today · {{ revenue.today }}</span><h2 id="dash-attention-title">Needs attention</h2></div>
@@ -21,6 +22,7 @@
       {% endfor %}
     </ul>
   </section>
+  {% endif %}
   <section class="revenue-dashboard dash-pending" aria-labelledby="pending-payments-title">
     <div class="revenue-heading">
       <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title" tabindex="-1">Bills awaiting receipt</h2><p>Sent bills not yet marked received in History. Internal debit-head bills are listed separately.</p></div>

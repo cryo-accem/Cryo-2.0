@@ -323,3 +323,35 @@ class AdminDashboardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DashboardResilienceTests(unittest.TestCase):
+    """Production runs MySQL; these guard the dashboard against SQL that only SQLite accepts."""
+
+    def setUp(self):
+        import tempfile, os
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        url = patch.object(database, "DATABASE_URL", f"sqlite:///{os.path.join(self.temp_dir.name, 'r.sqlite3')}")
+        url.start()
+        self.addCleanup(url.stop)
+        self.app = create_app()
+        self.app.testing = True
+        self.client = self.app.test_client()
+        with self.client.session_transaction() as sess:
+            sess["admin_logged_in"] = True
+            conn = database.get_db()
+            sess["admin_user_id"] = conn.execute("SELECT id FROM users WHERE role='admin' LIMIT 1").fetchone()["id"]
+            conn.close()
+
+    def test_attention_sql_never_compares_timestamps_with_empty_string(self):
+        import inspect, re
+        from blueprints import admin as admin_module
+        source = inspect.getsource(admin_module._dashboard_attention)
+        self.assertIsNone(re.search(r"_at\s*=\s*''", source))
+
+    def test_dashboard_still_loads_if_attention_summary_fails(self):
+        with patch("blueprints.admin._dashboard_attention", side_effect=RuntimeError("db")):
+            response = self.client.get("/admin/panel")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(b"Needs attention", response.data)

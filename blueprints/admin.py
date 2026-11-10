@@ -462,11 +462,17 @@ def _dashboard_attention(cur, today, pending_payments):
         ("screening_bookings", "status='completed' AND "),
         ("completed_freezing", ""),
     ):
+        # No "= ''" comparison in SQL: MySQL 8 rejects an empty string compared
+        # with a TIMESTAMP column ("Incorrect DATETIME value"), so blank values
+        # left by older SQLite rows are filtered in Python instead.
         cur.execute(
-            f"""SELECT pi_name FROM {table}
-                WHERE {where}(charge_sheet_sent_at IS NULL OR charge_sheet_sent_at = '')"""
+            f"""SELECT pi_name, charge_sheet_sent_at FROM {table}
+                WHERE {where}1=1"""
         )
-        unsent_bills += sum(1 for item in cur.fetchall() if is_billable_booking(item))
+        unsent_bills += sum(
+            1 for item in cur.fetchall()
+            if not str(item["charge_sheet_sent_at"] or "").strip() and is_billable_booking(item)
+        )
 
     grids_unstored = None
     try:
@@ -587,7 +593,13 @@ def panel():
     freezing_active = cur.fetchone()["count"]
     pending_payments = _dashboard_pending_payments(cur)
     revenue = _revenue_dashboard(cur)
-    attention = _dashboard_attention(cur, today_ist(), pending_payments)
+    try:
+        attention = _dashboard_attention(cur, today_ist(), pending_payments)
+    except Exception:
+        # The summary strip is a convenience; never let it take the dashboard down.
+        current_app.logger.exception("Dashboard attention summary failed")
+        conn.rollback()
+        attention = None
     cur.close()
     conn.close()
     # Six PI colours plus a neutral grey for the aggregated "Other PIs" slice,
