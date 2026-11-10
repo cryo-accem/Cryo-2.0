@@ -355,11 +355,13 @@
       const username = userName.value.trim();
       if (username) {
         url.searchParams.set("username", username);
+        url.searchParams.set("booking_name", username);
         url.searchParams.set("select", "1");
         url.searchParams.set("slot_type", slotType);
         url.searchParams.set("admin_selection", "1");
       } else {
         url.searchParams.delete("username");
+        url.searchParams.delete("booking_name");
         url.searchParams.delete("select");
         url.searchParams.delete("slot_type");
         url.searchParams.delete("admin_selection");
@@ -378,7 +380,9 @@
         : "";
     };
 
-    const renderResults = (grids) => {
+    // Recorded name picked from "Is this you?" (may differ from the typed name).
+    let inventoryOwner = "";
+    const renderResults = (grids, suggestions = []) => {
       const availableCodes = new Set(grids.map((grid) => grid.grid_code));
       const unavailable = [...selectedCodes].filter((code) => !availableCodes.has(code));
       window.AccemGridPicker.render(results, grids, {
@@ -388,6 +392,17 @@
         unavailable,
         onChange: updateCount,
       });
+      if (inventoryOwner) {
+        window.AccemGridPicker.renderOwnerNote(results, inventoryOwner, () => search(""));
+      } else if (suggestions.length) {
+        window.AccemGridPicker.renderNameChoices(
+          results, suggestions,
+          grids.length
+            ? "Also recorded under a similar name. Is one of these the same person?"
+            : `No grids are recorded under exactly “${userName.value.trim()}”. Is one of these the same person?`,
+          (name) => search(name),
+        );
+      }
       if (!results.children.length) {
         const empty = document.createElement("p");
         empty.className = "empty-message";
@@ -397,13 +412,15 @@
       updateCount();
     };
 
-    const search = async () => {
+    const search = async (owner) => {
+      if (typeof owner === "string") inventoryOwner = owner;
       const searchName = userName.value.trim();
       updateInventoryLink();
       const currentRequest = ++requestNumber;
       controller?.abort();
       controller = null;
       if (searchName !== lastUserName) {
+        inventoryOwner = "";
         selectedCodes.clear();
         lastUserName = searchName;
         results.replaceChildren();
@@ -423,7 +440,7 @@
       status.textContent = "Searching available inventory grids…";
       try {
         const response = await fetch(
-          `${picker.dataset.searchUrl}?user_name=${encodeURIComponent(searchName)}`,
+          `${picker.dataset.searchUrl}?user_name=${encodeURIComponent(inventoryOwner || searchName)}`,
           { headers: { Accept: "application/json" }, signal: controller.signal },
         );
         const contentType = response.headers.get("content-type") || "";
@@ -436,12 +453,14 @@
         if (!Array.isArray(data.grids)) {
           throw new Error("The inventory search returned an invalid response.");
         }
-        renderResults(data.grids);
+        renderResults(data.grids, Array.isArray(data.suggestions) ? data.suggestions : []);
         status.textContent = data.grids.length
           ? `${data.grids.length} available grid${data.grids.length === 1 ? "" : "s"} found.`
           : selectedCodes.size
             ? "Previously selected grids are no longer available. Uncheck them to remove them."
-            : "No available grids found for this username.";
+            : data.suggestions?.length && !inventoryOwner
+              ? "No grids under this exact name. Pick the matching name below."
+              : "No available grids found for this username.";
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") return;
         if (currentRequest !== requestNumber) return;
@@ -468,7 +487,10 @@
       const requestedCodes = [...new Set(event.data.grid_codes.filter(
         (code) => typeof code === "string",
       ))];
-      await search();
+      await search(
+        typeof event.data.owner === "string" && event.data.owner.trim() !== userName.value.trim()
+          ? event.data.owner.trim() : "",
+      );
       if (event.data.username.trim().toLocaleLowerCase()
           !== userName.value.trim().toLocaleLowerCase()) return;
       const availableInputs = new Map(

@@ -1019,17 +1019,23 @@ def link_selected_grids_to_booking(
         if not re.fullmatch(r"ACCEM-G-\d{4,}", code):
             raise InventoryError("Choose a valid inventory grid.")
         cursor.execute(
-            """SELECT g.grid_id, g.grid_code, g.current_status
+            """SELECT g.grid_id, g.grid_code, g.current_status,
+                      s.researcher_name, u.username AS linked_username
                FROM inventory_grids g
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                LEFT JOIN users u ON u.id=s.linked_user_id
-               WHERE g.grid_code=?
-                 AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
-                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))"""
+               WHERE g.grid_code=?"""
             + _lock_clause(),
-            [code, owner_name, owner_name],
+            [code],
         )
         grid = cursor.fetchone()
+        # The booking name may differ slightly from the name the grids were
+        # recorded under ("Bapan" / "Bapan Mondal" / "Bapen").
+        if grid and not (
+            names_match(owner_name, grid["researcher_name"])
+            or names_match(owner_name, grid["linked_username"])
+        ):
+            grid = None
         if not grid:
             raise InventoryError(
                 f"{code} is not associated with the entered username."
@@ -2972,3 +2978,95 @@ def humanize_grid_codes(text):
         ),
         text,
     )
+
+
+# ── Flexible researcher-name matching ─────────────────────────────────────────
+# People book under slightly different names ("Bapan", "Bapan Mondal",
+# "Dr. Bapan Mondal", or a typo such as "Bapen").  Public lookups never show
+# grids for a loose match directly: they offer the recorded names as
+# "Is this you?" choices, and grids are listed once a name is picked.
+
+_NAME_TITLES = {"dr", "prof", "professor", "mr", "mrs", "ms", "miss", "sir"}
+NAME_SUGGESTION_MIN_LENGTH = 3
+
+
+def _name_tokens(name):
+    text = re.sub(r"[^\w\s]", " ", str(name or "").casefold())
+    return [token for token in text.split() if token not in _NAME_TITLES]
+
+
+def _tokens_close(first, second):
+    if first == second:
+        return True
+    if min(len(first), len(second)) < 4:
+        return False
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, first, second).ratio() >= 0.75
+
+
+def name_match_score(query, candidate):
+    """0 when the names do not match; higher is closer (1.0 = same name)."""
+    query_tokens, candidate_tokens = _name_tokens(query), _name_tokens(candidate)
+    if not query_tokens or not candidate_tokens:
+        return 0.0
+    if query_tokens == candidate_tokens:
+        return 1.0
+    query_set, candidate_set = set(query_tokens), set(candidate_tokens)
+    if query_set <= candidate_set or candidate_set <= query_set:
+        return 0.9  # "Bapan" ⊂ "Bapan Mondal", in either direction
+    shorter, longer = sorted((query_tokens, candidate_tokens), key=len)
+    if all(any(_tokens_close(token, other) for other in longer) for token in shorter):
+        return 0.75  # spelling slip: "Bapen" ~ "Bapan"
+    return 0.0
+
+
+def names_match(query, candidate):
+    return name_match_score(query, candidate) > 0
+
+
+def similar_researcher_names(query, limit=6):
+    """Recorded names that loosely match ``query``, closest first.
+
+    Returns [{"name", "grid_count", "exact"}]; only names that have grids.
+    """
+    query = " ".join(str(query or "").split())
+    if len("".join(_name_tokens(query))) < NAME_SUGGESTION_MIN_LENGTH:
+        return []
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            """SELECT s.researcher_name AS name, COUNT(g.grid_id) AS grid_count
+               FROM inventory_samples s JOIN inventory_grids g ON g.sample_id=s.sample_id
+               WHERE g.current_status <> 'Discarded'
+               GROUP BY s.researcher_name"""
+        )
+        counts = {}
+        for row in cursor.fetchall():
+            key = " ".join(str(row["name"] or "").split())
+            if key:
+                counts[key] = counts.get(key, 0) + int(row["grid_count"] or 0)
+        cursor.execute(
+            """SELECT u.username AS name, COUNT(g.grid_id) AS grid_count
+               FROM users u JOIN inventory_samples s ON s.linked_user_id=u.id
+               JOIN inventory_grids g ON g.sample_id=s.sample_id
+               WHERE g.current_status <> 'Discarded'
+               GROUP BY u.username"""
+        )
+        for row in cursor.fetchall():
+            key = " ".join(str(row["name"] or "").split())
+            if key and key.casefold() not in {name.casefold() for name in counts}:
+                counts[key] = int(row["grid_count"] or 0)
+    finally:
+        cursor.close()
+        connection.close()
+    scored = []
+    for name, grid_count in counts.items():
+        score = name_match_score(query, name)
+        if score:
+            scored.append((score, name, grid_count))
+    scored.sort(key=lambda item: (-item[0], item[1].casefold()))
+    return [
+        {"name": name, "grid_count": grid_count, "exact": name.casefold() == query.casefold()}
+        for _, name, grid_count in scored[:limit]
+    ]

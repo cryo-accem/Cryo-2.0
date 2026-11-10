@@ -11,6 +11,7 @@ from database import _is_sqlite_url, ensure_site_stats_cache_table, get_db
 from normalization import clean_display_name
 from inventory_service import (
     PUBLIC_LOOKUP_MIN_LENGTH, InventoryError, group_by_freezing_session, public_inventory_grids,
+    similar_researcher_names,
 )
 from curated_publications import CURATED_PUBLICATIONS
 from publication_finder import normalize_doi, normalize_title
@@ -58,7 +59,11 @@ def grid_inventory():
         slot_type = ""
     selection_mode = request.args.get("select") == "1" and bool(slot_type)
     admin_selection = selection_mode and request.args.get("admin_selection") == "1"
+    # The name typed on the booking form, kept while the user confirms which
+    # recorded name is theirs, so the selection is sent back to that form.
+    booking_name = request.args.get("booking_name", "").strip()[:150] or username
     grids = []
+    name_suggestions = []
     search_error = ""
     searched = bool(username)
     if len(username) > 150 or len(sample_name) > 180:
@@ -70,10 +75,15 @@ def grid_inventory():
     elif searched:
         try:
             grids = public_inventory_grids(username, sample_name or None)
+            name_suggestions = [
+                item for item in similar_researcher_names(username) if not item["exact"]
+            ]
         except InventoryError as exc:
             search_error = str(exc)
     return render_template(
         "public_inventory.html",
+        name_suggestions=name_suggestions,
+        booking_name=booking_name,
         grids=grids,
         grid_sessions=group_by_freezing_session(grids),
         username=username,
@@ -99,9 +109,15 @@ def search_public_inventory():
         return jsonify({"grids": []})
     try:
         grids = public_inventory_grids(researcher_name, available_only=True)
+        suggestions = [
+            {"name": item["name"], "grid_count": item["grid_count"]}
+            for item in similar_researcher_names(researcher_name) if not item["exact"]
+        ]
     except InventoryError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({
+        # Loosely matching recorded names, offered as "Is this you?" choices.
+        "suggestions": suggestions,
         "grids": [
             {
                 "grid_code": grid["grid_code"],

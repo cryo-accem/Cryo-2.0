@@ -114,7 +114,8 @@ class PublicRatesFaqContactTests(unittest.TestCase):
         other = self._html("/faq")
         self.assertIn('<a href="/rates">Rates</a>', other)
         nav = re.search(r'<nav class="site-nav".*?</nav>', other, re.S).group(0)
-        self.assertEqual(nav.count("<a "), 12)  # 10 page links (6 inside the Facility / Using ACCEM menus) + Book slots + staff lock
+        self.assertEqual(nav.count("<a "), 13)  # 10 page links (6 inside the Facility / Using ACCEM menus) + Live schedule + Book slots + staff lock
+        self.assertIn('class="schedule-link" href="/freezing_schedule"', nav)
 
     def test_faq_is_accessible_and_script_free(self):
         html = self._html("/faq")

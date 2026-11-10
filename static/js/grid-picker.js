@@ -122,5 +122,38 @@
     });
   }
 
-  window.AccemGridPicker = { render };
+  /* "Is this you?" choices for names recorded slightly differently
+   * ("Bapan" / "Bapan Mondal" / "Bapen").  onPick(name) loads that name's grids. */
+  function renderNameChoices(container, suggestions, heading, onPick) {
+    if (!suggestions || !suggestions.length) return;
+    const box = el("div", "grid-picker-names");
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", "Similar recorded names");
+    box.append(el("p", "", heading));
+    const list = el("div", "grid-picker-names__list");
+    suggestions.forEach((item) => {
+      const button = el("button");
+      button.type = "button";
+      button.append(
+        el("strong", "", item.name),
+        el("small", "", `${item.grid_count} grid${item.grid_count === 1 ? "" : "s"} · Yes, this is me`),
+      );
+      button.addEventListener("click", () => onPick(item.name));
+      list.append(button);
+    });
+    box.append(list);
+    container.append(box);
+  }
+
+  /* "Showing grids recorded under …  Not you?" line above the grids. */
+  function renderOwnerNote(container, owner, onReset) {
+    const note = el("p", "grid-picker-owner", `Showing grids recorded under “${owner}”.`);
+    const reset = el("button", "", "Not you?");
+    reset.type = "button";
+    reset.addEventListener("click", onReset);
+    note.append(reset);
+    container.prepend(note);
+  }
+
+  window.AccemGridPicker = { render, renderNameChoices, renderOwnerNote };
 })();

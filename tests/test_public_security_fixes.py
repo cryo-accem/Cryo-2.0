@@ -89,9 +89,12 @@ class PublicSecurityFixTests(unittest.TestCase):
     # ── fix 1: grid ownership on booking ───────────────────────────────────
     def test_partial_name_cannot_reserve_someone_elses_grid(self):
         code = self._insert_grid("Rebecca Stone")
-        for name in ("e", "Rebecca", "stone"):
+        # Single letters and unrelated names are refused.  (Part of the
+        # recorded name, e.g. "Rebecca" for "Rebecca Stone", is accepted:
+        # people book under shorter names; see test_inventory_grid_labels.)
+        for name in ("e", "Ste", "Rachel Green"):
             response = self._post_register(
-                user_name=name, email=f"{name.lower()}@example.test",
+                user_name=name, email=f"{name.lower().replace(' ', '')}@example.test",
                 inventory_grid_codes=[code],
             )
             self.assertEqual(response.status_code, 200, name)

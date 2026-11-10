@@ -65,3 +65,62 @@ class GridLabelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FlexibleNameSearchTests(unittest.TestCase):
+    setUp = inventory_tests.GridInventoryTests.setUp
+    csrf_token = inventory_tests.GridInventoryTests.csrf_token
+    create_batch = inventory_tests.GridInventoryTests.create_batch
+
+    def test_name_rules(self):
+        from inventory_service import names_match
+        self.assertTrue(names_match("Bapan", "Bapan Mondal"))
+        self.assertTrue(names_match("Bapan Mondal", "Bapan"))
+        self.assertTrue(names_match("Bapen", "Bapan"))
+        self.assertTrue(names_match("dr. bapan mondal", "Bapan Mondal"))
+        self.assertFalse(names_match("Bapan", "Sonali Kumari"))
+        self.assertFalse(names_match("e", "Bapan"))
+
+    def test_lookup_offers_names_before_showing_grids(self):
+        grid = self.create_batch(1, "Bapan Mondal", "Spike RBD")[0]
+        guest = self.app.test_client()
+        for typed in ("Bapan", "Bapen", "bapan  mondal."):
+            page = guest.get("/inventory?username=" + typed.replace(" ", "%20")).data
+            self.assertNotIn(grid.encode(), page, typed)  # no grids until confirmed
+            self.assertIn(b"Is one of these you?", page, typed)
+            self.assertIn(b"username=Bapan+Mondal", page, typed)
+            api = guest.get("/inventory/search?user_name=" + typed.replace(" ", "%20")).get_json()
+            self.assertEqual(api["grids"], [], typed)
+            self.assertEqual(api["suggestions"][0]["name"], "Bapan Mondal", typed)
+        confirmed = guest.get("/inventory?username=Bapan%20Mondal&booking_name=Bapan").data
+        self.assertIn(grid.encode(), confirmed)
+
+    def test_unrelated_names_get_no_suggestions(self):
+        self.create_batch(1, "Bapan Mondal", "Spike RBD")
+        api = self.app.test_client().get("/inventory/search?user_name=Sonali").get_json()
+        self.assertEqual(api["suggestions"], [])
+        self.assertEqual(api["grids"], [])
+
+    def test_booking_under_short_name_can_use_grids_recorded_under_full_name(self):
+        import re as _re
+        from unittest.mock import patch as _patch
+        grid = self.create_batch(1, "Bapan Mondal", "Spike RBD")[0]
+        guest = self.app.test_client()
+        token = _re.search(rb'name="_csrf_token"\s+value="([^"]+)"', guest.get("/register").data).group(1).decode()
+        with _patch("extensions.send_email"):
+            guest.post("/register", data={
+                "_csrf_token": token, "reg_type": "screening", "user_name": "Bapan",
+                "pi_name": "PI Name", "email": "bapan@example.com", "origin": "Internal",
+                "esm": "IISc", "sample_name": "Spike RBD", "grids": "1",
+                "inventory_grid_codes": [grid],
+            })
+        conn = database.get_db()
+        linked = conn.execute(
+            """SELECT b.user_name FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               JOIN inventory_grids g ON g.grid_id=l.grid_id WHERE g.grid_code=?""",
+            (grid,),
+        ).fetchone()
+        conn.close()
+        self.assertIsNotNone(linked)
+        self.assertEqual(linked["user_name"], "Bapan")

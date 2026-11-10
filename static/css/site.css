@@ -3613,3 +3613,82 @@ html.lightbox-open { overflow: hidden; }
 .completion-used-status.is-error { background: #fff4e5; color: #8a5300; }
 .completion-mapped-grid > label.completion-used-toggle { grid-column: 1 / -1; display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #eef6f9; }
 .completion-mapped-grid > .completion-unused-note { grid-column: 1 / -1; }
+
+/* === "Live schedule" button beside Book slots ===
+   An outlined secondary button: same height as Book slots, lighter weight so
+   booking stays the primary action. It opens the schedules page, whose tabs
+   cover freezing, screening, data collection and Find your grids. */
+@media (min-width: 801px) {
+  .site-nav > a.schedule-link.schedule-link {
+    display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px;
+    border: 1px solid rgba(233, 244, 251, .38); border-radius: 8px; background: transparent;
+    color: #fff; font-size: 13.5px; font-weight: 600; white-space: nowrap; box-shadow: none;
+  }
+  .site-nav > a.schedule-link.schedule-link i { font-size: 12px; color: var(--cyan); }
+  .site-nav > a.schedule-link.schedule-link:hover, .site-nav > a.schedule-link.schedule-link:focus-visible {
+    border-color: var(--cyan); background: rgba(72, 200, 232, .1); color: #fff;
+  }
+  .site-nav > a.schedule-link.schedule-link.active { border-color: var(--cyan); background: rgba(72, 200, 232, .14); box-shadow: none; }
+}
+/* One row: the two buttons sit together on the right. */
+@media (min-width: 1401px) {
+  .site-nav > a.schedule-link.schedule-link { margin-left: auto; }
+  .site-nav .portal-link { margin-left: 8px; }
+}
+/* Below ~1400px everything no longer fits on one row: links take the second
+   row (as on tablets) and both buttons plus the lock sit top-right. */
+@media (min-width: 1001px) and (max-width: 1400px) {
+  .header-inner { position: relative; flex-wrap: wrap; gap: 12px 20px; padding: 12px 24px; }
+  .site-nav { order: 3; flex: 1 1 100%; width: 100%; justify-content: center; flex-wrap: wrap; gap: 10px; padding-bottom: 3px; }
+  .site-nav > a:first-child { margin-left: 0; }
+  .site-nav > a:not(.portal-link):not(.staff-login):not(.schedule-link), .nav-group__toggle { padding: 8px 13px; }
+  .nav-group__toggle { gap: 5px; }
+  .nav-group__toggle i { font-size: 9px; }
+  .site-nav .nav-group__toggle { padding-right: 9px; margin-right: -10px; }
+  .site-nav .portal-link { position: absolute; top: 22px; right: 66px; margin: 0; }
+  .site-nav .staff-login { position: absolute; top: 27px; right: 26px; margin: 0; width: 30px; height: 30px; }
+}
+@media (min-width: 801px) and (max-width: 1400px) {
+  .site-nav > a.schedule-link.schedule-link { position: absolute; top: 22px; right: 180px; margin: 0; }
+}
+@media (min-width: 1001px) and (max-width: 1400px) {
+  .site-nav .portal-link { padding: 9px 16px; }
+}
+/* Narrow tablets: tighter spacing keeps all the page links on one row. */
+@media (min-width: 801px) and (max-width: 900px) {
+  .site-nav { gap: 6px; }
+  .site-nav > a:not(.portal-link):not(.staff-login):not(.schedule-link), .nav-group__toggle { padding: 7px 9px; }
+  .site-nav .nav-group__toggle { padding-right: 5px; }
+}
+@media (max-width: 800px) {
+  .js .site-nav.is-open a.schedule-link { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; padding: 11px 12px; border: 1px solid rgba(233, 244, 251, .38); border-radius: 8px; color: #fff; font-weight: 700; text-align: center; }
+  .js .site-nav.is-open a.schedule-link i { color: var(--cyan); }
+  .js .site-nav.is-open a.schedule-link + .portal-link { margin-top: 8px; }
+}
+
+/* Red "live" indicator on the Live schedule button: glows and pulses. */
+.live-dot { position: relative; display: inline-block; flex: none; width: 9px; height: 9px; border-radius: 50%; background: #ff3b3b; box-shadow: 0 0 6px 1px rgba(255, 59, 59, .85); animation: live-dot-blink 1.4s ease-in-out infinite; }
+.live-dot::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: rgba(255, 59, 59, .55); animation: live-dot-ring 1.4s ease-out infinite; }
+@keyframes live-dot-blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; box-shadow: 0 0 2px 0 rgba(255, 59, 59, .4); } }
+@keyframes live-dot-ring { 0% { transform: scale(1); opacity: .8; } 100% { transform: scale(2.6); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .live-dot::after { animation: none; }
+  .live-dot::after { display: none; }
+}
+
+/* "Is this you?" name choices on Find your grids */
+.lookup-name-choices { margin: 14px 0; padding: 14px 16px; border: 1px solid #d6e6ee; border-radius: 12px; background: #f4fafc; }
+.lookup-name-choices__heading { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: #17324d; font-weight: 700; }
+.lookup-name-choices__heading i { color: #167da5; }
+.lookup-name-choices__list { display: flex; flex-wrap: wrap; gap: 8px; }
+.lookup-name-choice { display: grid; gap: 2px; min-width: 170px; padding: 10px 14px; border: 1px solid #b9d7e4; border-radius: 10px; background: #fff; color: #17324d; text-decoration: none; }
+.lookup-name-choice:hover, .lookup-name-choice:focus-visible { border-color: #167da5; box-shadow: 0 0 0 3px rgba(22, 125, 165, .12); }
+.lookup-name-choice small { color: #167da5; font-weight: 600; }
+.grid-picker-names { display: grid; gap: 8px; padding: 12px; border: 1px solid #d6e6ee; border-radius: 10px; background: #f4fafc; }
+.grid-picker-names p { margin: 0; color: #17324d; font-weight: 600; }
+.grid-picker-names__list { display: flex; flex-wrap: wrap; gap: 8px; }
+.grid-picker-names button { display: grid; gap: 2px; padding: 9px 12px; border: 1px solid #b9d7e4; border-radius: 9px; background: #fff; color: #17324d; font: inherit; text-align: left; cursor: pointer; }
+.grid-picker-names button:hover, .grid-picker-names button:focus-visible { border-color: #167da5; }
+.grid-picker-names button small { color: #167da5; font-weight: 600; }
+.grid-picker-owner { margin: 0 0 6px; color: #31566b; font-size: 12px; }
+.grid-picker-owner button { margin-left: 6px; border: 0; background: none; color: #167da5; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }

@@ -179,8 +179,13 @@ let gridSearchTimer;
 let gridSearchRequest;
 function updateFullInventoryLink(name) {
   const url = new URL(inventoryGridPicker.dataset.inventoryUrl, window.location.origin);
-  if (name) url.searchParams.set('username', name);
-  else url.searchParams.delete('username');
+  if (name) {
+    url.searchParams.set('username', name);
+    url.searchParams.set('booking_name', name);
+  } else {
+    url.searchParams.delete('username');
+    url.searchParams.delete('booking_name');
+  }
   const slotType = document.getElementById('reg_type').value;
   if (slotType === 'screening' || slotType === 'datacollecting') {
     url.searchParams.set('select', '1');
@@ -203,20 +208,45 @@ function showGridSearchMessage(message) {
   emptyMessage.textContent = message;
   inventoryGridResults.append(emptyMessage);
 }
-function renderAvailableGrids(grids) {
+// Recorded name whose grids are shown, when the user picked one of the
+// "Is this you?" choices (it can differ from the name typed above).
+let inventoryOwner = '';
+function renderAvailableGrids(grids, suggestions = [], owner = '') {
+  const typed = userNameInput.value.trim();
   inventoryGridResults.replaceChildren();
-  if (!grids.length) {
-    showGridSearchMessage('No available grids are recorded for this username. Search the full inventory below to see whether other grids are recorded.');
-    return;
+  if (grids.length) {
+    window.AccemGridPicker.render(inventoryGridResults, grids, {
+      inputName: 'inventory_grid_codes',
+      limit: 4,
+      onChange: updateGridCount,
+    });
   }
-  window.AccemGridPicker.render(inventoryGridResults, grids, {
-    inputName: 'inventory_grid_codes',
-    limit: 4,
-    onChange: updateGridCount,
-  });
+  if (owner) {
+    window.AccemGridPicker.renderOwnerNote(inventoryGridResults, owner, () => {
+      inventoryOwner = '';
+      searchMatchingGrids();
+    });
+  }
+  if (!owner && suggestions.length) {
+    window.AccemGridPicker.renderNameChoices(
+      inventoryGridResults,
+      suggestions,
+      grids.length
+        ? 'Also recorded under a similar name. Is one of these you too?'
+        : `No grids are recorded under exactly “${typed}”. Is one of these you?`,
+      name => searchMatchingGrids(name),
+    );
+  }
+  if (!grids.length && !(suggestions.length && !owner)) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-message';
+    empty.textContent = 'No available grids are recorded for this name. Search the full inventory below to see whether other grids are recorded.';
+    inventoryGridResults.append(empty);
+  }
 }
-async function searchMatchingGrids() {
+async function searchMatchingGrids(owner) {
   const name = userNameInput.value.trim();
+  inventoryOwner = typeof owner === 'string' ? owner : '';
   updateFullInventoryLink(name);
   if (!name) {
     showGridSearchMessage('Enter your name above to check for matching grids.');
@@ -226,13 +256,13 @@ async function searchMatchingGrids() {
   gridSearchRequest = new AbortController();
   showGridSearchMessage('Checking for matching grids…');
   const searchUrl = new URL(inventoryGridPicker.dataset.searchUrl, window.location.origin);
-  searchUrl.searchParams.set('user_name', name);
+  searchUrl.searchParams.set('user_name', inventoryOwner || name);
   try {
     const response = await fetch(searchUrl, { signal: gridSearchRequest.signal });
     if (!response.ok) throw new Error(`Grid search failed with status ${response.status}.`);
     const result = await response.json();
     if (!Array.isArray(result.grids)) throw new Error('Grid search returned an invalid response.');
-    renderAvailableGrids(result.grids);
+    renderAvailableGrids(result.grids, Array.isArray(result.suggestions) ? result.suggestions : [], inventoryOwner);
     inventoryGridCount.readOnly = false;
     inventoryGridCount.value = '';
     return result.grids;
@@ -257,7 +287,10 @@ window.addEventListener('message', async event => {
   const previouslySelected = [
     ...inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]:checked'),
   ].map(checkbox => checkbox.value);
-  const availableGrids = await searchMatchingGrids();
+  const availableGrids = await searchMatchingGrids(
+    typeof event.data.owner === 'string' && event.data.owner.trim() !== userNameInput.value.trim()
+      ? event.data.owner.trim() : undefined,
+  );
   if (event.data.username.trim().toLocaleLowerCase() !== userNameInput.value.trim().toLocaleLowerCase()) return;
 
   const availableCodes = new Set(availableGrids.map(grid => grid.grid_code));
@@ -290,7 +323,7 @@ userNameInput.addEventListener('input', () => {
   inventoryGridCount.readOnly = false;
   inventoryGridCount.value = '';
   showGridSearchMessage('Checking for matching grids…');
-  gridSearchTimer = setTimeout(searchMatchingGrids, 300);
+  gridSearchTimer = setTimeout(() => searchMatchingGrids(), 300);
 });
 const freezingDate = document.getElementById('freezing_date');
 freezingDate.addEventListener('change', () => {
