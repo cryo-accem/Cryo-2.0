@@ -289,17 +289,17 @@ class GridInventoryTests(unittest.TestCase):
             r'class="inventory-storage-code inventory-storage-code--f"[^>]*>F</span>',
         )
         self.assertIn(
-            f'<article class="inventory-metric inventory-metric--frozen"><span>Frozen</span>',
+            'inventory-metric--frozen" href="/admin/inventory/grids?status=Frozen#inventory-results"',
             content,
         )
-        self.assertIn('class="inventory-metric inventory-metric--stored"><span>Stored</span>', content)
-        self.assertIn('class="inventory-metric inventory-metric--clipped"><span>Clipped</span>', content)
-        self.assertIn('class="inventory-metric inventory-metric--discarded"><span>Discarded</span>', content)
-        self.assertIn('class="inventory-metric inventory-metric--in-microscope"><span>In microscope</span>', content)
-        self.assertIn('class="inventory-breakdown--status inventory-status--stored"', content)
-        self.assertIn('class="inventory-breakdown--status inventory-status--clipped"', content)
-        self.assertIn('class="inventory-breakdown--status inventory-status--discarded"', content)
-        self.assertIn('class="inventory-breakdown--status inventory-status--in-microscope"', content)
+        self.assertIn('inventory-metric--stored" href="/admin/inventory/grids?status=Stored#inventory-results"', content)
+        self.assertIn('inventory-metric--clipped" href="/admin/inventory/grids?status=Clipped#inventory-results"', content)
+        self.assertIn('inventory-metric--discarded" href="/admin/inventory/grids?status=Discarded#inventory-results"', content)
+        self.assertIn('inventory-metric--in-microscope" href="/admin/inventory/grids?status=In+Data+Collection#inventory-results"', content)
+        self.assertIn('inventory-breakdown--link inventory-status--stored"', content)
+        self.assertIn('inventory-breakdown--link inventory-status--clipped"', content)
+        self.assertIn('inventory-breakdown--link inventory-status--discarded"', content)
+        self.assertIn('inventory-breakdown--link inventory-status--in-microscope"', content)
         self.assertIn("To open or manage a grid, use Search grids.", content)
         storage_map = re.search(
             r'<section class="inventory-panel inventory-storage-map">(.*?)'

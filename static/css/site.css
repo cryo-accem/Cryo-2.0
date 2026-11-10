@@ -3773,3 +3773,24 @@ html.lightbox-open { overflow: hidden; }
 }
 .history-filter-count { align-self: center; color: #31566b; font-size: 12px; font-weight: 600; }
 [data-history-panel].is-filtered-empty { display: none; }
+
+/* Inventory overview: status tiles open Search grids filtered to that status. */
+a.inventory-metric--link { display: block; color: inherit; text-decoration: none; cursor: pointer; transition: transform .15s ease, box-shadow .15s ease; }
+a.inventory-metric--link:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(18, 61, 97, .12); }
+a.inventory-metric--link:focus-visible { outline: 3px solid #2f6f9f; outline-offset: 2px; }
+.inventory-metric .inventory-metric__go span { display: inline; }
+.inventory-metric__go { display: block; margin-top: 8px; color: var(--inventory-status-fg, #3d5f78); font-size: 11px; font-weight: 600; opacity: .75; }
+a.inventory-metric--link:hover .inventory-metric__go { opacity: 1; text-decoration: underline; }
+a.inventory-breakdown--link { color: inherit; text-decoration: none; }
+a.inventory-breakdown--link:hover { box-shadow: 0 4px 12px rgba(18, 61, 97, .12); }
+a.inventory-breakdown--link:focus-visible { outline: 3px solid #2f6f9f; outline-offset: 2px; }
+
+/* Search grids: status chips and the active-filter banner. */
+.inventory-status-chips { scroll-margin-top: 84px; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.inventory-status-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border: 1px solid var(--inventory-status-border, #d9e5ec); border-radius: 999px; background: var(--inventory-status-bg, #fff); color: var(--inventory-status-fg, #123d61); font-size: 13px; font-weight: 600; text-decoration: none; }
+.inventory-status-chip strong { font-size: 13px; }
+.inventory-status-chip:hover { box-shadow: 0 3px 10px rgba(18, 61, 97, .12); }
+.inventory-status-chip.is-active { border-color: var(--inventory-status-accent, #123d61); box-shadow: inset 0 0 0 2px var(--inventory-status-accent, #123d61); }
+.inventory-status-chip:focus-visible { outline: 3px solid #2f6f9f; outline-offset: 2px; }
+.inventory-panel > .inventory-filter-banner { font-size: 14px; line-height: 1.5; margin: 0 0 14px; padding: 10px 14px; border: 1px solid var(--inventory-status-border, #d9e5ec); border-left: 4px solid var(--inventory-status-accent, #123d61); border-radius: 8px; background: var(--inventory-status-bg, #f3f7fa); color: var(--inventory-status-fg, #123d61); }
+.inventory-panel > .inventory-filter-banner a { margin-left: 6px; font-weight: 600; }

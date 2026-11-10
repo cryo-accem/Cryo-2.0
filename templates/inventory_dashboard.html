@@ -11,8 +11,8 @@
     <a href="{{ url_for('inventory.activity') }}">Activity history</a>
   </nav>
   <section class="inventory-metrics" aria-label="Grid totals">
-    {% for label, value, status_class in [('Total grids', counts.total or 0, 'total'), ('Frozen', counts.frozen or 0, 'frozen'), ('Clipped', counts.clipped or 0, 'clipped'), ('Stored', counts.stored or 0, 'stored'), ('In microscope', counts.collecting or 0, 'in-microscope'), ('Discarded', counts.discarded or 0, 'discarded')] %}
-    <article class="inventory-metric inventory-metric--{{ status_class }}"><span>{{ label }}</span><strong>{{ value }}</strong></article>
+    {% for label, value, status_class, status_filter in [('Total grids', counts.total or 0, 'total', ''), ('Frozen', counts.frozen or 0, 'frozen', 'Frozen'), ('Clipped', counts.clipped or 0, 'clipped', 'Clipped'), ('Stored', counts.stored or 0, 'stored', 'Stored'), ('In microscope', counts.collecting or 0, 'in-microscope', 'In Data Collection'), ('Discarded', counts.discarded or 0, 'discarded', 'Discarded')] %}
+    <a class="inventory-metric inventory-metric--link inventory-metric--{{ status_class }}" href="{{ url_for('inventory.grids', status=status_filter) if status_filter else url_for('inventory.grids') }}#inventory-results" aria-label="{{ value }} {{ label|lower }}{{ ' grids' if status_filter else '' }} — view in Search grids"><span>{{ label }}</span><strong>{{ value }}</strong><small class="inventory-metric__go">View grids <span aria-hidden="true">→</span></small></a>
     {% endfor %}
   </section>
   <section class="inventory-panel inventory-storage-map">
@@ -73,7 +73,7 @@
       {% if by_type %}<div class="inventory-breakdown">{% for item in by_type %}<div><span>{{ item.grid_type_name }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grids have been registered.</p>{% endif %}
     </section>
     <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Lifecycle</span><h2>Grids by status</h2></div></div>
-      {% if by_status %}<div class="inventory-breakdown">{% for item in by_status %}<div class="inventory-breakdown--status inventory-status--{{ 'in-microscope' if item.current_status == 'In Data Collection' else item.current_status|lower|replace(' ','-') }}"><span>{{ 'In microscope' if item.current_status == 'In Data Collection' else item.current_status }}</span><strong>{{ item.count }}</strong></div>{% endfor %}</div>{% else %}<p class="empty-message">No grid status data yet.</p>{% endif %}
+      {% if by_status %}<div class="inventory-breakdown">{% for item in by_status %}<a class="inventory-breakdown--status inventory-breakdown--link inventory-status--{{ 'in-microscope' if item.current_status == 'In Data Collection' else item.current_status|lower|replace(' ','-') }}" href="{{ url_for('inventory.grids', status=item.current_status) }}#inventory-results"><span>{{ 'In microscope' if item.current_status == 'In Data Collection' else item.current_status }}</span><strong>{{ item.count }}</strong></a>{% endfor %}</div>{% else %}<p class="empty-message">No grid status data yet.</p>{% endif %}
     </section>
   </div>
   <section class="inventory-panel inventory-recent"><div class="inventory-panel__heading"><div><span class="chart-kicker">Audit trail</span><h2>Recent activity</h2></div><a class="button small secondary" href="{{ url_for('inventory.activity') }}">View full history</a></div>

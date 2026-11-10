@@ -13,6 +13,7 @@ from inventory_service import (
     InventoryError, activity_page, all_grid_types, available_grid_bookings,
     available_session_grids, booking_grid_links_for_bookings,
     complete_session_grid, create_data_session, create_grid_type, dashboard_data,
+    GRID_STATUS_FILTERS, grid_status_counts,
     dashboard_storage, facility_time, grid_booking_links, grid_details,
     humanize_grid_codes,
     iter_export_events, iter_export_grid_rows, list_accounts, list_grid_types,
@@ -152,6 +153,15 @@ def grids():
         previous_url=previous_url,
         next_url=next_url,
         grid_types=types,
+        status_filters=GRID_STATUS_FILTERS,
+        status_counts=grid_status_counts(),
+        status_links={
+            value: url_for("inventory.grids", **{**query_args, "status": value})
+            for value, _label, _css in GRID_STATUS_FILTERS
+        },
+        all_status_url=url_for(
+            "inventory.grids", **{k: v for k, v in query_args.items() if k != "status"}
+        ),
     )
 
 

@@ -16,8 +16,18 @@
     <label>Grid box<input name="box" value="{{ filters.get('box','') }}"></label>
     <label class="inventory-filter-actions"><button class="button small" type="submit">Apply filters</button><a class="button small secondary" href="{{ url_for('inventory.grids') }}">Clear</a></label>
   </form>
+  {% set active_status = filters.get('status', '') %}
+  <nav class="inventory-status-chips" id="inventory-results" aria-label="Filter grids by status">
+    <a class="inventory-status-chip inventory-status-chip--all{% if not active_status %} is-active{% endif %}" href="{{ all_status_url }}#inventory-results"{% if not active_status %} aria-current="true"{% endif %}><span>All grids</span><strong>{{ status_counts.values()|sum }}</strong></a>
+    {% for value, label, css in status_filters %}
+    <a class="inventory-status-chip inventory-status--{{ css }}{% if active_status == value %} is-active{% endif %}" href="{{ status_links[value] }}#inventory-results"{% if active_status == value %} aria-current="true"{% endif %}><span>{{ label }}</span><strong>{{ status_counts.get(value, 0) }}</strong></a>
+    {% endfor %}
+  </nav>
   <section class="inventory-panel">
-    <div class="inventory-panel__heading"><div><h2>Inventory results</h2><p>{{ total }} grid(s) in {{ total_boxes }} box group(s). Showing box groups {{ first_box }}–{{ last_box }}. Open a box to see individual grids.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
+    {% if active_status %}{% set active_label = {'In Data Collection': 'In microscope'}.get(active_status, active_status) %}
+    <p class="inventory-filter-banner inventory-status--{{ 'in-microscope' if active_status == 'In Data Collection' else active_status|lower|replace(' ','-') }}">Showing only <strong>{{ active_label }}</strong> grids. <a href="{{ all_status_url }}#inventory-results">Show all statuses</a></p>
+    {% endif %}
+    <div class="inventory-panel__heading"><div><h2>{% if active_status %}{{ active_label }} grids{% else %}Inventory results{% endif %}</h2><p>{{ total }} grid(s) in {{ total_boxes }} box group(s). Showing box groups {{ first_box }}–{{ last_box }}. Open a box to see individual grids.</p></div><a class="button small secondary" href="{{ export_url }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Export filtered CSV</a></div>
     <form id="bulk-clipping-form" method="post" action="{{ url_for('inventory.bulk_clipping') }}" onsubmit="return confirmBulkAction(this, event)">
       <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
       {% if rows %}<div class="inventory-bulk-controls">
@@ -32,7 +42,7 @@
             <header class="inventory-search-falcon__heading"><h3>{{ falcon }}</h3><span>{{ falcon_grids|length }} matching grid(s)</span></header>
             <div class="inventory-search-boxes">
               {% for box, box_grids in falcon_grids|groupby('storage_box_group') %}
-                <details class="inventory-search-box">
+                <details class="inventory-search-box"{% if active_status %} open{% endif %}>
                   <summary>
                     <strong>{{ box }}</strong>
                     <span>{{ box_grids|length }} grid(s)</span>

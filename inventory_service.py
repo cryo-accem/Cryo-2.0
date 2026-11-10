@@ -2363,6 +2363,30 @@ def search_grid_box_groups(args, page=1, page_size=40):
         connection.close()
 
 
+GRID_STATUS_FILTERS = (
+    ("Frozen", "Frozen", "frozen"),
+    ("Clipped", "Clipped", "clipped"),
+    ("Stored", "Stored", "stored"),
+    ("In Data Collection", "In microscope", "in-microscope"),
+    ("Discarded", "Discarded", "discarded"),
+)
+
+
+def grid_status_counts():
+    """Grid counts per lifecycle status, for the status chips on Search grids."""
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        cursor.execute(
+            "SELECT current_status, COUNT(*) AS count FROM inventory_grids GROUP BY current_status"
+        )
+        counts = {row["current_status"]: int(row["count"]) for row in cursor.fetchall()}
+    finally:
+        cursor.close()
+        connection.close()
+    return counts
+
+
 def dashboard_data():
     connection = get_db()
     cursor = connection.cursor()
