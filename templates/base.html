@@ -11,8 +11,10 @@
   <meta property="og:title" content="{{ self.title()|trim }}">
   <meta property="og:description" content="{{ self.meta_description()|trim }}">
   <meta property="og:image" content="{{ url_for('static', filename='images/cover-equipment-1600w.webp', _external=True) }}">
-  <link rel="icon" href="{{ url_for('static', filename='images/favicon.svg') }}" type="image/svg+xml">
   <link rel="icon" href="{{ url_for('static', filename='images/favicon-32.png') }}" type="image/png" sizes="32x32">
+  <link rel="icon" href="{{ url_for('static', filename='images/favicon-16.png') }}" type="image/png" sizes="16x16">
+  <link rel="icon" href="{{ url_for('static', filename='images/icon-192.png') }}" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='images/apple-touch-icon.png') }}">
   <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-wght-normal.woff2', v='5.1.0') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/fa-subset.css') }}">

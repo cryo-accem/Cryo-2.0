@@ -3,7 +3,7 @@ import datetime
 import hashlib
 import secrets
 from hmac import compare_digest
-from flask import Flask, abort, flash, jsonify, redirect, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, request, send_from_directory, session, url_for
 from werkzeug.security import safe_join
 from flask_compress import Compress
 
@@ -260,6 +260,14 @@ def create_app() -> Flask:
     app.register_blueprint(register_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(inventory_bp)
+
+    @app.route("/favicon.ico")
+    def favicon():
+        # Browsers ask for /favicon.ico directly: serve the IISc logo icon.
+        return send_from_directory(
+            os.path.join(app.static_folder, "images"), "favicon.ico",
+            mimetype="image/vnd.microsoft.icon", max_age=86400,
+        )
 
     with app.app_context():
         init_db()
