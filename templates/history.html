@@ -130,7 +130,7 @@
                 <label>Gold / graphene grids<input type="number" name="gold_grids" min="0" value="{{ slot.grid_breakdown.gold_carbon_graphene if slot.grid_breakdown else '' }}"></label>
                 {% if service_key != 'freezing' %}
                 <label>Clipped grids<input type="number" name="clipped_grids" min="0" value="{{ slot.clipped_grids or 0 }}"></label>
-                <label class="history-edit__check"><input type="checkbox" name="processing_requested" value="1" {{ 'checked' if slot.processing_requested else '' }}> Data processing requested</label>
+                <label class="history-edit__check"><input type="checkbox" name="processing_requested" value="1" {{ 'checked' if slot.processing_requested else '' }}> Data processing requested (industry only)</label>
                 {% endif %}
                 <button class="button small" type="submit">Save changes &amp; recalculate charges</button>
               </form>

@@ -3,52 +3,80 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css', v='20261103-storage-name-suggestions-v1') }}">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script src="{{ url_for('static', filename='js/nav.js') }}"></script>
+  <meta name="description" content="{% block meta_description %}Advanced Centre for Cryo-Electron Microscopy (ACCEM) at the Indian Institute of Science, Bengaluru: Talos Arctica cryo-TEM, sample preparation, grid screening, data collection and slot booking.{% endblock %}">
+  <meta name="theme-color" content="#061a35">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ACCEM, IISc">
+  <meta property="og:title" content="{{ self.title()|trim }}">
+  <meta property="og:description" content="{{ self.meta_description()|trim }}">
+  <meta property="og:image" content="{{ url_for('static', filename='images/cover-equipment-1600w.webp', _external=True) }}">
+  <link rel="icon" href="{{ url_for('static', filename='images/favicon.svg') }}" type="image/svg+xml">
+  <link rel="icon" href="{{ url_for('static', filename='images/favicon-32.png') }}" type="image/png" sizes="32x32">
+  <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-wght-normal.woff2', v='5.1.0') }}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/fa-subset.css') }}">
   <title>{% block title %}{% if page_content %}ACCEM | {{ page_content.title }}{% else %}ACCEM | Cryo-Electron Microscopy{% endif %}{% endblock %}</title>
 </head>
 <body class="{% if request.path.startswith('/admin') and request.path != '/admin/' %}admin-area{% endif %}">
+<a class="skip-link" href="#main-content">Skip to main content</a>
 <div class="site-shell">
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="{{ url_for('admin.login') }}" aria-label="Admin login">
-        <img class="brand-mark" src="{{ url_for('static', filename='images/iisc_logo.webp') }}" alt="Indian Institute of Science" decoding="async">
+      <a class="brand" href="{{ url_for('public.home') }}" aria-label="ACCEM home">
+        <img class="brand-mark" src="{{ url_for('static', filename='images/iisc_logo-64w.webp') }}" srcset="{{ url_for('static', filename='images/iisc_logo-64w.webp') }} 64w, {{ url_for('static', filename='images/iisc_logo-128w.webp') }} 128w, {{ url_for('static', filename='images/iisc_logo-192w.webp') }} 192w" sizes="50px" width="384" height="384" alt="Indian Institute of Science" decoding="async">
         <span><strong>ACCEM</strong><small>Advanced Centre for<br>Cryo-Electron Microscopy</small></span>
       </a>
       {% if request.path.startswith('/admin') and request.path != '/admin/' %}
       <div class="admin-header-context"><span>ACCEM</span><small>Admin workspace</small></div>
       {% else %}
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="{{ url_for('public.home') }}">Home</a>
-        <a href="{{ url_for('public.about') }}">About</a>
-        <a href="{{ url_for('public.facility') }}">Instructions</a>
-        <a href="{{ url_for('public.equipments') }}">Equipments</a>
-        <a href="{{ url_for('public.workflow') }}">Workflow</a>
-        <a href="{{ url_for('public.publications') }}">Publications</a>
-        <a href="{{ url_for('public.events') }}">Events</a>
-        <a href="{{ url_for('public.team') }}">Team</a>
-        <a class="portal-link" href="{{ url_for('register.register') }}">Book slots</a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav"><i class="fa-solid fa-bars" aria-hidden="true"></i><span>Menu</span></button>
+      {% set nav_endpoint = request.endpoint or '' %}
+      {% set facility_pages = ['public.about', 'public.equipments', 'public.workflow', 'public.team'] %}
+      {% set using_pages = ['public.facility', 'public.rates', 'public.faq'] %}
+      <nav class="site-nav" id="primary-nav" aria-label="Primary navigation">
+        <a href="{{ url_for('public.home') }}"{% if nav_endpoint == 'public.home' %} class="active" aria-current="page"{% endif %}>Home</a>
+        <div class="nav-group{% if nav_endpoint in facility_pages %} is-current{% endif %}">
+          <button class="nav-group__toggle" type="button" aria-expanded="false" aria-controls="nav-menu-facility">Facility <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+          <div class="nav-group__menu" id="nav-menu-facility">
+            <a href="{{ url_for('public.about') }}"{% if nav_endpoint == 'public.about' %} class="active" aria-current="page"{% endif %}>About</a>
+            <a href="{{ url_for('public.equipments') }}"{% if nav_endpoint == 'public.equipments' %} class="active" aria-current="page"{% endif %}>Equipment</a>
+            <a href="{{ url_for('public.workflow') }}"{% if nav_endpoint == 'public.workflow' %} class="active" aria-current="page"{% endif %}>Workflow</a>
+            <a href="{{ url_for('public.team') }}"{% if nav_endpoint == 'public.team' %} class="active" aria-current="page"{% endif %}>Team</a>
+          </div>
+        </div>
+        <div class="nav-group{% if nav_endpoint in using_pages %} is-current{% endif %}">
+          <button class="nav-group__toggle" type="button" aria-expanded="false" aria-controls="nav-menu-using">Using ACCEM <i class="fa-solid fa-chevron-down" aria-hidden="true"></i></button>
+          <div class="nav-group__menu" id="nav-menu-using">
+            <a href="{{ url_for('public.facility') }}"{% if nav_endpoint == 'public.facility' %} class="active" aria-current="page"{% endif %}>Instructions</a>
+            <a href="{{ url_for('public.rates') }}"{% if nav_endpoint == 'public.rates' %} class="active" aria-current="page"{% endif %}>Rates</a>
+            <a href="{{ url_for('public.faq') }}"{% if nav_endpoint == 'public.faq' %} class="active" aria-current="page"{% endif %}>FAQ</a>
+          </div>
+        </div>
+        <a href="{{ url_for('public.publications') }}"{% if nav_endpoint == 'public.publications' %} class="active" aria-current="page"{% endif %}>Publications</a>
+        <a href="{{ url_for('public.events') }}"{% if nav_endpoint == 'public.events' or nav_endpoint == 'public.community_gallery' %} class="active" aria-current="page"{% endif %}>Events</a>
+        <a class="portal-link{% if nav_endpoint == 'register.register' %} active{% endif %}" href="{{ url_for('register.register') }}"{% if nav_endpoint == 'register.register' %} aria-current="page"{% endif %}>Book slots</a>
+        <a class="staff-login" href="{{ url_for('admin.login') }}" title="Staff login" aria-label="Staff login"><i class="fa-solid fa-lock" aria-hidden="true"></i><span class="staff-login-label">Staff login</span></a>
       </nav>
       {% endif %}
     </div>
   </header>
   {% if facility_notices and not request.path.startswith('/admin') %}
-  <aside class="facility-notice" aria-label="Facility announcements">
-    <div class="facility-notice__label"><i class="fa-solid fa-bell" aria-hidden="true"></i><span>Facility updates</span></div>
+  <aside class="facility-notice notice-strip" aria-label="Facility announcements" data-notice-strip>
+    <div class="facility-notice__label"><i class="fa-solid fa-bell" aria-hidden="true"></i><span>Notice</span></div>
     <div class="facility-notice__items">
       {% for notice in facility_notices %}
-      <article class="facility-notice__item">
-        <strong>{{ notice.title }}</strong>
-        {% if notice.event_date %}<time datetime="{{ notice.event_date }}">{{ notice.event_date.strftime('%b %d, %Y') if notice.event_date.strftime is defined else notice.event_date }}</time>{% endif %}
-        <span>{{ notice.message }}</span>
-        {% if notice.link_url %}<a href="{{ notice.link_url }}" target="_blank" rel="noopener noreferrer">More details <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}
+      <article class="facility-notice__item notice-item" data-notice-id="{{ notice.id }}">
+        {% if notice.event_date %}<time class="notice-date" datetime="{{ notice.event_date.isoformat() if notice.event_date.isoformat is defined else notice.event_date }}">{{ notice.event_date.strftime('%d %b %Y') if notice.event_date.strftime is defined else notice.event_date }}</time>{% endif %}
+        <div class="notice-body">
+          <strong class="notice-title">{{ notice.title }}</strong>
+          <span class="notice-message">{{ notice.message }}</span>
+          {% if notice.link_url %}<a class="notice-link" href="{{ notice.link_url }}" target="_blank" rel="noopener noreferrer">More details <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}
+        </div>
       </article>
       {% endfor %}
     </div>
-    <button class="facility-notice__dismiss" type="button" aria-label="Dismiss facility announcements"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
+    <button class="facility-notice__dismiss" type="button" aria-label="Dismiss facility announcements" title="Dismiss"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>
   </aside>
   {% endif %}
   {% if request.path.startswith('/admin') and request.path != '/admin/' %}
@@ -65,10 +93,12 @@
       <a class="{% if request.path.startswith('/admin/history') %}active{% endif %}" href="{{ url_for('admin.history') }}"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i><span>Billing &amp; Payments</span></a>
       <div class="admin-sidebar__label">Website</div>
       <a class="{% if request.path.startswith('/admin/maintenance') %}active{% endif %}" href="{{ url_for('admin.maintenance') }}"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>Maintenance</span></a>
+      <a class="{% if request.path.startswith('/admin/publications') %}active{% endif %}" href="{{ url_for('admin.publication_finder') }}"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Publication finder</span></a>
     </nav>
     <a class="admin-sidebar__logout" href="{{ url_for('admin.logout') }}"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Logout</span></a>
   </aside>
   {% endif %}
+  <span id="main-content" class="skip-target" tabindex="-1"></span>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
     <div class="flash-messages" role="status">{% for category, message in messages %}<div class="flash-message flash-message--{{ category }}">{{ message }}</div>{% endfor %}</div>
@@ -101,250 +131,58 @@
   {% endif %}
   {% if not request.path.startswith('/admin') or request.path == '/admin/' %}
   <footer class="site-footer">
-    <div class="footer-grid">
-      <div><h3>ACCEM</h3><p>Advanced Centre for Cryo-Electron Microscopy<br>Indian Institute of Science, Bengaluru</p></div>
-      <div><h3>Contact</h3><p>cryoem.iisc@gmail.com<br>somnath@iisc.ac.in</p></div>
-      <div><h3>Quick links</h3><a href="{{ url_for('public.facility') }}">Instructions</a><a href="{{ url_for('public.equipments') }}">Equipments</a><a href="{{ url_for('public.publications') }}">Publications</a><a href="{{ url_for('public.events') }}">Events</a></div>
-      <div><h3>Connect</h3><a href="{{ url_for('register.register') }}">Register for a slot</a><a href="{{ url_for('imaging.list_view') }}">Data collection schedule</a></div>
+    <div class="footer-v2">
+      <div class="footer-v2__brand">
+        <a class="footer-v2__logo" href="{{ url_for('public.home') }}" aria-label="ACCEM home">
+          <img src="{{ url_for('static', filename='images/iisc_logo-64w.webp') }}" srcset="{{ url_for('static', filename='images/iisc_logo-64w.webp') }} 64w, {{ url_for('static', filename='images/iisc_logo-128w.webp') }} 128w" sizes="44px" width="384" height="384" alt="" decoding="async" loading="lazy">
+          <span><strong>ACCEM</strong><small>Advanced Centre for Cryo-Electron Microscopy</small></span>
+        </a>
+        <p class="footer-v2__about">Cryo-electron microscopy facility at the Indian Institute of Science, Bengaluru, open to academic and industry researchers.</p>
+        <a class="footer-v2__cta" href="{{ url_for('register.register') }}">Book a slot <span aria-hidden="true">→</span></a>
+      </div>
+      <nav class="footer-v2__col" aria-label="Facility">
+        <h3>Facility</h3>
+        <a href="{{ url_for('public.about') }}">About</a>
+        <a href="{{ url_for('public.equipments') }}">Equipment</a>
+        <a href="{{ url_for('public.workflow') }}">Workflow</a>
+        <a href="{{ url_for('public.team') }}">Team</a>
+        <a href="{{ url_for('public.publications') }}">Publications</a>
+        <a href="{{ url_for('public.events') }}">Events</a>
+      </nav>
+      <nav class="footer-v2__col" aria-label="Using ACCEM">
+        <h3>Using ACCEM</h3>
+        <a href="{{ url_for('public.facility') }}">Instructions</a>
+        <a href="{{ url_for('public.rates') }}">Rates</a>
+        <a href="{{ url_for('public.faq') }}">FAQ</a>
+        <a href="{{ url_for('public.grid_inventory') }}">Find your grids</a>
+        <a href="{{ url_for('imaging.list_view') }}">Data collection schedule</a>
+      </nav>
+      <div class="footer-v2__col footer-v2__contact">
+        <h3>Contact</h3>
+        <a href="mailto:cryoem.iisc@gmail.com"><i class="fa-solid fa-envelope" aria-hidden="true"></i>cryoem.iisc@gmail.com</a>
+        <a href="mailto:somnath@iisc.ac.in"><i class="fa-solid fa-envelope" aria-hidden="true"></i>somnath@iisc.ac.in</a>
+        <address>Indian Institute of Science<br>Bengaluru 560012, India</address>
+        <a class="contact-directions" href="https://www.google.com/maps/search/?api=1&amp;query=Indian+Institute+of+Science+Bengaluru" target="_blank" rel="noopener">Directions <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span class="footer-sr-only"> (opens in a new tab)</span></a>
+        <a href="{{ url_for('public.contact') }}">Contact us</a>
+      </div>
     </div>
-    <div class="copyright">Copyright © {{ current_year }} Advanced Centre for Cryo-Electron Microscopy (ACCEM), IISc. All Rights Reserved.</div>
+    <div class="footer-v2__bottom">
+      <p>© {{ current_year }} Advanced Centre for Cryo-Electron Microscopy (ACCEM), IISc. All rights reserved.</p>
+      <p class="footer-funding">Funded by the Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST.</p>
+      <p class="footer-credits">Cover photos: <a href="https://commons.wikimedia.org/wiki/File:Main_Building,_Indian_Institute_of_Science,_Bangalore,_Karnataka,_India_(2017).jpg" target="_blank" rel="noopener">Sayantan Mondal</a> and <a href="https://commons.wikimedia.org/wiki/User:Popart87" target="_blank" rel="noopener">Artem Popovich</a> (Wikimedia Commons, <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener">CC BY-SA 4.0</a>).</p>
+    </div>
   </footer>
   {% endif %}
 </div>
-<script>
-document.querySelectorAll(".facility-notice__dismiss").forEach((button) => {
-  button.addEventListener("click", () => button.closest(".facility-notice")?.remove());
-});
-</script>
-<script>
-// Initialize donut chart tooltips
-document.querySelectorAll('[data-donut]').forEach((donut) => {
-  const tooltip = donut.querySelector('.donut-tooltip');
-  donut.querySelectorAll('.donut-segment').forEach((segment) => {
-    const showTooltip = () => {
-      const value = document.createElement("strong");
-      value.textContent = segment.dataset.value;
-      tooltip.replaceChildren(
-        document.createTextNode(`${segment.dataset.label} `),
-        document.createElement("br"),
-        value,
-      );
-      tooltip.classList.add('is-visible');
-    };
-    const hideTooltip = () => tooltip.classList.remove('is-visible');
-    segment.addEventListener('mouseenter', showTooltip);
-    segment.addEventListener('mouseleave', hideTooltip);
-    segment.addEventListener('focus', showTooltip);
-    segment.addEventListener('blur', hideTooltip);
-  });
-});
-
-// Dynamic user statistics chart loader
-(function() {
-  let lastDataHash = null;
-
-  function hashData(data) {
-    return JSON.stringify(data).split('').reduce((a, b) => {
-      a = ((a << 5) - a) + b.charCodeAt(0);
-      return a & a;
-    }, 0);
-  }
-
-  async function loadUserStatistics() {
-    try {
-      const response = await fetch('/api/user-statistics');
-      if (!response.ok) throw new Error('Failed to fetch user statistics');
-      
-      const result = await response.json();
-      if (!result.success) throw new Error(result.error);
-
-      const dataHash = hashData(result.data);
-      
-      // Only update if data has changed
-      if (lastDataHash !== null && lastDataHash === dataHash) {
-        console.log('No changes in user statistics');
-        return;
-      }
-
-      lastDataHash = dataHash;
-      renderChart(result);
-    } catch (error) {
-      console.error('Error loading user statistics:', error);
-    }
-  }
-
-  function renderChart(result) {
-    const container = document.getElementById('user-stats-container');
-    if (!container) return;
-
-    const { total, data } = result;
-    
-    // Update total users count
-    const totalCountEl = document.getElementById('total-users-count');
-    if (totalCountEl) {
-      totalCountEl.textContent = "0 total users";
-      const start = performance.now();
-      const animateTotal = (now) => {
-        const progress = Math.min((now - start) / 1400, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-        totalCountEl.textContent = `${Math.floor(total * eased)} total users`;
-        if (progress < 1) requestAnimationFrame(animateTotal);
-      };
-      requestAnimationFrame(animateTotal);
-    }
-
-    // Create the chart and facility metric cards
-    const chartHTML = `
-      <article class="category-stat-card">
-        <div class="category-stat-card__heading">
-          <h3>User Distribution by Affiliation</h3>
-          <div><span>${total} users</span></div>
-        </div>
-        <div class="category-stat-card__body">
-          <div class="category-stat-card__chart donut-chart" data-donut>
-            <svg viewBox="0 0 120 120" role="img" aria-label="Users grouped by affiliation">
-              <circle class="donut-track" cx="60" cy="60" r="52" pathLength="100"></circle>
-              <g data-chart-segments></g>
-            </svg>
-            <div class="donut-center"><strong data-count-to="${total}">0</strong><span>users</span></div>
-            <div class="donut-tooltip" role="status"></div>
-          </div>
-        </div>
-      </article>
-      <article class="category-stat-card metric-card">
-        <div class="category-stat-card__heading">
-          <h3>Publications</h3>
-          <div><span>OpenAlex matches</span></div>
-        </div>
-        <div class="category-stat-card__body metric-card__body">
-          <i class="fa-solid fa-book-open metric-card__icon" aria-hidden="true"></i>
-          <strong class="metric-count" data-count-to="${result.metrics.publications}">0</strong>
-          <span>records mentioning ACCEM / cryo-EM IISc</span>
-        </div>
-      </article>
-      <article class="category-stat-card metric-card">
-        <div class="category-stat-card__heading">
-          <h3>EMDB structures</h3>
-          <div><span>PI-associated entries</span></div>
-        </div>
-        <div class="category-stat-card__body metric-card__body">
-          <i class="fa-solid fa-cubes metric-card__icon" aria-hidden="true"></i>
-          <strong class="metric-count" data-count-to="85" data-count-suffix="+">0</strong>
-          <span>structures deposited in EMDB</span>
-        </div>
-      </article>
-    `;
-
-    container.innerHTML = chartHTML;
-    const segmentGroup = container.querySelector("[data-chart-segments]");
-    const svgNamespace = "http://www.w3.org/2000/svg";
-    data.forEach((item) => {
-      const segment = document.createElementNS(svgNamespace, "circle");
-      segment.setAttribute("class", "donut-segment");
-      segment.setAttribute("tabindex", "0");
-      segment.setAttribute("role", "img");
-      segment.setAttribute("aria-label", `${item.label}: ${item.value} users`);
-      segment.setAttribute("cx", "60");
-      segment.setAttribute("cy", "60");
-      segment.setAttribute("r", "52");
-      segment.setAttribute("pathLength", "100");
-      segment.style.setProperty("--segment-color", item.color);
-      segment.style.strokeDasharray = `${item.end - item.start} 100`;
-      segment.style.strokeDashoffset = `-${item.start}`;
-      segment.dataset.label = item.label;
-      segment.dataset.value = `${item.value} users`;
-      segmentGroup.append(segment);
-    });
-    container.querySelectorAll("[data-count-to]").forEach((counter) => {
-      const target = Number(counter.dataset.countTo);
-      const suffix = counter.dataset.countSuffix || "";
-      const duration = 1400;
-      const start = performance.now();
-      const animate = (now) => {
-        const progress = Math.min((now - start) / duration, 1);
-        const eased = 1 - Math.pow(1 - progress, 3);
-        counter.textContent = `${Math.floor(target * eased)}${suffix}`;
-        if (progress < 1) requestAnimationFrame(animate);
-      };
-      requestAnimationFrame(animate);
-    });
-
-    // Re-initialize tooltips for the new chart
-    container.querySelectorAll('[data-donut]').forEach((donut) => {
-      const tooltip = donut.querySelector('.donut-tooltip');
-      donut.querySelectorAll('.donut-segment').forEach((segment) => {
-        const showTooltip = () => {
-          const value = document.createElement("strong");
-          value.textContent = segment.dataset.value;
-          tooltip.replaceChildren(
-            document.createTextNode(`${segment.dataset.label} `),
-            document.createElement("br"),
-            value,
-          );
-          tooltip.classList.add('is-visible');
-        };
-        const hideTooltip = () => tooltip.classList.remove('is-visible');
-        segment.addEventListener('mouseenter', showTooltip);
-        segment.addEventListener('mouseleave', hideTooltip);
-        segment.addEventListener('focus', showTooltip);
-        segment.addEventListener('blur', hideTooltip);
-      });
-    });
-  }
-
-  // Load on page load
-  if (window.location.pathname === '/home' || window.location.pathname === '/') {
-    loadUserStatistics();
-    
-    // Refresh every 30 seconds to check for new registrations
-    setInterval(loadUserStatistics, 30000);
-  }
-})();
-</script>
+<script src="{{ url_for('static', filename='js/site.js') }}" defer></script>
 {% if request.path.startswith('/admin') and request.path != '/admin/' %}
-<script>
-document.querySelectorAll('[data-admin-filter]').forEach((filter) => {
-  const scope = filter.closest('.data-stack');
-  const search = filter.querySelector('[data-table-search]');
-  const origin = filter.querySelector('[data-origin-filter]');
-  const rows = scope ? scope.querySelectorAll('.data-table tbody tr') : [];
-  const applyFilters = () => {
-    const query = (search?.value || '').trim().toLowerCase();
-    const selectedOrigin = (origin?.value || '').toLowerCase();
-    rows.forEach((row) => {
-      const matchesText = !query || row.textContent.toLowerCase().includes(query);
-      const matchesOrigin = !selectedOrigin || (row.dataset.origin || '').toLowerCase() === selectedOrigin;
-      row.hidden = !(matchesText && matchesOrigin);
-    });
-  };
-  search?.addEventListener('input', applyFilters);
-  origin?.addEventListener('change', applyFilters);
-});
-
-document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
-  const stack = tabs.nextElementSibling;
-  const panels = stack?.querySelectorAll('[data-history-panel]') || [];
-  tabs.querySelectorAll('[data-history-tab]').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const selectedService = tab.dataset.historyTab;
-      tabs.querySelectorAll('[data-history-tab]').forEach((item) => {
-        const active = item === tab;
-        item.classList.toggle('is-active', active);
-        item.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      panels.forEach((panel) => {
-        panel.hidden = selectedService !== 'all' && panel.dataset.historyPanel !== selectedService;
-      });
-    });
-  });
-});
-</script>
+<script src="{{ url_for('static', filename='js/admin.js') }}" defer></script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' and admin_assistant_enabled %}
-<script src="{{ url_for('static', filename='js/admin_assistant.js', v='20261013-mira-wav-audio') }}" defer></script>
+<script src="{{ url_for('static', filename='js/admin_assistant.js') }}" defer></script>
 {% endif %}
 {% if request.path.startswith('/admin') and request.path != '/admin/' %}
-<script src="{{ url_for('static', filename='js/storage_name_suggestions.js', v='20261103-storage-name-suggestions-v1') }}" data-suggestions-url="{{ url_for('inventory.storage_name_suggestions_json') }}" defer></script>
+<script src="{{ url_for('static', filename='js/storage_name_suggestions.js') }}" data-suggestions-url="{{ url_for('inventory.storage_name_suggestions_json') }}" defer></script>
 {% endif %}
 </body>
 </html>

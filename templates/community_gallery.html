@@ -2,21 +2,26 @@
 {% block title %}ACCEM | Community gallery{% endblock %}
 {% block content %}
 <main>
-  <section class="page-content">
+  <section class="page-content g2-page gallery-page">
     <header class="page-header page-header--events">
       <div><div class="eyebrow">ACCEM community</div><h1>Community gallery</h1><p>Snapshots from facility demonstrations, training sessions and cryo-EM work at ACCEM.</p></div>
     </header>
-    <section class="gallery-section">
-      <div class="section-heading"><h2>Inside the facility</h2><p>Explore the people, instruments and workflows that support our research community.</p></div>
-      <div class="community-gallery">
-        <figure><img src="{{ url_for('static', filename='images/school-outreach-iisc.webp') }}" alt="School Outreach Program at IISc" loading="lazy" decoding="async"><figcaption>School Outreach Program at IISc</figcaption></figure>
-        <figure><img src="{{ url_for('static', filename='images/pre-workshop-conference-embo.webp') }}" alt="Pre-Workshop Conference during EMBO (CEM3DIP)" loading="lazy" decoding="async"><figcaption>Pre-Workshop Conference during EMBO (CEM3DIP)</figcaption></figure>
-        <figure><img src="{{ url_for('static', filename='images/practical-demonstration-cce.webp') }}" alt="Practical Demonstration during CCE Course" loading="lazy" decoding="async"><figcaption>Practical Demonstration during CCE Course</figcaption></figure>
-        <figure><img src="{{ url_for('static', filename='images/school-outreach-iisc-2.webp') }}" alt="School Outreach Program at IISc" loading="lazy" decoding="async"><figcaption>School Outreach Program at IISc</figcaption></figure>
-        <figure><img src="{{ url_for('static', filename='images/school-outreach-iisc-3-jpe.webp') }}" alt="School Outreach program" loading="lazy" decoding="async"><figcaption>School Outreach program</figcaption></figure>
-        <figure><img src="{{ url_for('static', filename='images/practical-training-program.webp') }}" alt="Practical Training Program" loading="lazy" decoding="async"><figcaption>Practical Training Program</figcaption></figure>
+    <section class="gallery-section" aria-labelledby="gallery-title">
+      <div class="g2-head"><span class="g2-kicker">Photo gallery</span><h2 id="gallery-title">Inside the facility</h2><p>Explore the people, instruments and workflows that support our research community.</p></div>
+      <div class="community-gallery" data-lightbox-gallery="community">
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/school-outreach-iisc-400w.webp') }}" srcset="{{ url_for('static', filename='images/school-outreach-iisc-400w.webp') }} 400w, {{ url_for('static', filename='images/school-outreach-iisc-600w.webp') }} 600w, {{ url_for('static', filename='images/school-outreach-iisc-768w.webp') }} 768w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="768" height="1024" alt="School Outreach Program at IISc" decoding="async"><figcaption>School Outreach Program at IISc</figcaption></figure>
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/pre-workshop-conference-embo-400w.webp') }}" srcset="{{ url_for('static', filename='images/pre-workshop-conference-embo-400w.webp') }} 400w, {{ url_for('static', filename='images/pre-workshop-conference-embo-600w.webp') }} 600w, {{ url_for('static', filename='images/pre-workshop-conference-embo-800w.webp') }} 800w, {{ url_for('static', filename='images/pre-workshop-conference-embo-1024w.webp') }} 1024w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="1024" height="768" alt="Pre-Workshop Conference during EMBO (CEM3DIP)" loading="lazy" decoding="async"><figcaption>Pre-Workshop Conference during EMBO (CEM3DIP)</figcaption></figure>
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/practical-demonstration-cce-400w.webp') }}" srcset="{{ url_for('static', filename='images/practical-demonstration-cce-400w.webp') }} 400w, {{ url_for('static', filename='images/practical-demonstration-cce-600w.webp') }} 600w, {{ url_for('static', filename='images/practical-demonstration-cce-800w.webp') }} 800w, {{ url_for('static', filename='images/practical-demonstration-cce-1024w.webp') }} 1024w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="1024" height="768" alt="Practical Demonstration during CCE Course" loading="lazy" decoding="async"><figcaption>Practical Demonstration during CCE Course</figcaption></figure>
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/school-outreach-iisc-2-400w.webp') }}" srcset="{{ url_for('static', filename='images/school-outreach-iisc-2-400w.webp') }} 400w, {{ url_for('static', filename='images/school-outreach-iisc-2-600w.webp') }} 600w, {{ url_for('static', filename='images/school-outreach-iisc-2-768w.webp') }} 768w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="768" height="1024" alt="School Outreach Program at IISc" loading="lazy" decoding="async"><figcaption>School Outreach Program at IISc</figcaption></figure>
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/school-outreach-iisc-3-jpe-400w.webp') }}" srcset="{{ url_for('static', filename='images/school-outreach-iisc-3-jpe-400w.webp') }} 400w, {{ url_for('static', filename='images/school-outreach-iisc-3-jpe-600w.webp') }} 600w, {{ url_for('static', filename='images/school-outreach-iisc-3-jpe-768w.webp') }} 768w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="768" height="1024" alt="School Outreach program" loading="lazy" decoding="async"><figcaption>School Outreach program</figcaption></figure>
+        <figure data-lightbox-item><img src="{{ url_for('static', filename='images/practical-training-program-400w.webp') }}" srcset="{{ url_for('static', filename='images/practical-training-program-400w.webp') }} 400w, {{ url_for('static', filename='images/practical-training-program-567w.webp') }} 567w" sizes="(max-width: 520px) calc(100vw - 46px), (max-width: 800px) 46vw, (max-width: 1100px) 25vw, 366px" width="567" height="1280" alt="Practical Training Program" loading="lazy" decoding="async"><figcaption>Practical Training Program</figcaption></figure>
       </div>
     </section>
+    <nav class="g2-next" aria-label="Related pages">
+      <a class="g2-next__link" href="{{ url_for('public.events') }}">Events &amp; Training <span aria-hidden="true">→</span></a>
+      <a class="g2-next__link" href="{{ url_for('public.contact') }}">Contact <span aria-hidden="true">→</span></a>
+    </nav>
   </section>
 </main>
+<script src="{{ url_for('static', filename='js/gallery.js') }}" defer></script>
 {% endblock %}

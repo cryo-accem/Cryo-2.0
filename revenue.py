@@ -101,6 +101,28 @@ def pricing_category(origin):
     raise ValueError("Unsupported user category.")
 
 
+_ORIGIN_LABEL_FOR_CATEGORY = {"internal": "Internal", "academic": "External", "industry": "Industry"}
+
+
+def billed_origin(origin, user_category=None):
+    """Origin to store with a completed booking.
+
+    The completion form lets the admin bill under a different user category
+    than the one the user registered with.  Storing that category as the
+    booking's origin keeps the stored totals, the charge sheet (which is
+    recalculated from origin) and its ID prefix consistent.
+    """
+    if not user_category:
+        return origin
+    category = pricing_category(user_category)
+    try:
+        if pricing_category(origin) == category:
+            return origin
+    except ValueError:
+        pass
+    return _ORIGIN_LABEL_FOR_CATEGORY[category]
+
+
 def normalize_service_stage(stage):
     value = str(stage or "").strip().casefold().replace("_", " ")
     if value in {"freezing", "freezing / grid registration", "grid registration"}:
@@ -234,7 +256,9 @@ def calculate_charge_sheet(
         if selected_clip_base_source == "facility" else Decimal("0")
     )
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
-    processing_charge = PROCESSING_RATE if processing_requested and category != "internal" else Decimal("0")
+    # Data processing / image analysis is offered to industry users only; it is not
+    # applicable to internal or academic users, so the request flag is ignored for them.
+    processing_charge = PROCESSING_RATE if processing_requested and category == "industry" else Decimal("0")
     subtotal = grid_charge + handling_charge + clip_base_charge + slot_charge + processing_charge
     gst = subtotal * config["gst_rate"]
     result = {

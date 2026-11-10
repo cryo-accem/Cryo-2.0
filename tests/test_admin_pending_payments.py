@@ -88,6 +88,11 @@ class AdminPendingPaymentDashboardTests(unittest.TestCase):
 
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def test_dashboard_tracks_history_pending_statuses_and_omits_updated_statuses(self):
         response = self.client.get("/admin/panel")

@@ -40,6 +40,11 @@ def parse_datetime(value, label):
     )
 
 
+def facility_today():
+    """Return today's date in the facility's (India) time zone."""
+    return dt.datetime.now(FACILITY_TIMEZONE).date()
+
+
 def facility_time(value):
     if not value:
         return ""
@@ -62,11 +67,6 @@ def _text(value, label, limit, required=False):
     if len(cleaned) > limit:
         raise InventoryError(f"{label} must be {limit} characters or fewer.")
     return cleaned or None
-
-
-def _partial_match_pattern(value):
-    escaped = value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-    return f"%{escaped}%"
 
 
 def _positive_int(value, label, maximum=None):
@@ -957,6 +957,9 @@ def link_selected_grids_to_booking(
         raise InventoryError("Choose a valid booking type.")
     link_table, booking_column, operation_prefix = link_targets[service_type]
     codes = [str(code).strip() for code in grid_codes if str(code).strip()]
+    owner_name = (researcher_name or "").strip()
+    if codes and not owner_name:
+        raise InventoryError("Enter the username associated with the selected grids.")
     if len(codes) != len(set(codes)):
         raise InventoryError("A grid can only be selected once.")
     for code in codes:
@@ -968,14 +971,10 @@ def link_selected_grids_to_booking(
                JOIN inventory_samples s ON s.sample_id=g.sample_id
                LEFT JOIN users u ON u.id=s.linked_user_id
                WHERE g.grid_code=?
-                 AND (LOWER(TRIM(s.researcher_name)) LIKE LOWER(?) ESCAPE '!'
-                      OR LOWER(TRIM(u.username)) LIKE LOWER(?) ESCAPE '!')"""
+                 AND (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))"""
             + _lock_clause(),
-            [
-                code,
-                _partial_match_pattern(researcher_name),
-                _partial_match_pattern(researcher_name),
-            ],
+            [code, owner_name, owner_name],
         )
         grid = cursor.fetchone()
         if not grid:
@@ -1752,12 +1751,18 @@ def set_grid_type_active(grid_type_id, active):
     connection = get_db()
     cursor = connection.cursor()
     try:
+        # pymysql reports affected (changed) rows, so rowcount is 0 when the
+        # type already has the requested state; check existence explicitly.
+        cursor.execute(
+            "SELECT grid_type_id FROM grid_types WHERE grid_type_id=?",
+            [grid_type_id],
+        )
+        if not cursor.fetchone():
+            raise InventoryError("Grid type not found.")
         cursor.execute(
             "UPDATE grid_types SET active=? WHERE grid_type_id=?",
             (1 if active else 0, grid_type_id),
         )
-        if cursor.rowcount != 1:
-            raise InventoryError("Grid type not found.")
         connection.commit()
     except Exception:
         connection.rollback()
@@ -2139,8 +2144,15 @@ def dashboard_storage():
         connection.close()
 
 
+PUBLIC_LOOKUP_MIN_LENGTH = 2
+
+
 def public_inventory_grids(researcher_name, sample_name=None, available_only=False):
     researcher_name = _text(researcher_name, "Researcher name", 150, True)
+    if len(researcher_name) < PUBLIC_LOOKUP_MIN_LENGTH:
+        raise InventoryError(
+            f"Enter at least {PUBLIC_LOOKUP_MIN_LENGTH} characters of your username."
+        )
     if sample_name:
         sample_name = _text(sample_name, "Sample name", 180, True)
     connection = get_db()
@@ -2170,11 +2182,12 @@ def public_inventory_grids(researcher_name, sample_name=None, available_only=Fal
                LEFT JOIN users u ON u.id=s.linked_user_id
                LEFT JOIN storage_locations sl
                  ON sl.grid_id=g.grid_id AND sl.removed_at IS NULL
-               WHERE (LOWER(TRIM(s.researcher_name)) LIKE LOWER(?) ESCAPE '!'
-                      OR LOWER(TRIM(u.username)) LIKE LOWER(?) ESCAPE '!')
+               WHERE (LOWER(TRIM(s.researcher_name))=LOWER(TRIM(?))
+                      OR LOWER(TRIM(u.username))=LOWER(TRIM(?)))
                """
-        match_pattern = _partial_match_pattern(researcher_name)
-        values = [match_pattern, match_pattern]
+        # Public lookups are unauthenticated, so only an exact (case-insensitive,
+        # trimmed) username/researcher-name match may reveal grid records.
+        values = [researcher_name, researcher_name]
         if sample_name:
             query += " AND LOWER(TRIM(s.sample_name))=LOWER(TRIM(?))"
             values.append(sample_name)

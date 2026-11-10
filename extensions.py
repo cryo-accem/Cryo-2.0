@@ -1,12 +1,32 @@
 import os
 import threading
 import base64
+import datetime
+import http.client
 import json
+import socket
 import urllib.error
 import urllib.request
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+try:
+    from zoneinfo import ZoneInfo
+
+    INDIA_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:  # pragma: no cover - tzdata missing; India has no DST
+    INDIA_TZ = datetime.timezone(datetime.timedelta(hours=5, minutes=30), "IST")
+
+
+def now_ist() -> datetime.datetime:
+    """Current wall-clock time in India as a naive datetime (facility local time)."""
+    return datetime.datetime.now(INDIA_TZ).replace(tzinfo=None)
+
+
+def today_ist() -> datetime.date:
+    """Today's date in India, independent of the server's timezone."""
+    return datetime.datetime.now(INDIA_TZ).date()
 
 def init_mail(app):
     """Configure email delivery through a Google Apps Script HTTPS relay."""
@@ -75,7 +95,10 @@ def _deliver_email(app, recipient, subject, body, cc, attachments, priority):
             )
             return True
         except urllib.error.HTTPError as exc:
-            details = exc.read().decode("utf-8", errors="replace")
+            try:
+                details = exc.read().decode("utf-8", errors="replace")
+            except Exception:
+                details = ""
             app.logger.error(
                 "Email to %s failed through Google Apps Script (HTTP %s): %s",
                 recipient,
@@ -87,6 +110,13 @@ def _deliver_email(app, recipient, subject, body, cc, attachments, priority):
                 "Email to %s failed through Google Apps Script: %s",
                 recipient,
                 exc.reason,
+            )
+        except (socket.timeout, TimeoutError, http.client.HTTPException, OSError, ValueError) as exc:
+            app.logger.error(
+                "Email to %s failed through Google Apps Script: %s: %s",
+                recipient,
+                type(exc).__name__,
+                exc,
             )
         return False
 

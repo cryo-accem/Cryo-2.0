@@ -86,9 +86,11 @@ def _display_date(value):
 
 
 def _amount_words(number):
-    number = int(_decimal(number))
-    if number == 0:
-        return "Rupees Zero Only"
+    amount = _decimal(number)
+    negative = amount < 0
+    amount = abs(amount)
+    number = int(amount)
+    paise = int((amount - number) * 100)
 
     ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
             "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen",
@@ -109,14 +111,27 @@ def _amount_words(number):
             words.append(ones[value])
         return " ".join(words)
 
-    parts = []
-    for divisor, label in ((10_000_000, "Crore"), (100_000, "Lakh"), (1_000, "Thousand")):
-        count, number = divmod(number, divisor)
-        if count:
-            parts.extend([under_thousand(count), label])
-    if number:
-        parts.append(under_thousand(number))
-    return "Rupees " + " ".join(parts) + " Only"
+    def integer_words(value):
+        parts = []
+        # Indian numbering; amounts of 100 crore or more repeat "Crore" groups.
+        crores, value = divmod(value, 10_000_000)
+        if crores:
+            parts.extend([integer_words(crores), "Crore"])
+        for divisor, label in ((100_000, "Lakh"), (1_000, "Thousand")):
+            count, value = divmod(value, divisor)
+            if count:
+                parts.extend([under_thousand(count), label])
+        if value:
+            parts.append(under_thousand(value))
+        return " ".join(parts)
+
+    rupees = integer_words(number) if number else "Zero"
+    words = f"Rupees {rupees}"
+    if paise:
+        words += f" and {under_thousand(paise)} Paise"
+    if negative:
+        words = "Minus " + words
+    return words + " Only"
 
 
 def _styles():

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Freezing schedule{% endblock %}
 {% block content %}
-<main class="portal-page">
-  <section class="page-content">
+<main class="portal-page schedule-view">
+  <section class="page-content schedule-page">
     <header class="page-header page-header--portal page-header--schedule">
       <div>
         <div class="eyebrow">User portal</div>
@@ -11,40 +11,52 @@
       </div>
     </header>
 
+    <nav class="schedule-tabs" aria-label="Schedules">
+      <a href="{{ url_for('freezing.freezing_schedule') }}" aria-current="page"><i class="fa-solid fa-snowflake" aria-hidden="true"></i>Freezing</a>
+      <a href="{{ url_for('screening.screening_list') }}"><i class="fa-solid fa-microscope" aria-hidden="true"></i>Screening</a>
+      <a href="{{ url_for('imaging.list_view') }}"><i class="fa-solid fa-database" aria-hidden="true"></i>Data collection</a>
+      <a href="{{ url_for('public.grid_inventory') }}"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>Find your grids</a>
+      <a class="button schedule-tabs__book" href="{{ url_for('register.register') }}"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i>Book a slot</a>
+    </nav>
+
     <div class="data-stack">
-      <section class="data-panel">
-        <h2>Active slots</h2>
+      <section class="data-panel schedule-panel" aria-labelledby="freezing-active-title">
+        <div class="schedule-panel__head">
+          <span class="schedule-panel__icon" aria-hidden="true"><i class="fa-solid fa-snowflake"></i></span>
+          <h2 id="freezing-active-title">Active slots</h2>
+          <span class="schedule-count schedule-count--active">{{ active_slots|length }} active</span>
+        </div>
         {% if active_slots %}
           <div class="table-wrap">
-            <table class="data-table">
+            <table class="data-table schedule-table">
               <thead>
                 <tr>
-                  <th>Position</th>
-                  <th>Name of User</th>
-                  <th>Name of PI</th>
-                  <th>Origin</th>
-                  <th>Registered At</th>
-                  <th>Number of Grids</th>
-                  <th>Date for Freezing</th>
+                  <th scope="col">Position</th>
+                  <th scope="col">Name of User</th>
+                  <th scope="col">Name of PI</th>
+                  <th scope="col">Origin</th>
+                  <th scope="col">Registered At</th>
+                  <th scope="col">Number of Grids</th>
+                  <th scope="col">Date for Freezing</th>
                 </tr>
               </thead>
               <tbody>
                 {% for slot in active_slots %}
                   <tr>
-                    <td>{{ loop.index }}</td>
-                    <td>{{ slot.user_name }}</td>
-                    <td>{{ slot.pi_name }}</td>
-                    <td>{{ slot.origin if slot.origin else slot.esm }}</td>
-                    <td>{{ slot.registered_at[:10] if slot.registered_at and slot.registered_at is string else slot.registered_at.strftime('%Y-%m-%d') if slot.registered_at else '' }}</td>
-                    <td>{{ slot.grids }}</td>
-                    <td>{{ slot.freezing_date }}</td>
+                    <td data-label="Position"><span class="queue-pos">{{ loop.index }}</span></td>
+                    <td data-label="Name of User" class="schedule-table__name">{{ slot.user_name }}</td>
+                    <td data-label="Name of PI">{{ slot.pi_name }}</td>
+                    <td data-label="Origin">{{ slot.origin if slot.origin else slot.esm }}</td>
+                    <td data-label="Registered At">{{ slot.registered_at[:10] if slot.registered_at and slot.registered_at is string else slot.registered_at.strftime('%Y-%m-%d') if slot.registered_at else '' }}</td>
+                    <td data-label="Number of Grids">{{ slot.grids }}</td>
+                    <td data-label="Date for Freezing"><span class="schedule-date"><i class="fa-regular fa-calendar" aria-hidden="true"></i>{{ slot.freezing_date }}</span></td>
                   </tr>
                 {% endfor %}
               </tbody>
             </table>
           </div>
         {% else %}
-          <div class="empty-message">No active freezing slots at the moment.</div>
+          <div class="empty-message schedule-empty"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i><span>No active freezing slots at the moment.</span></div>
         {% endif %}
       </section>
 

@@ -3,7 +3,7 @@
 {% block content %}
 <main>
   <section class="hero">
-    <img class="hero-image" src="{{ url_for('static', filename='images/talos_arctica.webp') }}" alt="Talos Arctica cryo-electron microscope" loading="eager" fetchpriority="high" decoding="async">
+    <img class="hero-image" src="{{ url_for('static', filename='images/talos_arctica-1200w.webp') }}" srcset="{{ url_for('static', filename='images/talos_arctica-600w.webp') }} 600w, {{ url_for('static', filename='images/talos_arctica-800w.webp') }} 800w, {{ url_for('static', filename='images/talos_arctica-1200w.webp') }} 1200w, {{ url_for('static', filename='images/talos_arctica.webp') }} 1375w" sizes="(max-width: 520px) 580px, (max-width: 800px) 100vw, min(85vw, 1224px)" width="1375" height="1144" alt="Talos Arctica cryo-electron microscope" loading="eager" fetchpriority="high" decoding="async">
     <div class="hero-copy">
       <div class="eyebrow">{{ page_content.eyebrow if page_content else 'Indian Institute of Science · Bengaluru' }}</div>
       <h1>{{ page_content.title if page_content else 'Advanced Centre for Cryo-Electron Microscopy' }}</h1>
@@ -18,21 +18,62 @@
   <section class="section workflow-section">
     <div class="section-heading"><h2>View the complete cryo-EM workflow</h2><a class="section-link" href="{{ url_for('public.workflow') }}">Explore workflow details →</a></div>
     <div class="workflow">
-      <div class="step"><span class="step-number">01</span><img src="{{ url_for('static', filename='images/sample-submission.webp') }}" alt="Sample" loading="lazy" decoding="async"><strong>Sample</strong><span>Submit your sample</span></div>
-      <div class="step"><span class="step-number">02</span><img src="{{ url_for('static', filename='images/fei_vitrobot.webp') }}" alt="Grid freezing" loading="lazy" decoding="async"><strong>Grid freezing</strong><span>Vitrify the sample</span></div>
-      <div class="step"><span class="step-number">03</span><img src="{{ url_for('static', filename='images/grid-clipping.webp') }}" alt="Grid clipping" loading="lazy" decoding="async"><strong>Grid clipping</strong><span>Clip and insert grids</span></div>
-      <div class="step"><span class="step-number">04</span><img src="{{ url_for('static', filename='images/grid-screening.webp') }}" alt="Grid screening" loading="lazy" decoding="async"><strong>Screening</strong><span>Check grid quality</span></div>
-      <div class="step"><span class="step-number">05</span><img src="{{ url_for('static', filename='images/data-collection.webp') }}" alt="Data collection" loading="lazy" decoding="async"><strong>Data collection</strong><span>Acquire cryo-EM data</span></div>
-      <div class="step"><span class="step-number">06</span><img src="{{ url_for('static', filename='images/cryo-em_workstation.webp') }}" alt="Structural analysis" loading="lazy" decoding="async"><strong>Structural analysis</strong><span>Build the structure</span></div>
+      <div class="step"><span class="step-number">01</span><img src="{{ url_for('static', filename='images/sample-submission-200w.webp') }}" srcset="{{ url_for('static', filename='images/sample-submission-200w.webp') }} 200w, {{ url_for('static', filename='images/sample-submission-300w.webp') }} 300w, {{ url_for('static', filename='images/sample-submission-400w.webp') }} 400w, {{ url_for('static', filename='images/sample-submission-612w.webp') }} 612w" sizes="(max-width: 800px) 144px, 156px" width="612" height="408" alt="Sample" loading="lazy" decoding="async"><strong>Sample</strong><span>Submit your sample</span></div>
+      <div class="step"><span class="step-number">02</span><img src="{{ url_for('static', filename='images/fei_vitrobot-200w.webp') }}" srcset="{{ url_for('static', filename='images/fei_vitrobot-200w.webp') }} 200w, {{ url_for('static', filename='images/fei_vitrobot-300w.webp') }} 300w, {{ url_for('static', filename='images/fei_vitrobot-400w.webp') }} 400w, {{ url_for('static', filename='images/fei_vitrobot-719w.webp') }} 719w" sizes="(max-width: 800px) 96px, 104px" width="719" height="1024" alt="Grid freezing" loading="lazy" decoding="async"><strong>Grid freezing</strong><span>Vitrify the sample</span></div>
+      <div class="step"><span class="step-number">03</span><img src="{{ url_for('static', filename='images/grid-clipping-200w.webp') }}" srcset="{{ url_for('static', filename='images/grid-clipping-200w.webp') }} 200w, {{ url_for('static', filename='images/grid-clipping-300w.webp') }} 300w, {{ url_for('static', filename='images/grid-clipping-400w.webp') }} 400w, {{ url_for('static', filename='images/grid-clipping-537w.webp') }} 537w" sizes="(max-width: 800px) 96px, 104px" width="537" height="540" alt="Grid clipping" loading="lazy" decoding="async"><strong>Grid clipping</strong><span>Clip and insert grids</span></div>
+      <div class="step"><span class="step-number">04</span><img src="{{ url_for('static', filename='images/grid-screening-200w.webp') }}" srcset="{{ url_for('static', filename='images/grid-screening-200w.webp') }} 200w, {{ url_for('static', filename='images/grid-screening-300w.webp') }} 300w, {{ url_for('static', filename='images/grid-screening-400w.webp') }} 400w, {{ url_for('static', filename='images/grid-screening-600w.webp') }} 600w, {{ url_for('static', filename='images/grid-screening-800w.webp') }} 800w, {{ url_for('static', filename='images/grid-screening-964w.webp') }} 964w" sizes="(max-width: 800px) 171px, 185px" width="964" height="542" alt="Grid screening" loading="lazy" decoding="async"><strong>Screening</strong><span>Check grid quality</span></div>
+      <div class="step"><span class="step-number">05</span><img src="{{ url_for('static', filename='images/data-collection-200w.webp') }}" srcset="{{ url_for('static', filename='images/data-collection-200w.webp') }} 200w, {{ url_for('static', filename='images/data-collection-300w.webp') }} 300w, {{ url_for('static', filename='images/data-collection-719w.webp') }} 719w" sizes="(max-width: 800px) 96px, 104px" width="719" height="960" alt="Data collection" loading="lazy" decoding="async"><strong>Data collection</strong><span>Acquire cryo-EM data</span></div>
+      <div class="step"><span class="step-number">06</span><img src="{{ url_for('static', filename='images/cryo-em_workstation-200w.webp') }}" srcset="{{ url_for('static', filename='images/cryo-em_workstation-200w.webp') }} 200w, {{ url_for('static', filename='images/cryo-em_workstation-300w.webp') }} 300w, {{ url_for('static', filename='images/cryo-em_workstation-400w.webp') }} 400w, {{ url_for('static', filename='images/cryo-em_workstation-540w.webp') }} 540w" sizes="(max-width: 800px) 115px, 125px" width="540" height="450" alt="Structural analysis" loading="lazy" decoding="async"><strong>Structural analysis</strong><span>Build the structure</span></div>
     </div>
   </section>
   <section class="section user-statistics">
-   <div class="section-heading"><div><h2>ACCEM activity at a glance</h2><p>Live facility metrics covering users, publications and EMDB structures.</p></div><span class="user-statistics-total" id="total-users-count">Loading...</span></div>
-   <div class="user-statistics-grid" id="user-stats-container">
-     <article class="category-stat-card">
-       <div class="category-stat-card__heading"><h3>Dynamic User Statistics</h3><div><span id="loading-indicator">Loading user data...</span></div></div>
-       <div class="category-stat-card__body" style="text-align: center; padding: 40px;">
-         <p>Fetching real-time user statistics from the database...</p>
+   <div class="section-heading"><div><h2>ACCEM activity at a glance</h2><p>Live facility metrics covering users, publications and EMDB structures.</p></div></div>
+   {% if user_stats %}<script type="application/json" id="user-stats-initial">{{ user_stats|tojson }}</script>{% endif %}
+   {% set stats_ok = user_stats and user_stats.success is not sameas false and user_stats.data is defined %}
+   {% set stats_metrics = (user_stats.metrics if stats_ok and user_stats.metrics else {}) %}
+   {% set stats_internal = (user_stats.data|selectattr('label', 'equalto', 'Internal')|map(attribute='value')|sum) if stats_ok else 0 %}
+   <div class="stats-e" id="user-stats-container" data-stats-state="{{ 'ready' if stats_ok else 'pending' }}">
+     <div class="stats-e__numbers">
+       <article class="stats-row-tile stats-e__tile">
+         <i class="fa-solid fa-users stats-row-tile__icon" aria-hidden="true"></i>
+         <strong class="stats-row-tile__value" data-stat="users">{{ user_stats.total if stats_ok else '—' }}</strong>
+         <h3 class="stats-row-tile__label">Users</h3>
+         <span class="stats-row-tile__note" data-stat="users-note">{% if stats_ok %}across {{ user_stats.data|length }} affiliation categories{% else %}User data is loading{% endif %}</span>
+       </article>
+       <article class="stats-row-tile stats-e__tile">
+         <i class="fa-solid fa-graduation-cap stats-row-tile__icon" aria-hidden="true"></i>
+         <strong class="stats-row-tile__value" data-stat="external">{{ (user_stats.total - stats_internal) if stats_ok else '—' }}</strong>
+         <h3 class="stats-row-tile__label">Users from outside IISc</h3>
+         <span class="stats-row-tile__note">Academic, external and industry users</span>
+       </article>
+       <article class="stats-row-tile stats-e__tile">
+         <i class="fa-solid fa-book-open stats-row-tile__icon" aria-hidden="true"></i>
+         <strong class="stats-row-tile__value" data-stat="publications">{{ stats_metrics.publications if stats_metrics.publications is defined and stats_metrics.publications is not none else '—' }}</strong>
+         <h3 class="stats-row-tile__label"><a class="stats-row-tile__link" href="{{ url_for('public.publications') }}">Publications</a></h3>
+         <span class="stats-row-tile__note">Listed on our Publications page</span>
+       </article>
+       <article class="stats-row-tile stats-e__tile">
+         <i class="fa-solid fa-cubes stats-row-tile__icon" aria-hidden="true"></i>
+         {# Stored EMDB count (emdb_structures.py, refreshed daily); "85+" until the first check. #}
+         <strong class="stats-row-tile__value" data-stat="structures">{{ structures_count if structures_count is defined else '85+' }}</strong>
+         <h3 class="stats-row-tile__label">EMDB structures</h3>
+         <span class="stats-row-tile__note">EMDB entries from ACCEM-linked research</span>
+       </article>
+     </div>
+     <article class="stats-e__breakdown">
+       <div class="stats-e__chart">
+         <div class="category-stat-card__chart donut-chart" data-donut>
+           <svg viewBox="0 0 120 120" role="img" aria-label="Users grouped by affiliation">
+             <circle class="donut-track" cx="60" cy="60" r="52" pathLength="100"></circle>
+             <g data-chart-segments>{% if stats_ok %}{% for item in user_stats.data %}<circle class="donut-segment" tabindex="0" role="img" aria-label="{{ item.label }}: {{ item.value }} users" cx="60" cy="60" r="52" pathLength="100" color="{{ item.color }}" stroke-dasharray="{{ item.end - item.start }} 100" stroke-dashoffset="-{{ item.start }}" data-label="{{ item.label }}" data-value="{{ item.value }} users"></circle>{% endfor %}{% endif %}</g>
+           </svg>
+           <div class="donut-center"><strong>{{ user_stats.total if stats_ok else '—' }}</strong><span>users</span></div>
+           <div class="donut-tooltip" role="status"></div>
+         </div>
+       </div>
+       <div class="stats-e__legend-wrap">
+         <h3>Users by affiliation <span data-stat="users-total">{% if stats_ok %}{{ user_stats.total }} users{% else %}<span id="loading-indicator">Loading user data…</span>{% endif %}</span></h3>
+         <ul class="stats-e__legend" data-stats-legend>{% if stats_ok %}{% for item in user_stats.data %}<li><svg class="stats-e__swatch" viewBox="0 0 12 12" aria-hidden="true"><rect width="12" height="12" rx="3" fill="{{ item.color }}"></rect></svg><span>{{ item.label }}</span><strong>{{ item.value }}</strong></li>{% endfor %}{% endif %}</ul>
        </div>
      </article>
    </div>

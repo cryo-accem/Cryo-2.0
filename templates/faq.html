@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | FAQ{% endblock %}
+{% block meta_description %}Frequently asked questions about using the Advanced Centre for Cryo-Electron Microscopy (ACCEM) at IISc Bengaluru: access, booking limits, charges, grid inventory, data hand-off and acknowledgement.{% endblock %}
+{% block content %}
+<main>
+  <section class="page-content g2-page faq-page">
+    <header class="page-header page-header--faq">
+      <div><div class="eyebrow">Using the facility</div><h1>Frequently asked questions</h1>
+      <p>Quick answers about access, booking, charges, data and acknowledging the facility.</p></div>
+    </header>
+
+    <nav class="faq-topics" aria-label="FAQ topics">
+      <ul>
+        <li><a href="#faq-access"><i class="fa-solid fa-users" aria-hidden="true"></i>Getting started <span>4</span></a></li>
+        <li><a href="#faq-booking"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i>Booking slots <span>3</span></a></li>
+        <li><a href="#faq-charges"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i>Charges and grids <span>3</span></a></li>
+        <li><a href="#faq-data"><i class="fa-solid fa-database" aria-hidden="true"></i>Data and acknowledgement <span>2</span></a></li>
+      </ul>
+    </nav>
+
+    <section class="faq-group" id="faq-access" aria-labelledby="faq-access-title">
+      <div class="faq-group__head">
+        <span class="faq-group__icon" aria-hidden="true"><i class="fa-solid fa-users"></i></span>
+        <span class="g2-kicker">Access</span>
+        <h2 id="faq-access-title">Getting started</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>Who can use the facility?</summary>
+          <div class="faq-answer">
+            <p>Academic and industrial researchers who want to use ACCEM at IISc for high-resolution data collection can contact the EM manager. IISc users, external academic users and industry users can all request slots.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>How do I get started, and who should I contact?</summary>
+          <div class="faq-answer">
+            <p>Write to the EM manager at <a href="mailto:cryoem.iisc@gmail.com">cryoem.iisc@gmail.com</a> or <a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a> before submitting a sample. The <a href="{{ url_for('public.facility') }}">instructions page</a> walks through each step, and the <a href="{{ url_for('public.team') }}">team page</a> lists the faculty in-charge and EM manager.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>What do I need to provide before using the microscope?</summary>
+          <div class="faq-answer">
+            <p>Sample details and preliminary purification or biochemical data. If they are not provided, no assurance can be given about grid or data quality.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Can I operate the microscope or prepare grids myself?</summary>
+          <div class="faq-answer">
+            <p>Only trained users are allowed to operate the microscope (Latitude S software). Because cryo-EM apparatus and accessories are expensive, only expert users (mainly PIs) prepare samples or hand them over to the EM manager. External and internal users cannot request cryo-freezing, cartridge preparation or cassette transfer.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="faq-group" id="faq-booking" aria-labelledby="faq-booking-title">
+      <div class="faq-group__head">
+        <span class="faq-group__icon" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span>
+        <span class="g2-kicker">Booking</span>
+        <h2 id="faq-booking-title">Booking slots</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>How do I book a slot?</summary>
+          <div class="faq-answer">
+            <p>Use the <a href="{{ url_for('register.register') }}">slot booking form</a> and choose freezing, screening or data collection. Current bookings are shown on the <a href="{{ url_for('freezing.freezing_schedule') }}">freezing</a>, <a href="{{ url_for('screening.screening_list') }}">screening</a> and <a href="{{ url_for('imaging.list_view') }}">data collection</a> schedules.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>How many grids and days can I request?</summary>
+          <div class="faq-answer">
+            <p>A screening or data collection request can include 1 to 4 grids. Data collection can be booked for 1 to 4 days; microscope time is charged per 24-hour slot.</p>
+            <p>Freezing is booked by date on weekdays only, and the facility freezes at most {{ freezing_grid_limit }} grids per day across all bookings. The freezing form shows how many grids are still free on each date.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Do industrial samples receive priority?</summary>
+          <div class="faq-answer">
+            <p>Yes. Industrial samples receive preferential consideration.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="faq-group" id="faq-charges" aria-labelledby="faq-charges-title">
+      <div class="faq-group__head">
+        <span class="faq-group__icon" aria-hidden="true"><i class="fa-solid fa-file-invoice-dollar"></i></span>
+        <span class="g2-kicker">Charges</span>
+        <h2 id="faq-charges-title">Charges and grids</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>How are charges calculated?</summary>
+          <div class="faq-answer">
+            <p>Charges depend on your user category (internal, academic or industry) and cover microscope slots, grids, C-clip and base ring, and handling. 18% GST is added for academic and industry users. See the <a href="{{ url_for('public.rates') }}">rates page</a> for the full charge sheet. The final amount is as per the issued charge sheet.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>How can I check which of my grids are stored at the facility?</summary>
+          <div class="faq-answer">
+            <p>Use <a href="{{ url_for('public.grid_inventory') }}">Find your grids</a> and enter the username you used when booking. It lists your grids, their current storage position and whether each one is available for booking.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Why are the first and last cassette positions left empty?</summary>
+          <div class="faq-answer">
+            <p>For safety and handling, the first and last grid positions of the cassette are left unoccupied.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section class="faq-group" id="faq-data" aria-labelledby="faq-data-title">
+      <div class="faq-group__head">
+        <span class="faq-group__icon" aria-hidden="true"><i class="fa-solid fa-database"></i></span>
+        <span class="g2-kicker">Data</span>
+        <h2 id="faq-data-title">Data and acknowledgement</h2>
+      </div>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>How will I receive my data, and is processing support available?</summary>
+          <div class="faq-answer">
+            <p>Data are transferred to your own hard drive (not provided by the facility), and processing may take 2–3 days. Please arrange collection or shipping of the drive yourself.</p>
+            <p>Full data processing support is not available, but assistance is provided if necessary.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>How should I acknowledge the facility in publications?</summary>
+          <div class="faq-answer">
+            <p>Acknowledge the facility personnel and include this funding acknowledgement:</p>
+            <blockquote class="faq-quote">"The data was collected at the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY FACILITY FOR BIOLOGICAL SCIENCES AT IISc, Bengaluru, India funded by Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST."</blockquote>
+            <p>This applies even if data collection is done elsewhere after screening at IISc.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <div class="faq-more g2-cta">
+      <span class="g2-cta__icon" aria-hidden="true"><i class="fa-solid fa-circle-info"></i></span>
+      <p>Still have a question? Read the <a href="{{ url_for('public.facility') }}">instructions</a> or <a href="{{ url_for('public.contact') }}">contact us</a>.</p>
+    </div>
+  </section>
+</main>
+{% endblock %}

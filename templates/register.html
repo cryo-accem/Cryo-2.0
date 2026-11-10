@@ -1,62 +1,78 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Register{% endblock %}
 {% block content %}
-<main class="portal-page">
-  <section class="page-content">
+<main class="portal-page booking-view">
+  <section class="page-content booking-page">
     <header class="page-header page-header--portal"><div><div class="eyebrow">User portal</div><h1>Register for a Cryo-EM slot</h1><p>Tell us about your sample and preferred service. The facility team will follow up by email.</p></div></header>
-    <div class="form-card">
+    <div class="booking-layout">
+    <div class="form-card booking-card">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% set registration_messages = messages | selectattr('0', 'equalto', 'registration') | map(attribute='1') | list %}
-        {% if registration_messages %}<div class="flash">{% for msg in registration_messages %}<p>{{ msg }}</p>{% endfor %}</div>{% endif %}
+        {% if registration_messages %}<div class="flash booking-flash" role="alert"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><div>{% for msg in registration_messages %}<p>{{ msg }}</p>{% endfor %}</div></div>{% endif %}
       {% endwith %}
-      <form action="{{ url_for('register.register') }}" method="post">
+      <form class="booking-form" action="{{ url_for('register.register') }}" method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <input type="hidden" id="reg_type" name="reg_type" required>
-        <div class="form-field full">
-          <label>Registration Type</label>
-          <div class="reg-type-grid" role="listbox" aria-label="Registration Type">
-            <button type="button" class="reg-type-card" data-value="freezing" aria-label="Freezing">
-              <i class="fa-solid fa-snowflake"></i>
+        <fieldset class="booking-step">
+          <legend class="booking-step__legend"><span class="booking-step__num" aria-hidden="true">1</span><span>Registration Type</span></legend>
+          <p class="booking-step__hint" id="reg-type-hint">Choose the service you want to book.</p>
+          <div class="reg-type-grid" role="listbox" aria-label="Registration Type" aria-describedby="reg-type-hint">
+            <button type="button" class="reg-type-card" data-value="freezing" aria-label="Freezing" role="option" aria-selected="false">
+              <i class="fa-solid fa-snowflake" aria-hidden="true"></i>
               <span>Freezing</span>
+              <small class="reg-type-card__meta" aria-hidden="true">Up to 8 grids · weekdays</small>
             </button>
-            <button type="button" class="reg-type-card" data-value="screening" aria-label="Screening">
-              <i class="fa-solid fa-microscope"></i>
+            <button type="button" class="reg-type-card" data-value="screening" aria-label="Screening" role="option" aria-selected="false">
+              <i class="fa-solid fa-microscope" aria-hidden="true"></i>
               <span>Screening</span>
+              <small class="reg-type-card__meta" aria-hidden="true">Up to 4 grids</small>
             </button>
-            <button type="button" class="reg-type-card" data-value="datacollecting" aria-label="Data Collecting">
-              <i class="fa-solid fa-database"></i>
+            <button type="button" class="reg-type-card" data-value="datacollecting" aria-label="Data Collecting" role="option" aria-selected="false">
+              <i class="fa-solid fa-database" aria-hidden="true"></i>
               <span>Data Collecting</span>
+              <small class="reg-type-card__meta" aria-hidden="true">Up to 4 grids · 4 days</small>
             </button>
           </div>
-        </div>
-        <div class="form-grid" id="registration-fields">
-          <div class="form-field"><label for="user_name">Name of the User</label><input type="text" id="user_name" name="user_name" required></div>
-          <div class="form-field"><label for="pi_name">Name of PI (Principal Investigator)</label><input type="text" id="pi_name" name="pi_name" required></div>
-          <div class="form-field"><label for="email">Email Address</label><input type="email" id="email" name="email" required></div>
-          <div class="form-field"><label for="origin">Origin of the User</label><select id="origin" name="origin" required onchange="toggleEsmField()"><option value="">Select origin</option><option value="Internal">IISc Users</option><option value="External">External Academic Users</option><option value="Industry">Industry User</option></select></div>
-          <div class="form-field hidden" id="esm_field"><label for="esm">Institute Name</label><input type="text" id="esm" name="esm"></div>
-          <div class="form-field full"><label for="sample_name">Name of the Sample</label><input type="text" id="sample_name" name="sample_name" required></div>
-          <div id="imaging_fields" class="form-grid full">
-            <div class="form-field"><label for="grids">How Many Grids (Maximum 4)</label><input type="number" id="grids" name="grids" min="1" max="4"></div>
+        </fieldset>
+
+        <fieldset class="booking-step">
+          <legend class="booking-step__legend"><span class="booking-step__num" aria-hidden="true">2</span><span>Your details</span></legend>
+          <div class="form-grid">
+            <div class="form-field"><label for="user_name">Name of the User</label><input type="text" id="user_name" name="user_name" required autocomplete="name" aria-describedby="user_name-hint"><small class="field-hint" id="user_name-hint">Your grids in the inventory are matched to this name.</small></div>
+            <div class="form-field"><label for="pi_name">Name of PI (Principal Investigator)</label><input type="text" id="pi_name" name="pi_name" required></div>
+            <div class="form-field"><label for="email">Email Address</label><input type="email" id="email" name="email" required autocomplete="email"></div>
+            <div class="form-field"><label for="origin">Origin of the User</label><select id="origin" name="origin" required onchange="toggleEsmField()"><option value="">Select origin</option><option value="Internal">IISc Users</option><option value="External">External Academic Users</option><option value="Industry">Industry User</option></select></div>
+            <div class="form-field hidden" id="esm_field"><label for="esm">Institute Name</label><input type="text" id="esm" name="esm" autocomplete="organization"></div>
           </div>
-          <section id="inventory-grid-picker" class="form-field full hidden"
+        </fieldset>
+
+        <fieldset class="booking-step">
+          <legend class="booking-step__legend"><span class="booking-step__num" aria-hidden="true">3</span><span>Sample and slot</span></legend>
+        <div class="form-grid" id="registration-fields">
+          <div class="form-field full"><label for="sample_name">Name of the Sample</label><input type="text" id="sample_name" name="sample_name" required></div>
+          <p class="booking-choose-hint full"><i class="fa-solid fa-circle-info" aria-hidden="true"></i>Choose a registration type in step 1 to see the slot options.</p>
+          <div id="imaging_fields" class="form-grid full">
+            <div class="form-field"><label for="grids">How Many Grids (Maximum 4)</label><input type="number" id="grids" name="grids" min="1" max="4" inputmode="numeric" aria-describedby="grids-hint"><small class="field-hint" id="grids-hint">Between 1 and 4. Filled in automatically when you choose grids from inventory.</small></div>
+          </div>
+          <fieldset id="inventory-grid-picker" class="form-field full hidden booking-picker"
                    data-search-url="{{ url_for('public.search_public_inventory') }}"
                    data-inventory-url="{{ url_for('public.grid_inventory') }}">
-            <div><label>Choose your grids from inventory <span class="form-hint">Optional · up to four grids</span></label><p class="form-hint">Available grids associated with your username appear below. The sample name is shown for each grid. Leave grids unselected to use your own.</p></div>
+            <legend class="booking-picker__legend"><span class="booking-picker__icon" aria-hidden="true"><i class="fa-solid fa-boxes-stacked"></i></span><span>Choose your grids from inventory <span class="form-hint booking-tag">Optional · up to four grids</span></span></legend>
+            <p class="form-hint">Available grids associated with your username appear below. The sample name is shown for each grid. Leave grids unselected to use your own.</p>
             <div class="public-grid-selection" id="public-grid-results" role="group" aria-label="Matching available inventory grids" aria-live="polite">
               <p class="empty-message">Enter your name above to check for matching grids.</p>
             </div>
             <p class="form-hint" id="inventory-selection-status" role="status" aria-live="polite"></p>
-            <p class="public-grid-inventory-link">Looking for a grid that is not available to book? <a id="full-inventory-link" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search the full inventory by username</a>.</p>
-          </section>
+            <p class="public-grid-inventory-link"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Looking for a grid that is not available to book? <a id="full-inventory-link" href="{{ url_for('public.grid_inventory') }}" target="_blank" rel="opener">Search the full inventory by username</a>.</p>
+          </fieldset>
           <div id="datacollecting_fields" class="form-grid full">
-            <div class="form-field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4"></div>
+            <div class="form-field"><label for="days">How Many Days Required (Maximum 4)</label><input type="number" id="days" name="days" min="1" max="4" inputmode="numeric" aria-describedby="days-hint"><small class="field-hint" id="days-hint">Between 1 and 4 days.</small></div>
           </div>
           <div id="freezing_fields" class="form-grid full">
             <div class="form-field full">
               <label for="freezing_date">Date for Registration</label>
               <input type="hidden" id="freezing_date" name="freezing_date">
-              <button type="button" class="date-picker-trigger" id="date-picker-trigger" aria-expanded="false" aria-controls="freezing-calendar">
+              <button type="button" class="date-picker-trigger" id="date-picker-trigger" aria-expanded="false" aria-controls="freezing-calendar" aria-describedby="freezing_date-hint">
                 <span class="date-picker-trigger__icon" aria-hidden="true"><i class="fa-regular fa-calendar"></i></span>
                 <span class="date-picker-trigger__copy">
                   <strong id="date-picker-label">Choose a freezing date</strong>
@@ -64,6 +80,7 @@
                 </span>
                 <i class="fa-solid fa-chevron-down date-picker-trigger__chevron" aria-hidden="true"></i>
               </button>
+              <small class="field-hint" id="freezing_date-hint">Weekdays only. Freezing slots cannot be booked on Saturdays or Sundays.</small>
               <div class="freezing-calendar hidden" id="freezing-calendar" aria-label="Freezing slot availability">
                 <div class="freezing-calendar__toolbar">
                   <button type="button" class="calendar-nav" id="calendar-previous" aria-label="Previous month">&lsaquo;</button>
@@ -82,11 +99,31 @@
                 </div>
               </div>
             </div>
-            <div class="form-field"><label for="grids_freezing">How Many Grids (Maximum 8)</label><input type="number" id="grids_freezing" name="grids_freezing" min="1" max="8"></div>
+            <div class="form-field"><label for="grids_freezing">How Many Grids (Maximum 8)</label><input type="number" id="grids_freezing" name="grids_freezing" min="1" max="8" inputmode="numeric" aria-describedby="grids_freezing-hint"><small class="field-hint" id="grids_freezing-hint">Between 1 and 8.</small></div>
           </div>
         </div>
-        <div class="form-actions"><button type="reset" class="button muted">Clear</button><button type="submit" class="button">Submit request</button></div>
+        </fieldset>
+        <div class="form-actions booking-actions"><p class="booking-actions__note"><i class="fa-solid fa-envelope" aria-hidden="true"></i>The facility team will follow up by email.</p><button type="reset" class="button muted">Clear</button><button type="submit" class="button">Submit request</button></div>
       </form>
+    </div>
+    <aside class="booking-aside" aria-labelledby="booking-aside-title">
+      <div class="booking-aside__card">
+        <span class="booking-kicker">Before you book</span>
+        <h2 id="booking-aside-title">Slot limits</h2>
+        <ul class="booking-rules">
+          <li><span class="booking-rules__icon" aria-hidden="true"><i class="fa-solid fa-snowflake"></i></span><div><strong>Freezing</strong><span>Up to 8 grids. Weekdays only; pick a date from the live availability calendar.</span></div></li>
+          <li><span class="booking-rules__icon" aria-hidden="true"><i class="fa-solid fa-microscope"></i></span><div><strong>Screening</strong><span>Up to 4 grids. Optionally choose your grids from inventory.</span></div></li>
+          <li><span class="booking-rules__icon" aria-hidden="true"><i class="fa-solid fa-database"></i></span><div><strong>Data Collecting</strong><span>Up to 4 grids and up to 4 days.</span></div></li>
+        </ul>
+      </div>
+      <nav class="booking-aside__card booking-links" aria-labelledby="booking-links-title">
+        <span class="booking-kicker" id="booking-links-title">Schedules</span>
+        <a href="{{ url_for('freezing.freezing_schedule') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i>Freezing schedule</a>
+        <a href="{{ url_for('screening.screening_list') }}"><i class="fa-solid fa-microscope" aria-hidden="true"></i>Screening schedule</a>
+        <a href="{{ url_for('imaging.list_view') }}"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i>Data collection schedule</a>
+        <a href="{{ url_for('public.grid_inventory') }}"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>Find your grids</a>
+      </nav>
+    </aside>
     </div>
   </section>
 </main>

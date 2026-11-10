@@ -17,3 +17,8 @@ instance/payment_proofs/
 # IDE
 .vscode/
 preview.db
+
+# Local databases and generated previews
+*.db
+previews/
+charge-sheet-preview.pdf

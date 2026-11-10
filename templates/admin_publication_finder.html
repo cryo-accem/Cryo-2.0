@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Publication finder{% endblock %}
+{% macro candidate_rows(candidates, show_add) %}
+  {% for c in candidates %}
+  <tr>
+    <td class="pubfinder-year">{{ c.year or '—' }}</td>
+    <td class="pubfinder-pub">
+      <strong>{{ c.title }}</strong>
+      <small>{{ c.authors }}{% if c.journal %} · <em>{{ c.journal }}</em>{% endif %}</small>
+      {% if c.is_preprint %}<span class="pubfinder-tag pubfinder-tag--preprint">Preprint</span>{% endif %}
+      {% for pre in c.also_preprint %}<span class="pubfinder-note">Published version; preprint {% if pre.doi_url %}<a href="{{ pre.doi_url }}" target="_blank" rel="noopener noreferrer">{{ pre.doi }}</a>{% else %}{{ pre.title }}{% endif %}{% if pre.year %} ({{ pre.year }}){% endif %}</span>{% endfor %}
+      {% if c.other_dois %}<span class="pubfinder-note">Also: {{ c.other_dois|join(', ') }}</span>{% endif %}
+      {% if c.mentions_national_facility %}<span class="pubfinder-tag pubfinder-tag--flag" title="The acknowledgement also mentions the National Cryo-EM Facility (NCBS). Check that ACCEM was used.">Also thanks National Cryo-EM Facility</span>{% endif %}
+    </td>
+    <td class="pubfinder-links">
+      {% if c.doi_url %}<a href="{{ c.doi_url }}" target="_blank" rel="noopener noreferrer">DOI <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}
+      {% if c.europe_pmc_url %}<a href="{{ c.europe_pmc_url }}" target="_blank" rel="noopener noreferrer">Europe PMC <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% endif %}
+      {% if not c.doi_url and not c.europe_pmc_url %}—{% endif %}
+    </td>
+    <td class="pubfinder-match"><span>{{ describe_matches(c) }}</span><small>{{ c.sources|join(', ') }}</small></td>
+    <td><span class="pubfinder-badge pubfinder-badge--{{ c.confidence }}">{{ c.confidence|capitalize }}</span></td>
+    {% if show_add %}
+    <td class="pubfinder-action">
+      <form method="post" action="{{ url_for('admin.add_finder_publication') }}" class="inline-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="key" value="{{ candidate_key(c) }}">
+        <button class="btn btn-load" type="submit"><i class="fa-solid fa-plus" aria-hidden="true"></i> Add to website</button>
+      </form>
+    </td>
+    {% endif %}
+  </tr>
+  {% endfor %}
+{% endmacro %}
+{% block content %}
+<main class="portal-page"><section class="page-content pubfinder">
+  <header class="page-header page-header--admin">
+    <div><div class="eyebrow">Website content</div><h1>Publication finder</h1><p>Search Europe PMC and OpenAlex for papers that acknowledge ACCEM and compare them with the Publications page.</p></div>
+  </header>
+
+  <section class="data-panel pubfinder-run">
+    <div class="pubfinder-run__intro">
+      <span class="pubfinder-run__icon"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i></span>
+      <div>
+        <h2>Searching for</h2>
+        <ul class="pubfinder-tags">
+          {% for tag in search_tags %}
+          <li>
+            <span class="pubfinder-tags__id">Tag {{ tag.tag }}</span>
+            <strong>“{{ tag.label }}”</strong>
+            <span class="pubfinder-tags__detail">Any of {% for phrase in tag.phrases %}<code>{{ phrase }}</code>{% if not loop.last %} / {% endif %}{% endfor %}
+              with {% for word in tag.institution %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% if tag.city %} and {% for word in tag.city %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}.
+              {% if tag.tag == 'A' %}High confidence in acknowledgements, medium in full text or affiliations.{% else %}High confidence anywhere; centre-name phrases are also searched in OpenAlex full text.{% endif %}</span>
+          </li>
+          {% endfor %}
+        </ul>
+        <p class="pubfinder-muted">Searched in Europe PMC acknowledgement/funding text, full text and affiliations. Papers that also thank the <code>{{ excluded_phrase }}</code> (NCBS, a different facility) are flagged for review. Only open-access papers expose their acknowledgements, so this list cannot be complete.</p>
+      </div>
+    </div>
+    <div class="pubfinder-run__actions">
+      <form method="post" action="{{ url_for('admin.run_publication_finder') }}" data-busy-label="Searching… (about 10–20 seconds)">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <button class="button" type="submit"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> <span data-busy-text>Run search</span></button>
+      </form>
+      {% if run %}<a class="button secondary" href="{{ url_for('admin.download_publication_finder_csv') }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Download CSV</a>{% endif %}
+      <p class="pubfinder-muted">The search takes about 10–20 seconds; keep this page open until it finishes.{% if run %} Last run {{ run.ran_at }} IST ({{ run.duration_seconds }} s).{% else %} No search has been run yet.{% endif %}</p>
+    </div>
+    {% if run and run.queries %}
+    <details class="pubfinder-queries">
+      <summary>Queries in the last run</summary>
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Tag · field</th><th>Source</th><th>Hits</th><th>Query</th></tr></thead><tbody>
+        {% for q in run.queries %}<tr><td>{{ q.id }}</td><td>{{ q.source }}</td><td>{% if q.error %}<span class="pubfinder-badge pubfinder-badge--error">Failed</span><small>{{ q.error }}</small>{% else %}{{ q.hit_count }}{% endif %}</td><td><code>{{ q.query }}</code></td></tr>{% endfor %}
+      </tbody></table></div>
+    </details>
+    {% endif %}
+  </section>
+
+  {% if comparison %}
+  <div class="pubfinder-summary">
+    <div><strong>{{ comparison.not_on_website|length }}</strong><span>Found online, not on website</span></div>
+    <div><strong>{{ comparison.on_website|length }}</strong><span>Already on website</span></div>
+    <div><strong>{{ comparison.on_website_not_found_online|length }}</strong><span>On website, not found online</span></div>
+  </div>
+
+  <section class="data-panel pubfinder-group" id="not-on-website">
+    <h2>Found online, not on website <span class="pubfinder-count">{{ comparison.not_on_website|length }}</span></h2>
+    <p class="pubfinder-muted">Review each paper before adding it: “Add to website” creates a managed publication (editable or removable on the Maintenance page).</p>
+    {% if comparison.not_on_website %}<div class="table-wrap"><table class="data-table pubfinder-table"><thead><tr><th>Year</th><th>Publication</th><th>Links</th><th>Matched (tag: field)</th><th>Confidence</th><th>Action</th></tr></thead><tbody>
+      {{ candidate_rows(comparison.not_on_website, true) }}
+    </tbody></table></div>{% else %}<p class="empty-message">Every paper found online is already on the website.</p>{% endif %}
+  </section>
+
+  <section class="data-panel pubfinder-group" id="on-website">
+    <h2>Already on website <span class="pubfinder-count">{{ comparison.on_website|length }}</span></h2>
+    {% if comparison.on_website %}<div class="table-wrap"><table class="data-table pubfinder-table"><thead><tr><th>Year</th><th>Publication</th><th>Links</th><th>Matched (tag: field)</th><th>Confidence</th></tr></thead><tbody>
+      {{ candidate_rows(comparison.on_website, false) }}
+    </tbody></table></div>{% else %}<p class="empty-message">None of the papers found online are on the website yet.</p>{% endif %}
+  </section>
+
+  <section class="data-panel pubfinder-group" id="not-found-online">
+    <h2>On website but not found online <span class="pubfinder-count">{{ comparison.on_website_not_found_online|length }}</span></h2>
+    <p class="pubfinder-muted">For information only. Many of these are older or not open access, so their acknowledgements cannot be searched; others may thank the facility in different words.</p>
+    {% if comparison.on_website_not_found_online %}<div class="table-wrap"><table class="data-table pubfinder-table"><thead><tr><th>Year</th><th>Citation on website</th><th>Link</th></tr></thead><tbody>
+      {% for entry in comparison.on_website_not_found_online %}<tr><td class="pubfinder-year">{{ entry.year or '—' }}</td><td class="pubfinder-pub">{{ entry.citation }}</td><td class="pubfinder-links">{% if entry.doi_url %}<a href="{{ entry.doi_url }}" target="_blank" rel="noopener noreferrer">DOI <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i></a>{% else %}—{% endif %}</td></tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="empty-message">Every website entry was found online.</p>{% endif %}
+  </section>
+  {% else %}
+  <p class="empty-message">Run the search to see which papers acknowledging ACCEM are missing from the Publications page.</p>
+  {% endif %}
+
+  <section class="data-panel pubfinder-group emdb-panel" id="emdb">
+    <h2>Structures (EMDB) {% if emdb %}<span class="pubfinder-count">{{ emdb.count }}</span>{% endif %}</h2>
+    <p class="pubfinder-muted">Counted on the home page. An EMDB entry counts when it cites a paper on the Publications page (or a high-confidence paper found above), or belongs to an approved IISc group:
+      {% for group in accem_groups %}<strong>{{ group.name }}</strong> (<code>{{ group.depositor }}</code>{% if group.rule == 'facility_head' %}: ORCID, or India-funded deposits{% else %}: India-funded, Talos Arctica{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}.
+      India-funded Talos Arctica entries from other groups are listed under “Needs review” and only count once approved.</p>
+    <div class="pubfinder-run__actions">
+      <form method="post" action="{{ url_for('admin.check_emdb_structures') }}" data-busy-label="Checking EMDB…">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <button class="button" type="submit"><i class="fa-solid fa-cubes" aria-hidden="true"></i> <span data-busy-text>Check EMDB now</span></button>
+      </form>
+      {% if emdb %}<a class="button secondary" href="{{ url_for('admin.download_emdb_csv') }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Download CSV</a>{% endif %}
+      <p class="pubfinder-muted">{% if emdb %}Last checked {{ emdb.checked_at }} UTC; {{ emdb.count }} structures counted. Refreshed daily with the site statistics.{% else %}Not checked yet; the home page shows “85+” until the first check.{% endif %}</p>
+    </div>
+    {% if emdb %}
+    {% if emdb.new_ids %}
+    <div class="emdb-new" role="status">
+      <h3><i class="fa-solid fa-bell" aria-hidden="true"></i> New since last check <span class="pubfinder-count">{{ emdb.new_ids|length }}</span></h3>
+      <ul>{% for entry in emdb.entries if entry.emdb_id in emdb_new_ids %}<li><a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.emdb_id }}</a> {{ entry.title }}{% if entry.paper_title %} <small>· {{ entry.paper_title }}</small>{% endif %}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+    <div class="table-wrap"><table class="data-table pubfinder-table emdb-table"><thead><tr><th>EMDB ID</th><th>Structure</th><th>Released</th><th>Microscope</th><th>Counted because</th></tr></thead>
+      {% for group in emdb_groups %}<tbody>
+        <tr class="emdb-paper-row"><td colspan="5"><strong>{{ group.paper.title }}</strong>{% if group.paper.year %} ({{ group.paper.year }}){% endif %}{% if group.paper.doi %} · <a href="https://doi.org/{{ group.paper.doi }}" target="_blank" rel="noopener noreferrer">{{ group.paper.doi }}</a>{% endif %} <span class="pubfinder-count">{{ group.entries|length }}</span></td></tr>
+        {% for entry in group.entries %}<tr{% if entry.emdb_id in emdb_new_ids %} class="emdb-row--new"{% endif %}>
+          <td class="pubfinder-year"><a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.emdb_id }}</a>{% if entry.emdb_id in emdb_new_ids %} <span class="pubfinder-tag pubfinder-tag--new">New</span>{% endif %}</td>
+          <td class="pubfinder-pub">{{ entry.title }}{% if not group.paper.doi and entry.paper_title and entry.paper_title != entry.title %}<small>{{ entry.paper_title }}</small>{% endif %}</td>
+          <td>{{ entry.release_date or '—' }}</td>
+          <td>{{ entry.microscope or '—' }}</td>
+          <td class="pubfinder-match"><span>{% for source in entry.sources %}{{ emdb_source_labels.get(source, source) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>{% if entry.groups %}<small>{{ entry.groups|join(', ') }}</small>{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody>{% endfor %}
+    </table></div>
+
+    <h3 class="emdb-review-heading">Needs review <span class="pubfinder-count">{{ emdb.needs_review|length }}</span></h3>
+    <p class="pubfinder-muted">India-funded entries collected on a Talos Arctica that no rule above links to ACCEM. Not counted unless approved; other Indian institutes run Talos Arctica microscopes too.{% if emdb.excluded %} Hidden as another institute's microscope: {% for label, n in emdb.excluded.items() %}{{ label }}, {{ n }} {{ 'entry' if n == 1 else 'entries' }}{% if not loop.last %}; {% endif %}{% endfor %}.{% endif %}</p>
+    {% if emdb.needs_review %}<div class="table-wrap"><table class="data-table pubfinder-table"><thead><tr><th>EMDB ID</th><th>Structure</th><th>Depositors</th><th>Released</th><th>Action</th></tr></thead><tbody>
+      {% for entry in emdb.needs_review %}<tr>
+        <td class="pubfinder-year"><a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.emdb_id }}</a></td>
+        <td class="pubfinder-pub">{{ entry.title }}{% if entry.paper_title %}<small>{{ entry.paper_title }}</small>{% endif %}</td>
+        <td class="pubfinder-match">{{ entry.depositors or '—' }}</td>
+        <td>{{ entry.release_date or '—' }}</td>
+        <td class="pubfinder-action">
+          <form method="post" action="{{ url_for('admin.review_emdb_entry') }}" class="inline-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><input type="hidden" name="emdb_id" value="{{ entry.emdb_id }}">
+            <button class="btn btn-load" type="submit" name="action" value="approve"><i class="fa-solid fa-check" aria-hidden="true"></i> Count as ACCEM</button>
+            <button class="btn btn-delete" type="submit" name="action" value="dismiss"><i class="fa-solid fa-xmark" aria-hidden="true"></i> Dismiss</button>
+          </form>
+        </td>
+      </tr>{% endfor %}
+    </tbody></table></div>{% else %}<p class="empty-message">Nothing waiting for review.</p>{% endif %}
+    {% endif %}
+  </section>
+</section></main>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Rates{% endblock %}
+{% block meta_description %}Charge sheet for the Advanced Centre for Cryo-Electron Microscopy (ACCEM), IISc Bengaluru: microscope slots, grids, C-clip and base ring, handling and data processing for internal, academic and industry users.{% endblock %}
+{% block content %}
+<main>
+  <section class="page-content g2-page rates-page">
+    <header class="page-header page-header--rates">
+      <div><div class="eyebrow">Using the facility</div><h1>Rates</h1>
+      <p>Charges for microscope time, grids and services, by user category.</p></div>
+    </header>
+
+    <section class="rates-section" aria-labelledby="rates-table-heading">
+      <div class="g2-head"><span class="g2-kicker">Rates</span><h2 id="rates-table-heading">Charge sheet</h2><p>Base prices in INR. Prices exclude GST for academic and industry users; no GST applies to internal (IISc) users.</p></div>
+      <div class="rates-table-wrap rates-sheet-wrap" role="region" aria-labelledby="rates-table-heading" tabindex="0">
+        <table class="rates-table rates-sheet">
+          <caption>Charge sheet by user category</caption>
+          <thead>
+            <tr>
+              <th scope="col">Particulars</th>
+              {% for category in categories %}<th scope="col">{{ category }}<span class="rates-sheet__gst-head">{{ gst_labels[loop.index0] }}</span></th>{% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            {% if row.note %}
+            <tr class="rates-sheet__note" data-rate-row="{{ row.id }}">
+              <td colspan="{{ categories|length + 1 }}"><i class="fa-solid fa-circle-info" aria-hidden="true"></i> {{ row.label }}</td>
+            </tr>
+            {% else %}
+            <tr class="{% if row.sub_row %}rates-sheet__sub{% endif %}" data-rate-row="{{ row.id }}">
+              <th scope="row">{{ row.label }}<small>{{ row.unit }}</small>{% if row.row_note %}<span class="rates-sheet__row-note">{{ row.row_note }}</span>{% endif %}</th>
+              {% for cell in row.cells %}<td data-label="{{ categories[loop.index0] }}"><span class="rates-sheet__amount">{{ cell.text }}</span>{% if cell.gst %}<span class="rates-sheet__gst">{{ cell.gst }}</span>{% endif %}</td>{% endfor %}
+            </tr>
+            {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="rates-sheet__meta"><i class="fa-solid fa-clock" aria-hidden="true"></i> Rates current as of <time datetime="{{ effective_date.isoformat() }}">{{ effective_date.strftime('%d %B %Y') }}</time> (IST). Final amount is as per the issued charge sheet.</p>
+    </section>
+
+    <section class="rates-section" aria-labelledby="rates-example-heading">
+      <div class="g2-head"><span class="g2-kicker">Examples</span><h2 id="rates-example-heading">Worked examples</h2><p>Calculated with the same rules used for issued charge sheets.</p></div>
+      <div class="rates-examples">
+        {% for example in examples %}
+        <figure class="rates-example">
+          <figcaption class="rates-example__title">{{ example.title }}</figcaption>
+          <dl>
+            {% for label, quantity, amount in example.lines %}
+            <div><dt>{{ label }} <span class="rates-example__qty">{{ quantity }}</span></dt><dd>{{ amount }}</dd></div>
+            {% endfor %}
+            <div class="rates-example__subtotal"><dt>Subtotal</dt><dd data-rates-{{ example.key }}-subtotal>{{ example.subtotal }}</dd></div>
+            <div><dt>GST ({{ example.gst_percent }}%)</dt><dd data-rates-{{ example.key }}-gst>{{ example.gst }}</dd></div>
+            <div class="rates-example__total"><dt>Grand total</dt><dd data-rates-{{ example.key }}-total>{{ example.total }}</dd></div>
+          </dl>
+        </figure>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section class="rates-section rates-notes" aria-labelledby="rates-notes-heading">
+      <div class="g2-head"><span class="g2-kicker">Rules</span><h2 id="rates-notes-heading">How the charges apply</h2></div>
+      <ul class="rates-list">
+        <li><i class="fa-solid fa-check" aria-hidden="true"></i><span><strong>Microscope slot:</strong> charged per 24-hour slot used for screening or data collection.</span></li>
+        <li><i class="fa-solid fa-check" aria-hidden="true"></i><span><strong>Grids:</strong> charged per facility-provided grid at the rate for its type. Your own grids carry no grid charge.</span></li>
+        <li><i class="fa-solid fa-check" aria-hidden="true"></i><span><strong>C-clip and base ring:</strong> charged for screening and data collection, for each grid that is not already clipped. Not charged if your lab provides the C-clip and base ring.</span></li>
+        <li><i class="fa-solid fa-check" aria-hidden="true"></i><span><strong>Handling:</strong> quoted per 4 grids and charged pro rata for the actual number of grids, once on the freezing booking (glow discharger and Vitrobot) and once on the screening / clipping or data-collection booking.</span></li>
+        <li><i class="fa-solid fa-check" aria-hidden="true"></i><span><strong>GST:</strong> 18% GST is added to every line for academic and industry users. Internal (IISc) users do not pay GST and provide a Debit Head instead.</span></li>
+      </ul>
+    </section>
+
+    <div class="rates-cta g2-cta">
+      <span class="g2-cta__icon" aria-hidden="true"><i class="fa-solid fa-calendar-days"></i></span>
+      <p>Planning an experiment? Contact the EM manager before submitting a sample, then request a slot.</p>
+      <div class="g2-cta__actions">
+        <a class="button" href="{{ url_for('register.register') }}">Book slots</a>
+        <a class="rates-cta__link" href="{{ url_for('public.faq') }}">Read the FAQ</a>
+        <a class="rates-cta__link" href="{{ url_for('public.contact') }}">Contact us</a>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

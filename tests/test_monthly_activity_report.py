@@ -68,6 +68,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
     def test_custom_month_range_downloads_editable_report_with_activity_and_totals(self):
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         response = self.client.get(
             "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"
@@ -106,6 +111,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
     def test_invalid_custom_range_returns_validation_error(self):
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         response = self.client.get(
             "/admin/activity-report.docx?range=custom&start_date=2024-05-01&end_date=2024-04-30"
@@ -116,6 +126,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
     def test_custom_date_range_excludes_other_dates_in_the_same_month(self):
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         response = self.client.get(
             "/admin/activity-report.docx?range=custom&start_date=2024-04-11&end_date=2024-04-19"
@@ -151,6 +166,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
             conn.close()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         response = self.client.get(
             "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"
@@ -178,6 +198,11 @@ class MonthlyActivityReportTests(unittest.TestCase):
             conn.close()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         pending_response = self.client.get(
             "/admin/activity-report.docx?range=custom&start_date=2024-04-01&end_date=2024-04-30"

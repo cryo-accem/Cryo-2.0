@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Contact{% endblock %}
+{% block meta_description %}Contact the Advanced Centre for Cryo-Electron Microscopy (ACCEM) at the Indian Institute of Science, Bengaluru: EM manager and faculty in-charge email addresses and campus location.{% endblock %}
+{% block content %}
+<main>
+  <section class="page-content g2-page contact-page">
+    <header class="page-header page-header--contact">
+      <div><div class="eyebrow">Get in touch</div><h1>Contact</h1>
+      <p>Write to the EM manager before submitting a sample or requesting a slot.</p></div>
+    </header>
+
+    <div class="contact-grid">
+      <article class="contact-card" aria-labelledby="contact-email-heading">
+        <span class="contact-card__icon"><i class="fa-solid fa-envelope" aria-hidden="true"></i></span>
+        <h2 id="contact-email-heading">Email us</h2>
+        <p>Email is the best way to reach the facility.</p>
+        <ul class="contact-card__list">
+          <li><span class="contact-card__mail" aria-hidden="true"><i class="fa-solid fa-envelope"></i></span><span class="contact-card__role">EM manager</span><a href="mailto:cryoem.iisc@gmail.com">cryoem.iisc@gmail.com</a></li>
+          <li><span class="contact-card__mail" aria-hidden="true"><i class="fa-solid fa-envelope"></i></span><span class="contact-card__role">Faculty in-charge</span><a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a></li>
+        </ul>
+      </article>
+
+      <article class="contact-card" aria-labelledby="contact-location-heading">
+        <span class="contact-card__icon"><i class="fa-solid fa-microscope" aria-hidden="true"></i></span>
+        <h2 id="contact-location-heading">Find us</h2>
+        <address class="contact-card__address">Advanced Centre for Cryo-Electron Microscopy<br>Indian Institute of Science<br>Bengaluru 560012</address>
+        <a class="contact-card__map" href="https://www.google.com/maps/search/?api=1&amp;query=Indian+Institute+of+Science+Bengaluru" target="_blank" rel="noopener">Open IISc campus in Google Maps <i class="fa-solid fa-arrow-up-right-from-square" aria-hidden="true"></i><span class="footer-sr-only"> (opens in a new tab)</span></a>
+      </article>
+    </div>
+
+    <div class="contact-next g2-cta">
+      <span class="g2-cta__icon" aria-hidden="true"><i class="fa-solid fa-circle-info"></i></span>
+      <p>Looking for something specific?</p>
+      <div class="g2-cta__actions">
+        <a class="button" href="{{ url_for('register.register') }}">Book slots</a>
+        <a class="rates-cta__link" href="{{ url_for('public.faq') }}">Read the FAQ</a>
+        <a class="rates-cta__link" href="{{ url_for('public.rates') }}">See rates</a>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,11 +1,24 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Screening schedule{% endblock %}
 {% block content %}
-<main class="portal-page"><section class="page-content">
+<main class="portal-page schedule-view"><section class="page-content schedule-page">
   <header class="page-header page-header--portal page-header--schedule"><div><div class="eyebrow">User portal</div><h1>Screening slots</h1><p>Current availability for cryo-EM screening.</p></div></header>
+  <nav class="schedule-tabs" aria-label="Schedules">
+    <a href="{{ url_for('freezing.freezing_schedule') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i>Freezing</a>
+    <a href="{{ url_for('screening.screening_list') }}" aria-current="page"><i class="fa-solid fa-microscope" aria-hidden="true"></i>Screening</a>
+    <a href="{{ url_for('imaging.list_view') }}"><i class="fa-solid fa-database" aria-hidden="true"></i>Data collection</a>
+    <a href="{{ url_for('public.grid_inventory') }}"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>Find your grids</a>
+    <a class="button schedule-tabs__book" href="{{ url_for('register.register') }}"><i class="fa-solid fa-calendar-days" aria-hidden="true"></i>Book a slot</a>
+  </nav>
   <div class="data-stack">
-    <section class="data-panel"><h2>Ongoing screening and data collection</h2>{% if ongoing_slots %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Service</th><th>Name of User</th><th>Name of PI</th><th>Origin</th><th>Registration Date</th></tr></thead><tbody>{% for slot in ongoing_slots %}<tr><td><span class="status-badge">{{ slot.service }}</span></td><td>{{ slot.user_name }}</td><td>{{ slot.pi_name }}</td><td>{{ slot.origin if slot.origin else slot.esm }}</td><td>{{ slot.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No ongoing screening or data collection slots at the moment.</div>{% endif %}</section>
-    <section class="data-panel"><h2>Waiting slots</h2>{% if waiting_slots %}<div class="table-wrap"><table class="data-table"><thead><tr><th>Position</th><th>Name of User</th><th>Name of PI</th><th>Origin</th><th>Registration Date</th></tr></thead><tbody>{% for slot in waiting_slots %}<tr><td>{{ loop.index }}</td><td>{{ slot.user_name }}</td><td>{{ slot.pi_name }}</td><td>{{ slot.origin if slot.origin else slot.esm }}</td><td>{{ slot.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message">No waiting screening slots at the moment.</div>{% endif %}</section>
+    <section class="data-panel schedule-panel" aria-labelledby="screening-ongoing-title">
+      <div class="schedule-panel__head"><span class="schedule-panel__icon" aria-hidden="true"><i class="fa-solid fa-microscope"></i></span><h2 id="screening-ongoing-title">Ongoing screening and data collection</h2><span class="schedule-count schedule-count--ongoing">{{ ongoing_slots|length }} ongoing</span></div>
+      {% if ongoing_slots %}<div class="table-wrap"><table class="data-table schedule-table"><thead><tr><th scope="col">Service</th><th scope="col">Name of User</th><th scope="col">Name of PI</th><th scope="col">Origin</th><th scope="col">Registration Date</th></tr></thead><tbody>{% for slot in ongoing_slots %}<tr><td data-label="Service"><span class="status-badge status-badge--{{ 'screening' if slot.service == 'Screening' else 'datacollection' }}">{{ slot.service }}</span></td><td data-label="Name of User" class="schedule-table__name">{{ slot.user_name }}</td><td data-label="Name of PI">{{ slot.pi_name }}</td><td data-label="Origin">{{ slot.origin if slot.origin else slot.esm }}</td><td data-label="Registration Date">{{ slot.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message schedule-empty"><i class="fa-solid fa-microscope" aria-hidden="true"></i><span>No ongoing screening or data collection slots at the moment.</span></div>{% endif %}
+    </section>
+    <section class="data-panel schedule-panel" aria-labelledby="screening-waiting-title">
+      <div class="schedule-panel__head"><span class="schedule-panel__icon" aria-hidden="true"><i class="fa-solid fa-clock"></i></span><h2 id="screening-waiting-title">Waiting slots</h2><span class="schedule-count schedule-count--waiting">{{ waiting_slots|length }} waiting</span></div>
+      {% if waiting_slots %}<div class="table-wrap"><table class="data-table schedule-table"><thead><tr><th scope="col">Position</th><th scope="col">Name of User</th><th scope="col">Name of PI</th><th scope="col">Origin</th><th scope="col">Registration Date</th></tr></thead><tbody>{% for slot in waiting_slots %}<tr><td data-label="Position"><span class="queue-pos">{{ loop.index }}</span></td><td data-label="Name of User" class="schedule-table__name">{{ slot.user_name }}</td><td data-label="Name of PI">{{ slot.pi_name }}</td><td data-label="Origin">{{ slot.origin if slot.origin else slot.esm }}</td><td data-label="Registration Date">{{ slot.registration_date }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-message schedule-empty"><i class="fa-solid fa-clock" aria-hidden="true"></i><span>No waiting screening slots at the moment.</span></div>{% endif %}
+    </section>
   </div>
 </section>
   <div class="success-modal" id="success-modal" data-success-type="Screening">

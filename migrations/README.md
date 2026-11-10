@@ -49,3 +49,32 @@ before it starts serving requests. The migration is idempotent, so it can
 safely run again when the application restarts. For environments with an
 existing deployment, run the manual command above once if the service has not
 yet restarted with this application version.
+
+## Migration 008 is intentionally not applied
+
+`008_csic_project_entries` (both dialects) is deliberately left out of the
+`MIGRATIONS` tuple in `apply_grid_inventory.py`. Nothing in the application
+reads or writes a `csic_project_entries` table, so the runner never creates
+it. The files are kept only so the version number is not reused; do not add
+008 to the tuple unless a feature starts using that table.
+
+## Idempotency on MySQL
+
+MySQL commits DDL implicitly, so a transaction rollback cannot undo an
+`ALTER TABLE` that ran before a later failure. The runner therefore commits
+after each MySQL migration and treats "duplicate column" (1060) and
+"duplicate key name" (1061) errors as an already-applied step, so a restart
+after a partial failure does not crash on the repeated DDL. Keep new MySQL
+`ALTER TABLE ... ADD COLUMN` / `CREATE INDEX` migrations to one column or
+index per statement so each step can be skipped independently. SQLite still
+applies all pending migrations in a single transaction.
+
+## Storage names are case-insensitive on MySQL only
+
+Falcon container, grid box, and position values (`storage_locations`) are
+compared using the database's default collation. Production MySQL uses a
+case- and accent-insensitive collation (e.g. `utf8mb4_0900_ai_ci`), so `F1`
+and `f1` are the same container there and collide on
+`uq_storage_active_position`, while the SQLite preview/test database treats
+them as different. No schema change is made; normalise or compare names
+case-insensitively in application code if consistent behaviour is needed.

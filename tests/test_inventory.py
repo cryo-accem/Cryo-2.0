@@ -270,10 +270,8 @@ class GridInventoryTests(unittest.TestCase):
         dashboard = self.client.get("/admin/inventory/")
         self.assertEqual(dashboard.status_code, 200)
         content = dashboard.data.decode()
-        self.assertIn(
-            "/static/css/site.css?v=20261103-storage-name-suggestions-v1",
-            content,
-        )
+        # The stylesheet is cache-busted; the exact version changes with CSS edits.
+        self.assertRegex(content, r"/static/css/site\.css\?v=[\w.-]+")
         self.assertIn("Falcon-A", content)
         self.assertIn("GridBox-1", content)
         self.assertIn(
@@ -671,7 +669,7 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(response.status_code, 302)
 
         guest = self.app.test_client()
-        inventory_search = guest.get("/inventory/search?user_name=subhajit")
+        inventory_search = guest.get("/inventory/search?user_name=%20subhajit%20MAHANTY%20")
         self.assertEqual(inventory_search.status_code, 200)
         grids = inventory_search.get_json()["grids"]
         grid_codes = [grid["grid_code"] for grid in grids]
@@ -703,7 +701,7 @@ class GridInventoryTests(unittest.TestCase):
                 data={
                     "_csrf_token": csrf_match.group(1).decode(),
                     "reg_type": "screening",
-                    "user_name": "Subhajit",
+                    "user_name": "subhajit mahanty",
                     "pi_name": "ACCEM Trial PI",
                     "email": "pipeline-screening@example.test",
                     "origin": "Internal",
@@ -731,7 +729,10 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(linked_codes, sorted(grid_codes))
 
         with patch("blueprints.admin.send_email"):
-            response = self.client.get(f"/admin/screening/load/{screening_booking_id}")
+            response = self.client.post(
+                f"/admin/screening/load/{screening_booking_id}",
+                data={"_csrf_token": self.csrf_token()},
+            )
         self.assertEqual(response.status_code, 302)
         conn = database.get_db()
         screening_status = conn.execute(
@@ -1017,8 +1018,9 @@ class GridInventoryTests(unittest.TestCase):
                 self.assertEqual(linked_codes, frozen_codes[:2])
 
                 with patch("blueprints.admin.send_email"):
-                    load_response = self.client.get(
-                        f"/admin/screening/load/{screening['id']}"
+                    load_response = self.client.post(
+                        f"/admin/screening/load/{screening['id']}",
+                        data={"_csrf_token": self.csrf_token()},
                     )
                 self.assertEqual(load_response.status_code, 302)
                 conn = database.get_db()
@@ -1678,21 +1680,29 @@ class GridInventoryTests(unittest.TestCase):
         conn.close()
         self.assertEqual(linked_grid["grid_code"], selected_grid)
 
-    def test_name_search_matches_first_or_last_name_without_case_sensitivity(self):
+    def test_public_name_search_requires_full_name_without_case_sensitivity(self):
         grid = self.create_batch(
             1, researcher_name="Subhajit Mahanty", sample_name="Name search sample"
         )[0]
         guest = self.app.test_client()
 
-        for name_variant in ("subhajit", "MAHANTY", "sUbHaJiT mAhAnTy"):
+        for name_variant in ("subhajit mahanty", "SUBHAJIT MAHANTY", "sUbHaJiT mAhAnTy"):
             response = guest.get(f"/inventory?username={name_variant.replace(' ', '%20')}")
             self.assertIn(grid.encode(), response.data, name_variant)
 
+        # Partial names must not reveal another researcher's grids publicly.
+        for partial in ("subhajit", "MAHANTY", "e"):
+            response = guest.get(f"/inventory?username={partial}")
+            self.assertNotIn(grid.encode(), response.data, partial)
+            search = guest.get(f"/inventory/search?user_name={partial}")
+            self.assertEqual(search.get_json().get("grids", []), [], partial)
+
+        # Admin search keeps partial matching.
         for query in ("SUBHAJIT", "mahanty"):
             response = self.client.get(f"/admin/inventory/grids?q={query}")
             self.assertIn(grid.encode(), response.data, query)
 
-        search = guest.get("/inventory/search?user_name=mahanty")
+        search = guest.get("/inventory/search?user_name=subhajit%20mahanty")
         self.assertEqual(
             [item["grid_code"] for item in search.get_json()["grids"]],
             [grid],
@@ -1707,7 +1717,7 @@ class GridInventoryTests(unittest.TestCase):
                 data={
                     "_csrf_token": csrf_match.group(1).decode(),
                     "reg_type": "screening",
-                    "user_name": "subhajit",
+                    "user_name": "  SUBHAJIT mahanty ",
                     "pi_name": "Grid PI",
                     "email": "subhajit-search@example.test",
                     "origin": "Internal",
@@ -1717,6 +1727,16 @@ class GridInventoryTests(unittest.TestCase):
                 },
             )
         self.assertEqual(booking.status_code, 302)
+        conn = database.get_db()
+        linked = conn.execute(
+            """SELECT g.grid_code FROM screening_booking_grids l
+               JOIN screening_bookings b ON b.id=l.screening_booking_id
+               JOIN inventory_grids g ON g.grid_id=l.grid_id
+               WHERE b.email=?""",
+            ["subhajit-search@example.test"],
+        ).fetchone()
+        conn.close()
+        self.assertEqual(linked["grid_code"], grid)
 
     def test_public_registration_rejects_unrecognized_origin_values(self):
         response = self.client.post(
@@ -1901,7 +1921,10 @@ class GridInventoryTests(unittest.TestCase):
         self.assertEqual(initial_grid["current_status"], "Frozen")
 
         with patch("blueprints.admin.send_email"):
-            response = self.client.get(f"/admin/screening/load/{booking['id']}")
+            response = self.client.post(
+                f"/admin/screening/load/{booking['id']}",
+                data={"_csrf_token": self.csrf_token()},
+            )
         self.assertEqual(response.status_code, 302)
         detail = self.client.get(f"/admin/inventory/grids/{grid_code}")
         self.assertIn(b"In Data Collection", detail.data)
@@ -2167,7 +2190,7 @@ class GridInventoryTests(unittest.TestCase):
             self.assertIn(b"Copy first Falcon to all grids", page.data)
             self.assertIn(b"Copy first grid box to all grids", page.data)
             self.assertIn(b"data-copy-first-grid-field", page.data)
-            self.assertIn(b"20261103-storage-name-suggestions-v1", page.data)
+            self.assertRegex(page.get_data(as_text=True), r"/static/js/storage_name_suggestions\.js\?v=[0-9a-f]{12}")
             self.assertIn(
                 b"additionalGridStorage.hidden = additionalCount === 0 && linkedGridCount > 0",
                 page.data,
@@ -2205,7 +2228,10 @@ class GridInventoryTests(unittest.TestCase):
                 ).fetchone()["id"]
                 conn.close()
                 with patch("blueprints.admin.send_email"):
-                    load_response = self.client.get(f"{load_path}{booking_id}")
+                    load_response = self.client.post(
+                        f"{load_path}{booking_id}",
+                        data={"_csrf_token": self.csrf_token()},
+                    )
                 self.assertEqual(load_response.status_code, 302)
 
                 with patch("blueprints.admin.send_email"):

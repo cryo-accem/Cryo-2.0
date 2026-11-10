@@ -23,6 +23,11 @@ class AdminMaintenancePagesTests(unittest.TestCase):
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def test_maintenance_hides_editable_public_pages(self):
         response = self.client.get("/admin/maintenance")
@@ -75,6 +80,11 @@ class AdminMaintenancePagesTests(unittest.TestCase):
         self.assertIn(b'rel="noopener noreferrer"', public_page.data)
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         edited = self.client.post(
             "/admin/maintenance/notices/save",
@@ -92,6 +102,11 @@ class AdminMaintenancePagesTests(unittest.TestCase):
         self.assertNotIn(b"Cryo-EM workshop", hidden_page.data)
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
         deleted = self.client.post(
             f"/admin/maintenance/notices/{notice_id}/delete",

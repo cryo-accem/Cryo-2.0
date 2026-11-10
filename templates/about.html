@@ -2,20 +2,72 @@
 {% block title %}ACCEM | {{ page_content.title if page_content else 'About' }}{% endblock %}
 {% block content %}
 <main>
-  <section class="page-content">
+  <section class="page-content about-page">
     <header class="page-header page-header--science">
       <div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'About ACCEM' }}</div><h1>{{ page_content.title if page_content else 'About the facility' }}</h1>
       <p>{{ page_content.intro if page_content else 'Open-access cryo-electron microscopy infrastructure for researchers across India.' }}</p></div>
     </header>
     {% if page_content and page_content.additional_content %}<div class="managed-page-content prose">{{ page_content.additional_content }}</div>{% endif %}
-    <div class="prose">
-      <p>The Cryo-electron microscopy facility at IISc features a state-of-the-art 200 kV Talos-Arctica electron microscope (FEI/Thermo Scientific) equipped with a Gatan K2 Summit Direct Electron Detector, automatic data acquisition via the Latitude S software package, and a Talos L120C Transmission Electron Microscope. Typically, the Talos L120C is used for negative stain sample visualization before proceeding to cryo-EM data collection using the 200 kV Talos-Arctica microscope.</p>
-      <p>The facility is also equipped with essential sample preparation tools such as the FEI Vitrobot™ Mark IV, Pelco easiGLOW &amp; GloQube glow discharge system, and Q150T ES carbon coater.</p>
-      <p>We provide one of the finest cryo-EM facilities in India, supporting negative staining, cryo-EM sample preparation, high-throughput data acquisition, fast data transfer, secure storage, and automatic movie frame alignment. Researchers are supported throughout sample preparation, data collection, and preliminary image analysis.</p>
-      <p><strong>Mission:</strong> Our goal is to offer open access to the cryo-EM facility for all researchers through a nominal charge or collaborative model. Renowned faculty, postdocs, and EM managers at IISc provide training on protein purification, sample prep, data collection, and basic image processing. Our broader vision is to establish a national-level cryo-EM hub that benefits researchers across India.</p>
-      <p><strong>Note:</strong> Currently, full-scale data processing support is limited to collaborative projects only.</p>
-      <div class="notice"><strong>This facility was developed with support from the Department of Biotechnology (DBT-SAHAJ), Government of India, through Infrastructure Grants, and the DST-FIST grant to the Molecular Biophysics Unit, IISc.</strong></div>
+
+    <section class="about-overview" aria-labelledby="about-overview-title">
+      <div class="about-overview__text">
+        <span class="about-kicker">Overview</span>
+        <h2 id="about-overview-title">Cryo-EM at the Indian Institute of Science</h2>
+        <p>The Cryo-electron microscopy facility at IISc features a state-of-the-art 200 kV Talos-Arctica electron microscope (FEI/Thermo Scientific) equipped with a Gatan K2 Summit Direct Electron Detector, automatic data acquisition via the Latitude S software package, and a Talos L120C Transmission Electron Microscope. Typically, the Talos L120C is used for negative stain sample visualization before proceeding to cryo-EM data collection using the 200 kV Talos-Arctica microscope.</p>
+      </div>
+      <figure class="about-overview__photo">
+        <img src="{{ url_for('static', filename='images/talos_arctica-800w.webp') }}" srcset="{{ url_for('static', filename='images/talos_arctica-600w.webp') }} 600w, {{ url_for('static', filename='images/talos_arctica-800w.webp') }} 800w, {{ url_for('static', filename='images/talos_arctica-1200w.webp') }} 1200w" sizes="(max-width: 900px) 100vw, 460px" width="1375" height="1144" alt="The 200 kV Talos Arctica cryo-electron microscope at ACCEM" loading="lazy" decoding="async">
+        <figcaption>200 kV Talos Arctica, ACCEM</figcaption>
+      </figure>
+    </section>
+
+    <ul class="about-glance" aria-label="Instruments at a glance">
+      <li><i class="fa-solid fa-microscope" aria-hidden="true"></i><strong>200 kV</strong><span>Talos Arctica cryo-TEM</span></li>
+      <li><i class="fa-solid fa-cubes" aria-hidden="true"></i><strong>K2 Summit</strong><span>Direct electron detector</span></li>
+      <li><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><strong>Talos L120C</strong><span>Negative stain screening</span></li>
+      <li><i class="fa-solid fa-snowflake" aria-hidden="true"></i><strong>Vitrobot Mark IV</strong><span>Grid vitrification</span></li>
+    </ul>
+
+    <div class="about-cards">
+      <article class="about-card">
+        <span class="about-card__icon"><i class="fa-solid fa-snowflake" aria-hidden="true"></i></span>
+        <h3>Sample preparation</h3>
+        <p>The facility is also equipped with essential sample preparation tools such as the FEI Vitrobot™ Mark IV, Pelco easiGLOW &amp; GloQube glow discharge system, and Q150T ES carbon coater.</p>
+        <ul class="about-tags" aria-label="Sample preparation instruments">
+          <li>FEI Vitrobot™ Mark IV</li><li>Pelco easiGLOW</li><li>GloQube glow discharge</li><li>Q150T ES carbon coater</li>
+        </ul>
+        <a class="about-card__link" href="{{ url_for('public.equipments') }}">See the equipment <span aria-hidden="true">→</span></a>
+      </article>
+      <article class="about-card">
+        <span class="about-card__icon"><i class="fa-solid fa-server" aria-hidden="true"></i></span>
+        <h3>What we support</h3>
+        <p>We provide one of the finest cryo-EM facilities in India, supporting negative staining, cryo-EM sample preparation, high-throughput data acquisition, fast data transfer, secure storage, and automatic movie frame alignment. Researchers are supported throughout sample preparation, data collection, and preliminary image analysis.</p>
+        <ul class="about-tags" aria-label="Services">
+          <li>Negative staining</li><li>Sample preparation</li><li>High-throughput acquisition</li><li>Fast data transfer</li><li>Secure storage</li><li>Movie frame alignment</li>
+        </ul>
+      </article>
     </div>
+
+    <section class="about-mission" aria-labelledby="about-mission-title">
+      <span class="about-mission__icon"><i class="fa-solid fa-users" aria-hidden="true"></i></span>
+      <div>
+        <h2 id="about-mission-title">Mission</h2>
+        <p>Our goal is to offer open access to the cryo-EM facility for all researchers through a nominal charge or collaborative model. Renowned faculty, postdocs, and EM managers at IISc provide training on protein purification, sample prep, data collection, and basic image processing. Our broader vision is to establish a national-level cryo-EM hub that benefits researchers across India.</p>
+        <p class="about-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span><strong>Note:</strong> Currently, full-scale data processing support is limited to collaborative projects only.</span></p>
+      </div>
+    </section>
+
+    <aside class="about-funding">
+      <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+      <p>This facility was developed with support from the Department of Biotechnology (DBT-SAHAJ), Government of India, through Infrastructure Grants, and the DST-FIST grant to the Molecular Biophysics Unit, IISc.</p>
+    </aside>
+
+    <nav class="about-next" aria-label="Next steps">
+      <a class="button" href="{{ url_for('register.register') }}">Book slots</a>
+      <a class="about-next__link" href="{{ url_for('public.facility') }}">How to use the facility <span aria-hidden="true">→</span></a>
+      <a class="about-next__link" href="{{ url_for('public.rates') }}">Rates <span aria-hidden="true">→</span></a>
+      <a class="about-next__link" href="{{ url_for('public.equipments') }}">All equipment <span aria-hidden="true">→</span></a>
+    </nav>
   </section>
 </main>
 {% endblock %}

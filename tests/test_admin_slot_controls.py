@@ -22,6 +22,11 @@ class AdminSlotControlsTests(unittest.TestCase):
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def _csrf_token(self):
         response = self.client.get("/admin/panel")

@@ -262,13 +262,19 @@ def build_monthly_activity_report(
                 row.get("pi_name") or "-",
                 row.get("sample_name") or "-",
                 int(_decimal(row.get("clipped_grids"))),
-                _money(_decimal(row.get("clipping_charge"))),
+                # The legacy clipping_charge column holds the C-clip + base ring
+                # charge (billed per unclipped grid), not a charge for clipping.
+                _money(_decimal(
+                    row.get("clip_base_charge")
+                    if row.get("clip_base_charge") is not None
+                    else row.get("clipping_charge")
+                )),
             )
             for service, row in clipped_events
         ]
         _add_table(
             document,
-            ("Service", "Date", "User", "PI", "Sample", "Grids clipped", "Clipping charge"),
+            ("Service", "Date", "User", "PI", "Sample", "Grids clipped", "C-clip + base ring charge"),
             clipping_rows,
         )
     else:

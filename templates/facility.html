@@ -8,14 +8,87 @@
       <p>{{ page_content.intro if page_content else 'Plan your experiment and connect with the EM manager before submitting a sample.' }}</p></div>
     </header>
     {% if page_content and page_content.additional_content %}<div class="managed-page-content prose">{{ page_content.additional_content }}</div>{% endif %}
-    <div class="prose">
-      <p>Any academic or industrial researchers and scientists who want to use the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY FACILITY at IISc for high-resolution data collection should directly contact the EM manager <strong>(cryoem.iisc@gmail.com)</strong> or <a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a>. A nominal charge will be applicable for cryo-EM grid preparation &amp; microscope usage. Users must provide sample details and preliminary purification or biochemical data to access the microscope. If not provided, no assurance will be given about grid/data quality.</p>
-      <p>Most cryo-EM apparatuses and accessories are expensive. Therefore, external/internal users cannot request cryo-freezing, cartridge preparation, or cassette transfer. Only expert users (mainly PIs) should prepare samples or hand over to the EM manager. Only trained users are allowed to operate the microscope (Latitude S Software).</p>
-      <p>Data will be transferred to users' hard drives (not provided by the facility), and processing may take 2–3 days. Users should make their own arrangements for collecting/shipping the drives. While full data processing support is not available, assistance will be provided if necessary.</p>
-      <p>Users publishing work based on data collected at our facility should acknowledge the facility personnel and include the following funding acknowledgement:</p>
-      <div class="notice"><em>"The data was collected at the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY FACILITY FOR BIOLOGICAL SCIENCES AT IISc, Bengaluru, India funded by Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST."</em><br><br>This applies even if the data collection is conducted elsewhere after screening at IISc. (<a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a>)</div>
-      <p><strong>Industrial samples will receive preferential consideration.</strong><br><strong>For safety and handling considerations, the first and last grid positions of the cassette will be left unoccupied.</strong></p>
+
+    <section class="ins-flow" aria-labelledby="ins-flow-title">
+      <div class="section-heading ins-heading">
+        <h2 id="ins-flow-title">How to use the facility</h2>
+        <p>Academic and industrial researchers who want to use ACCEM at IISc for high-resolution data collection follow these steps.</p>
+      </div>
+      <ol class="ins-steps">
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">01</span>
+          <h3>Contact the EM manager</h3>
+          <p>Write to the EM manager directly at <a href="mailto:cryoem.iisc@gmail.com">cryoem.iisc@gmail.com</a> or <a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a>. A nominal charge applies for cryo-EM grid preparation and microscope usage.</p>
+          <a class="ins-step__link" href="{{ url_for('public.rates') }}">See rates →</a>
+        </li>
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">02</span>
+          <h3>Share sample details &amp; preliminary data</h3>
+          <p>Provide sample details and preliminary purification or biochemical data to access the microscope. If not provided, no assurance will be given about grid/data quality.</p>
+          <a class="ins-step__link" href="{{ url_for('register.register') }}">Book slots →</a>
+        </li>
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">03</span>
+          <h3>Grid freezing</h3>
+          <p>Cryo-EM apparatus and accessories are expensive, so only expert users (mainly PIs) prepare samples or hand them over to the EM manager.</p>
+          <a class="ins-step__link" href="{{ url_for('freezing.freezing_schedule') }}">Freezing schedule →</a>
+        </li>
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">04</span>
+          <h3>Screening</h3>
+          <p>For safety and handling considerations, the first and last grid positions of the cassette will be left unoccupied.</p>
+          <a class="ins-step__link" href="{{ url_for('screening.screening_list') }}">Screening schedule →</a>
+        </li>
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">05</span>
+          <h3>Data collection</h3>
+          <p>Only trained users are allowed to operate the microscope (Latitude S software).</p>
+          <a class="ins-step__link" href="{{ url_for('imaging.list_view') }}">Data collection schedule →</a>
+        </li>
+        <li class="ins-step">
+          <span class="ins-step__number" aria-hidden="true">06</span>
+          <h3>Data hand-off &amp; processing</h3>
+          <p>Data are transferred to your own hard drive; processing may take 2–3 days. Full data processing support is not available, but assistance is provided if necessary.</p>
+          <a class="ins-step__link" href="{{ url_for('public.grid_inventory') }}">Find your grids →</a>
+        </li>
+      </ol>
+    </section>
+
+    <div class="ins-cards">
+      <section class="ins-card ins-checklist" aria-labelledby="ins-checklist-title">
+        <h2 id="ins-checklist-title"><i class="fa-solid fa-clipboard" aria-hidden="true"></i>Good to know</h2>
+        <h3 class="ins-checklist__group">Before you come</h3>
+        <ul class="ins-checklist__list">
+          <li><i class="fa-solid fa-check" aria-hidden="true"></i><span>Sample details and preliminary purification or biochemical data are required.</span></li>
+          <li><i class="fa-solid fa-check" aria-hidden="true"></i><span>Bring your own hard drive (not provided by the facility) and arrange collection or shipping of the drive yourself.</span></li>
+        </ul>
+        <h3 class="ins-checklist__group">Facility rules</h3>
+        <ul class="ins-checklist__list ins-checklist__list--rules">
+          <li><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Only trained users are allowed to operate the microscope (Latitude S software).</span></li>
+          <li><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Only expert users (mainly PIs) should prepare samples or hand over to the EM manager.</span></li>
+          <li><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>External and internal users cannot request cryo-freezing, cartridge preparation or cassette transfer.</span></li>
+          <li><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>The first and last cassette positions are left empty.</span></li>
+        </ul>
+        <h3 class="ins-checklist__group">Scheduling</h3>
+        <ul class="ins-checklist__list ins-checklist__list--rules">
+          <li><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>Industrial samples will receive preferential consideration.</span></li>
+        </ul>
+      </section>
+
+      <section class="ins-card ins-ack" aria-labelledby="ins-ack-title">
+        <h2 id="ins-ack-title"><i class="fa-solid fa-book-open" aria-hidden="true"></i>Acknowledging the facility</h2>
+        <p>If you publish work based on data collected at ACCEM, acknowledge the facility personnel and include this funding acknowledgement. It applies even if data collection is done elsewhere after screening at IISc.</p>
+        <figure class="ins-ack__quote">
+          <blockquote id="ack-text">The data was collected at the ADVANCED CENTER FOR CRYO-ELECTRON MICROSCOPY FACILITY FOR BIOLOGICAL SCIENCES AT IISc, Bengaluru, India funded by Department of Biotechnology (DBT) Infrastructure Grant, Govt of India and DST-FIST.</blockquote>
+          <div class="ins-ack__actions">
+            <button class="ins-ack__copy" type="button" data-copy-target="ack-text"><i class="fa-solid fa-clipboard" aria-hidden="true"></i><span data-copy-label>Copy acknowledgement</span></button>
+            <span class="ins-ack__status" role="status" aria-live="polite" data-copy-status></span>
+          </div>
+        </figure>
+      </section>
     </div>
+
+    <p class="ins-contact"><i class="fa-solid fa-envelope" aria-hidden="true"></i><span>Questions? Contact the EM manager at <a href="mailto:cryoem.iisc@gmail.com">cryoem.iisc@gmail.com</a> or <a href="mailto:somnath@iisc.ac.in">somnath@iisc.ac.in</a>.</span></p>
   </section>
 </main>
 {% endblock %}

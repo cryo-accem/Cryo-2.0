@@ -29,13 +29,13 @@ class PublicSlideshowTests(unittest.TestCase):
         self.assertNotIn("1c.jpg", images)
         self.assertEqual(len(images), len(set(images)))
 
-    def test_webp_responses_are_cached_for_one_day(self):
+    def test_webp_responses_are_cached_for_one_week(self):
         response = self.client.get("/static/images/iisc_logo.webp")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.mimetype, "image/webp")
         self.assertIn("public", response.headers["Cache-Control"])
-        self.assertIn("max-age=86400", response.headers["Cache-Control"])
+        self.assertIn("max-age=604800", response.headers["Cache-Control"])
         self.assertNotIn("no-cache", response.headers["Cache-Control"])
 
 

@@ -4,7 +4,8 @@ from decimal import Decimal
 from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
-from revenue import calculate_charge_sheet, is_non_billable_booking
+from revenue import billed_origin, calculate_charge_sheet, is_non_billable_booking
+from inventory_service import _begin, _lock_clause, facility_today
 
 freezing_bp = Blueprint("freezing", __name__)
 
@@ -41,7 +42,7 @@ def complete_freezing_booking(cur, booking_id, actual_grids, grid_source="facili
             bill_generated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
         (booking["user_name"], booking["pi_name"], booking["email"],
-         booking["origin"], booking["sample_name"], booking["grids"],
+         billed_origin(booking["origin"], user_category), booking["sample_name"], booking["grids"],
          booking["freezing_date"], str(actual_grids), charges["number_of_grids"],
          charges["service_stage"], charges["grid_source"], charges["grid_type"],
          json.dumps({"normal_holey_carbon": charges["normal_grids"],
@@ -66,7 +67,6 @@ def freezing_schedule():
     """
     conn = get_db()
     cur = conn.cursor()
-    today = datetime.date.today()
 
     cur.execute("SELECT * FROM freezing_bookings WHERE status='active'")
     active = cur.fetchall()
@@ -127,37 +127,44 @@ def register_freezing(
         selected_date = datetime.date.fromisoformat(str(freezing_date))
     except ValueError:
         return False, "Please choose a valid freezing date."
-    if selected_date < datetime.date.today():
+    if selected_date < facility_today():
         return False, "Freezing dates in the past cannot be booked."
     if selected_date.weekday() >= 5:
         return False, "Freezing slots cannot be booked on Saturdays or Sundays."
 
     conn = get_db()
     cur = conn.cursor()
+    try:
+        # Check the daily capacity and insert inside one transaction; on MySQL
+        # the locking read serialises concurrent bookings for the same date.
+        _begin(conn)
+        cur.execute(
+            "SELECT COALESCE(SUM(grids),0) AS total FROM freezing_bookings "
+            "WHERE freezing_date=? AND status='active'" + _lock_clause(),
+            [selected_date.isoformat()],
+        )
+        total = int(cur.fetchone()["total"] or 0)
 
-    cur.execute(
-        "SELECT COALESCE(SUM(grids),0) AS total FROM freezing_bookings "
-        "WHERE freezing_date=? AND status='active'",
-        [freezing_date],
-    )
-    total = cur.fetchone()["total"]
+        if not allow_over_capacity and total + grids > GRID_LIMIT_PER_DAY:
+            conn.rollback()
+            remaining = max(0, GRID_LIMIT_PER_DAY - total)
+            return False, f"Grid limit exceeded. Only {remaining} grids left for this date."
 
-    if not allow_over_capacity and total + grids > GRID_LIMIT_PER_DAY:
-        remaining = GRID_LIMIT_PER_DAY - total
+        cur.execute(
+            """INSERT INTO freezing_bookings
+               (user_name, pi_name, email, origin, sample_name,
+                grids, freezing_date, status, registered_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)""",
+            (user_name, pi_name, email, origin, sample_name, grids,
+             selected_date.isoformat()),
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
         cur.close()
         conn.close()
-        return False, f"Grid limit exceeded. Only {remaining} grids left for this date."
-
-    cur.execute(
-        """INSERT INTO freezing_bookings
-           (user_name, pi_name, email, origin, sample_name,
-            grids, freezing_date, status, registered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'active', CURRENT_TIMESTAMP)""",
-        (user_name, pi_name, email, origin, sample_name, grids, freezing_date),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
 
     send_email(
         email,

@@ -1,5 +1,8 @@
+import logging
 import os
+import secrets
 import sqlite3
+import tempfile
 import urllib.parse
 
 from dotenv import load_dotenv
@@ -9,6 +12,8 @@ import pymysql
 import pymysql.cursors
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_SQLITE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preview.db")
@@ -72,6 +77,52 @@ def _sqlite_db_path():
     return db_path
 
 
+_ssl_warning_logged = False
+_ssl_pem_cache = {}
+
+
+def _mysql_ssl_options():
+    """Build pymysql SSL options.
+
+    MYSQL_SSL_CA (path to a CA bundle) or MYSQL_SSL_CA_PEM (the CA certificate
+    contents, e.g. Aiven's ca.pem pasted into an env var) enable certificate
+    and hostname verification. Without either, the connection stays encrypted
+    but unverified (the historical behaviour), and a warning is logged once.
+    """
+    global _ssl_warning_logged
+
+    ca_path = os.environ.get("MYSQL_SSL_CA", "").strip()
+    if not ca_path:
+        pem = os.environ.get("MYSQL_SSL_CA_PEM", "").strip()
+        if pem:
+            if "\n" not in pem and "\\n" in pem:
+                pem = pem.replace("\\n", "\n")
+            ca_path = _ssl_pem_cache.get(pem)
+            if not ca_path or not os.path.exists(ca_path):
+                handle = tempfile.NamedTemporaryFile(
+                    "w", prefix="mysql-ca-", suffix=".pem", delete=False
+                )
+                with handle:
+                    handle.write(pem + "\n")
+                os.chmod(handle.name, 0o600)
+                ca_path = handle.name
+                _ssl_pem_cache[pem] = ca_path
+
+    if ca_path:
+        if not os.path.isfile(ca_path):
+            raise RuntimeError(f"MYSQL_SSL_CA file does not exist: {ca_path}")
+        return {"ca": ca_path, "check_hostname": True}
+
+    if not _ssl_warning_logged:
+        _ssl_warning_logged = True
+        logger.warning(
+            "MySQL TLS certificate verification is DISABLED. Set MYSQL_SSL_CA "
+            "(path) or MYSQL_SSL_CA_PEM (certificate contents) to the database "
+            "provider's CA certificate to verify the server."
+        )
+    return {"ssl": {}}
+
+
 def get_db():
     url = urllib.parse.urlparse(DATABASE_URL)
 
@@ -88,7 +139,7 @@ def get_db():
         password=url.password,
         database=database,
         port=url.port or 3306,
-        ssl={"ssl": {}},
+        ssl=_mysql_ssl_options(),
         cursorclass=MySQLDictCursor,
     )
 
@@ -289,6 +340,51 @@ def _seed_bootstrap_admin(cur):
     cur.execute("INSERT INTO bootstrap_admins (username) VALUES (?)", [username])
 
 
+def _seed_preview_admin_if_missing(cur):
+    """Never seed a default admin on MySQL; only seed for local SQLite previews.
+
+    Production admins come from BOOTSTRAP_ADMIN_* (see _seed_bootstrap_admin).
+    For a local SQLite preview, a one-off admin is created with a random
+    password (or PREVIEW_ADMIN_PASSWORD) that must be changed at first login.
+    Under pytest the legacy fixture account (admin / admin123, no forced
+    change) is kept because the existing test suite logs in with it.
+    """
+    cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role = ?", ["admin"])
+    if cur.fetchone()["cnt"]:
+        return
+
+    if not _is_sqlite_url() or os.environ.get("RENDER"):
+        logger.warning(
+            "No admin account exists and none was created. Set "
+            "BOOTSTRAP_ADMIN_USERNAME, BOOTSTRAP_ADMIN_EMAIL and "
+            "BOOTSTRAP_ADMIN_PASSWORD, then restart to create one."
+        )
+        return
+
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        password, must_change = "admin123", 0
+    else:
+        password = os.environ.get("PREVIEW_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
+        must_change = 1
+        logger.warning(
+            "Created local preview admin 'admin' with temporary password %s "
+            "(must be changed at first login).",
+            password,
+        )
+    cur.execute(
+        "INSERT INTO users "
+        "(username, email, password_hash, role, must_change_password) "
+        "VALUES (?, ?, ?, ?, ?)",
+        [
+            "admin",
+            "admin@accem.iisc.ac.in",
+            generate_password_hash(password, method="pbkdf2:sha256"),
+            "admin",
+            must_change,
+        ],
+    )
+
+
 def _ensure_global_charge_sheet_sequence(cur):
     """Seed one shared bill counter without reusing numbers already issued."""
     latest_number = 75
@@ -328,6 +424,26 @@ def _ensure_global_charge_sheet_sequence(cur):
             "WHERE academic_year=? AND category=?",
             [latest_number, 0, "all"],
         )
+
+
+def ensure_site_stats_cache_table(cur):
+    """Create the small key/value table holding precomputed public statistics."""
+    if _is_sqlite_url():
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS site_stats_cache (
+                cache_key  TEXT PRIMARY KEY,
+                payload    TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+    else:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS site_stats_cache (
+                cache_key  VARCHAR(64) NOT NULL PRIMARY KEY,
+                payload    MEDIUMTEXT NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+        """)
 
 
 def init_db():
@@ -717,6 +833,7 @@ def init_db():
             )
         """)
     _ensure_global_charge_sheet_sequence(cur)
+    ensure_site_stats_cache_table(cur)
 
     # ── Remove any UNIQUE index on email in bookings & screening_bookings ────
     # Uses information_schema so it finds the real index name on Aiven.
@@ -727,15 +844,7 @@ def init_db():
     _drop_unique_email(cur, "bookings")
     _drop_unique_email(cur, "screening_bookings")
 
-    # ── Seed default admin user if none exists ──────────────────────────────
-    cur.execute("SELECT COUNT(*) as cnt FROM users WHERE role = ?", ["admin"])
-    admin_count = cur.fetchone()["cnt"]
-    if admin_count == 0:
-        default_password_hash = generate_password_hash("admin123", method="pbkdf2:sha256")
-        cur.execute(
-            "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)",
-            ["admin", "admin@accem.iisc.ac.in", default_password_hash, "admin"]
-        )
+    _seed_preview_admin_if_missing(cur)
 
     conn.commit()
     cur.close()

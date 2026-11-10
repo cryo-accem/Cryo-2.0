@@ -162,7 +162,7 @@
   </section>
   <div class="dashboard-meta"><i class="fa-regular fa-clock" aria-hidden="true"></i> Last updated {{ updated_at }}
     <a class="button button--secondary backup-button" href="{{ url_for('admin.download_database_backup') }}">Download full database backup</a>
-    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" style="display:inline" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <form method="post" action="{{ url_for('admin.archive_completed_registrations') }}" class="inline-form" onsubmit="return confirm('A full copy of the database will be emailed to cryoem.iisc@gmail.com before completed registrations are permanently removed. Continue?');"><input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
       <button class="button archive-button" type="submit">Email backup and remove completed</button>
     </form>
     <strong class="archive-warning">A full backup is emailed to cryoem.iisc@gmail.com before completed records are permanently removed. No archive is saved on this server.</strong>

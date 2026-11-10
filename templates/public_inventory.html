@@ -1,38 +1,46 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Search grid inventory{% endblock %}
 {% block content %}
-<main class="portal-page"><section class="page-content inventory-page">
+<main class="portal-page lookup-view"><section class="page-content inventory-page lookup-page">
   <header class="page-header page-header--portal"><div><div class="eyebrow">Inventory lookup</div><h1>Find your grids</h1><p>Enter the username used when booking. Sample names are not required.</p></div>{% if selection_mode %}<button class="button" type="button" data-return-to-booking>Return to quick slot</button>{% else %}<a class="button" href="{{ url_for('register.register') }}">Book a slot</a>{% endif %}</header>
-  <section class="inventory-panel">
-    {% if selection_mode %}<div class="inventory-selection-intro"><strong>Select grids for the booking</strong><span>Only currently available grids can be selected. Your quick-slot form stays open in the other tab.</span></div>{% endif %}
-    <form class="public-inventory-search" action="{{ url_for('public.grid_inventory') }}" method="get">
-      <label>Username<input type="text" name="username" value="{{ username }}" maxlength="150" required autocomplete="username"></label>
+  {% if not selection_mode %}<nav class="schedule-tabs" aria-label="Schedules">
+    <a href="{{ url_for('freezing.freezing_schedule') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i>Freezing</a>
+    <a href="{{ url_for('screening.screening_list') }}"><i class="fa-solid fa-microscope" aria-hidden="true"></i>Screening</a>
+    <a href="{{ url_for('imaging.list_view') }}"><i class="fa-solid fa-database" aria-hidden="true"></i>Data collection</a>
+    <a href="{{ url_for('public.grid_inventory') }}" aria-current="page"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>Find your grids</a>
+  </nav>{% endif %}
+  <section class="inventory-panel lookup-panel" aria-label="Grid inventory lookup">
+    {% if selection_mode %}<div class="inventory-selection-intro"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><strong>Select grids for the booking</strong><span>Only currently available grids can be selected. Your quick-slot form stays open in the other tab.</span></div>{% endif %}
+    <form class="public-inventory-search" action="{{ url_for('public.grid_inventory') }}" method="get" role="search">
+      <label for="lookup-username">Username</label>
+      <span class="lookup-input"><i class="fa-solid fa-user" aria-hidden="true"></i><input type="text" id="lookup-username" name="username" value="{{ username }}" maxlength="150" required autocomplete="username" aria-describedby="lookup-username-hint"></span>
       {% if selection_mode %}<input type="hidden" name="select" value="1"><input type="hidden" name="slot_type" value="{{ slot_type }}">{% if admin_selection %}<input type="hidden" name="admin_selection" value="1">{% endif %}{% endif %}
-      <button class="button" type="submit">Search my grids</button>
+      <button class="button" type="submit"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>Search my grids</button>
+      <small class="field-hint" id="lookup-username-hint">Use the same username you entered on the booking form.</small>
     </form>
     {% if search_error %}
-      <p class="empty-message">{{ search_error }}</p>
+      <p class="empty-message lookup-error" role="alert"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>{{ search_error }}</span></p>
     {% elif searched %}
       {% if grids %}
-        <p class="public-inventory-result-count">{{ grids|length }} grid{{ '' if grids|length == 1 else 's' }} found for username <strong>{{ username }}</strong>.</p>
-        <div class="table-wrap"><table class="data-table"><thead><tr>{% if selection_mode %}<th>Select</th>{% endif %}<th>Status</th><th>Grid</th><th>Current storage</th><th>Booking availability</th></tr></thead><tbody>
+        <p class="public-inventory-result-count" role="status"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>{{ grids|length }} grid{{ '' if grids|length == 1 else 's' }} found for username <strong>{{ username }}</strong>.</span></p>
+        <div class="table-wrap"><table class="data-table lookup-table"><thead><tr>{% if selection_mode %}<th scope="col">Select</th>{% endif %}<th scope="col">Status</th><th scope="col">Grid</th><th scope="col">Current storage</th><th scope="col">Booking availability</th></tr></thead><tbody>
           {% for grid in grids %}
-            <tr>
-              {% if selection_mode %}<td>{% if grid.available %}<label class="inventory-select-grid"><input type="checkbox" value="{{ grid.grid_code }}" data-inventory-grid><span>Select</span></label>{% else %}<span class="form-hint">Unavailable</span>{% endif %}</td>{% endif %}
-              <td><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span> {{ grid.current_status }}</td>
-              <td>{{ grid.grid_code }}</td>
-              <td>{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} · {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}Not currently in storage{% endif %}</td>
-              <td>{% if grid.available %}<span class="public-grid-availability">Available for booking</span>{% elif grid.current_status == 'In Data Collection' %}In data collection{% elif grid.current_status == 'Discarded' %}Discarded{% else %}Already reserved{% endif %}</td>
+            <tr{% if grid.available %} class="is-available"{% endif %}>
+              {% if selection_mode %}<td data-label="Select">{% if grid.available %}<label class="inventory-select-grid"><input type="checkbox" value="{{ grid.grid_code }}" data-inventory-grid><span>Select</span></label>{% else %}<span class="form-hint">Unavailable</span>{% endif %}</td>{% endif %}
+              <td data-label="Status"><span class="lookup-status"><span class="inventory-storage-code inventory-storage-code--{{ grid.status_code|lower }}">{{ grid.status_code }}</span> {{ grid.current_status }}</span></td>
+              <td data-label="Grid" class="lookup-table__code">{{ grid.grid_code }}</td>
+              <td data-label="Current storage">{% if grid.falcon_container_id %}{{ grid.falcon_container_id }} · {{ grid.grid_box_name }} / {{ grid.grid_position }}{% else %}<span class="lookup-muted">Not currently in storage</span>{% endif %}</td>
+              <td data-label="Booking availability">{% if grid.available %}<span class="public-grid-availability">Available for booking</span>{% elif grid.current_status == 'In Data Collection' %}<span class="lookup-availability lookup-availability--busy">In data collection</span>{% elif grid.current_status == 'Discarded' %}<span class="lookup-availability lookup-availability--off">Discarded</span>{% else %}<span class="lookup-availability lookup-availability--busy">Already reserved</span>{% endif %}</td>
             </tr>
           {% endfor %}
         </tbody></table></div>
         {% if selection_mode %}<div class="inventory-selection-actions"><span data-inventory-selection-count role="status" aria-live="polite">No grids selected.</span><button class="button" type="button" data-use-selected-grids disabled>Use selected grids</button></div>{% endif %}
-        <p class="public-inventory-result-note">This lookup matches the username associated with your grid records. To book an available grid, use that same username on the booking form.</p>
+        <p class="public-inventory-result-note"><i class="fa-solid fa-circle-info" aria-hidden="true"></i><span>This lookup matches the username associated with your grid records. To book an available grid, use that same username on the booking form.</span></p>
       {% else %}
-        <p class="empty-message">No grids were found for username <strong>{{ username }}</strong>. Check the spelling or contact the facility team if the inventory entry needs correction.</p>
+        <p class="empty-message lookup-empty"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><span>No grids were found for username <strong>{{ username }}</strong>. Check the spelling or contact the facility team if the inventory entry needs correction.</span></p>
       {% endif %}
     {% else %}
-      <p class="public-inventory-prompt">Enter your username to find grids associated with your bookings.</p>
+      <p class="public-inventory-prompt"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>Enter your username to find grids associated with your bookings.</span></p>
     {% endif %}
   </section>
 </section></main>

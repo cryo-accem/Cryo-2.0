@@ -1,9 +1,10 @@
-import datetime
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from database import get_db
 from extensions import send_email
 from blueprints.public import get_combined_ongoing_slots
-from inventory_service import _begin, link_selected_grids_to_booking
+from inventory_service import (
+    _begin, _lock_clause, facility_today, link_selected_grids_to_booking,
+)
 
 imaging_bp = Blueprint("imaging", __name__)
 
@@ -40,7 +41,8 @@ def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids,
     try:
         _begin(conn)
         cur.execute(
-            "SELECT id FROM bookings WHERE email=? AND status IN ('waiting','ongoing')",
+            "SELECT id FROM bookings WHERE LOWER(email)=LOWER(?) AND status IN ('waiting','ongoing')"
+            + _lock_clause(),
             [email],
         )
         if cur.fetchone():
@@ -53,7 +55,7 @@ def register_imaging(user_name, pi_name, email, origin, esm, sample_name, grids,
                 grids, days, registration_date, status)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
             (user_name, pi_name, email, origin, esm, sample_name,
-             grids, days, datetime.date.today()),
+             grids, days, facility_today()),
         )
         booking_id = cur.lastrowid
         if grid_codes:

@@ -60,6 +60,11 @@ class AdminHistoryEditTests(unittest.TestCase):
             conn.close()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def _csrf_token(self):
         response = self.client.get("/admin/history")
@@ -116,7 +121,7 @@ class AdminHistoryEditTests(unittest.TestCase):
             self.assertEqual(str(booking["completion_date"]), "2026-09-10")
             self.assertEqual(str(booking["actual_slots"]), "2")
             self.assertEqual(booking["actual_grids"], 2)
-            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("38940.00"))
+            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("41890.00"))
             cur.close()
             conn.close()
 
@@ -191,7 +196,7 @@ class AdminHistoryEditTests(unittest.TestCase):
             self.assertEqual(booking["user_name"], "Formatted Slot User")
             self.assertEqual(booking["sample_name"], "Corrected from production format")
             self.assertEqual(Decimal(str(booking["actual_slots"])), Decimal("3.000"))
-            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("53100.00"))
+            self.assertEqual(Decimal(str(booking["total_billed"])), Decimal("56050.00"))
             cur.close()
             conn.close()
 
@@ -360,6 +365,69 @@ class AdminHistoryEditTests(unittest.TestCase):
         self.assertEqual(edited_row["clipped_grids"], 1)
         self.assertEqual(Decimal(str(edited_row["clip_base_charge"])), Decimal("2500.00"))
         self.assertEqual(Decimal(str(edited_row["total_billed"])), Decimal("38940.00"))
+
+    def _insert_sent_imaging(self, sheet_id):
+        with self.app.app_context():
+            conn = database.get_db()
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO bookings
+                   (user_name, pi_name, email, origin, sample_name, grids, days,
+                    status, completion_date, actual_slots, actual_grids,
+                    number_of_grids, grid_source, grid_type, subtotal,
+                    gst_amount, grand_total, total_billed, charge_sheet_id,
+                    charge_sheet_sent_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           CURRENT_TIMESTAMP)""",
+                ("Billed User", "Billed PI", "billed@example.com", "External",
+                 "Billed sample", 1, 1, "2026-09-05", 1, 1, 1, "self", "",
+                 "12250.00", "2205.00", "14455.00", "14455.00", sheet_id),
+            )
+            booking_id = cur.lastrowid
+            conn.commit()
+            cur.close()
+            conn.close()
+        return booking_id
+
+    def test_combined_sheet_refuses_slots_already_billed_separately(self):
+        first = self._insert_sent_imaging("2026_ACDM_0201")
+        second = self._insert_sent_imaging("2026_ACDM_0202")
+        with (
+            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
+            patch("blueprints.admin.send_email") as send,
+        ):
+            response = self.client.post(
+                "/admin/charge-sheet/combined",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "selected_slots": json.dumps([
+                        {"service_key": "imaging", "booking_id": first},
+                        {"service_key": "imaging", "booking_id": second},
+                    ]),
+                },
+                follow_redirects=True,
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"already billed on their own charge sheet", response.data)
+        make_pdf.assert_not_called()
+        send.assert_not_called()
+
+    def test_combined_sheet_resend_of_one_billed_slot_keeps_its_id(self):
+        booking = self._insert_sent_imaging("2026_ACDM_0301")
+        with (
+            patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf,
+            patch("blueprints.admin.send_email") as send,
+        ):
+            self.client.post(
+                "/admin/charge-sheet/combined",
+                data={
+                    "_csrf_token": self._csrf_token(),
+                    "selected_slots": json.dumps([{"service_key": "imaging", "booking_id": booking}]),
+                },
+                follow_redirects=True,
+            )
+        self.assertEqual(make_pdf.call_args.args[0]["charge_sheet_id"], "2026_ACDM_0301")
+        send.assert_called_once()
 
     def test_sent_booking_cannot_be_edited(self):
         response = self.client.post(

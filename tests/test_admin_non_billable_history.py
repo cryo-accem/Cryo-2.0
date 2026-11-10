@@ -36,6 +36,11 @@ class AdminNonBillableHistoryTests(unittest.TestCase):
             conn.close()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def test_non_billable_history_is_completed_without_payment_details(self):
         response = self.client.get("/admin/history")

@@ -1,9 +1,10 @@
-import datetime
 from flask import Blueprint, render_template
 from database import get_db
 from extensions import send_email
 from blueprints.public import get_combined_ongoing_slots
-from inventory_service import _begin, _lock_clause, link_selected_grids_to_booking
+from inventory_service import (
+    _begin, _lock_clause, facility_today, link_selected_grids_to_booking,
+)
 
 screening_bp = Blueprint("screening", __name__)
 
@@ -42,7 +43,7 @@ def register_screening(user_name, pi_name, email, origin, esm, sample_name, grid
         _begin(conn)
         cur.execute(
             "SELECT id, grids FROM screening_bookings "
-            "WHERE email=? AND status IN ('waiting','ongoing')"
+            "WHERE LOWER(email)=LOWER(?) AND status IN ('waiting','ongoing')"
             + _lock_clause(),
             [email],
         )
@@ -79,7 +80,7 @@ def register_screening(user_name, pi_name, email, origin, esm, sample_name, grid
                     grids, days, registration_date, status)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting')""",
                 (user_name, pi_name, email, origin, esm, sample_name,
-                 grids, days, datetime.date.today()),
+                 grids, days, facility_today()),
             )
             booking_id = cur.lastrowid
             if grid_codes:

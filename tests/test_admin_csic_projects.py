@@ -26,6 +26,11 @@ class AdminCsicBillingTests(unittest.TestCase):
         self.client = self.app.test_client()
         with self.client.session_transaction() as session:
             session["admin_logged_in"] = True
+            admin_conn = database.get_db()
+            session["admin_user_id"] = admin_conn.execute(
+                "SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1"
+            ).fetchone()["id"]
+            admin_conn.close()
 
     def _csrf_token(self):
         response = self.client.get("/admin/history")
@@ -146,10 +151,10 @@ class AdminCsicBillingTests(unittest.TestCase):
         self.assertEqual(booking["is_csic"], 1)
         self.assertEqual(str(booking["csic_final_amount"]), "10000")
         self.assertEqual(str(booking["total_billed"]), "10000")
-        self.assertEqual(str(booking["csic_original_amount"]), "64900")
+        self.assertEqual(str(booking["csic_original_amount"]), "69620")
         self.assertEqual(str(booking["subtotal"]), "8474.58")
         self.assertEqual(str(booking["gst_amount"]), "1525.42")
-        self.assertEqual(str(booking["csic_adjustment"]), "-46525.42")
+        self.assertEqual(str(booking["csic_adjustment"]), "-50525.42")
         self.assertEqual(audit["action"], "completion")
         self.assertEqual(audit["discount_reason"], "Approved facility discount")
         self.assertEqual(str(audit["final_amount"]), "10000")

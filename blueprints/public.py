@@ -2,28 +2,21 @@ import os
 import csv
 import io
 import json
-import time
 import datetime
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+import threading
+import re
+from markupsafe import Markup, escape
 from flask import Blueprint, render_template, current_app, redirect, url_for, Response, jsonify, request
-from database import get_db
+from database import _is_sqlite_url, ensure_site_stats_cache_table, get_db
 from normalization import clean_display_name
-from inventory_service import public_inventory_grids
+from inventory_service import (
+    PUBLIC_LOOKUP_MIN_LENGTH, InventoryError, public_inventory_grids,
+)
+from curated_publications import CURATED_PUBLICATIONS
+from publication_finder import normalize_doi, normalize_title
+import emdb_structures
 
 public_bp = Blueprint("public", __name__)
-_publication_cache = {"timestamp": 0.0, "count": 36, "source": "curated fallback"}
-_structure_cache = {"timestamp": 0.0, "count": 69, "source": "facility logs"}
-_structure_breakdown_cache = {"timestamp": 0.0, "data": {}}
-EMDB_PIS = (
-    ("Somnath Dutta", "Dutta"),
-    ("Siddhartha P. Sarma", "Sarma"),
-    ("Raghavan Varadarajan", "Varadarajan"),
-    ("Vinothkumar Kutti Ragunath", "Vinothkumar"),
-    ("Vidya Mangala Prasad", "Prasad"),
-    ("N. Ravishankar", "Ravishankar"),
-    ("Aravind Penmatsa", "Penmatsa"),
-)
 
 PI_USERS = [
     ("Prof. Dipshikha Chakravortty", 1), ("Prof. Dipankar Chatterji", 1), ("Prof. K. Suguna", 1),
@@ -69,8 +62,15 @@ def grid_inventory():
     searched = bool(username)
     if len(username) > 150 or len(sample_name) > 180:
         search_error = "Enter a shorter username or sample name."
+    elif searched and len(username) < PUBLIC_LOOKUP_MIN_LENGTH:
+        search_error = (
+            f"Enter your full username (at least {PUBLIC_LOOKUP_MIN_LENGTH} characters)."
+        )
     elif searched:
-        grids = public_inventory_grids(username, sample_name or None)
+        try:
+            grids = public_inventory_grids(username, sample_name or None)
+        except InventoryError as exc:
+            search_error = str(exc)
     return render_template(
         "public_inventory.html",
         grids=grids,
@@ -92,7 +92,13 @@ def search_public_inventory():
         return jsonify({"grids": []})
     if len(researcher_name) > 150:
         return jsonify({"error": "Enter a shorter username."}), 400
-    grids = public_inventory_grids(researcher_name, available_only=True)
+    if len(researcher_name) < PUBLIC_LOOKUP_MIN_LENGTH:
+        # Too short to identify a researcher; never fall back to a broad listing.
+        return jsonify({"grids": []})
+    try:
+        grids = public_inventory_grids(researcher_name, available_only=True)
+    except InventoryError as exc:
+        return jsonify({"error": str(exc)}), 400
     return jsonify({
         "grids": [
             {
@@ -229,25 +235,120 @@ def get_color_for_index(index):
     return CHART_COLORS[index % len(CHART_COLORS)]
 
 
+STRUCTURES_FALLBACK = "85+"  # shown only until the first EMDB check is stored
+PUBLICATION_FINDER_CACHE_KEY = "publication_finder"
+EMDB_STRUCTURES_CACHE_KEY = "emdb_structures"
+EMDB_REVIEW_CACHE_KEY = "emdb_structures_review"
+
+
 def get_facility_metrics():
-    """Return published research and completed structure-project totals."""
+    """Return the publication count shown on the Publications page and the
+    stored EMDB structure count."""
     return {
-        "publications": get_publication_count(),
-        "structures": "85+",
+        "publications": count_site_publications(),
+        "structures": get_structures_metric(),
     }
+
+
+def get_structures_metric():
+    """Stored EMDB structure count, or the "85+" fallback before the first check."""
+    try:
+        payload = load_cache_payload(EMDB_STRUCTURES_CACHE_KEY)
+    except Exception as exc:
+        current_app.logger.warning("EMDB structure count read failed: %s", exc)
+        return STRUCTURES_FALLBACK
+    if isinstance(payload, dict) and isinstance(payload.get("count"), int):
+        return payload["count"]
+    return STRUCTURES_FALLBACK
+
+
+def load_emdb_review_state():
+    state = load_cache_payload(EMDB_REVIEW_CACHE_KEY) or {}
+    return {
+        "approved": list(state.get("approved") or []),
+        "dismissed": list(state.get("dismissed") or []),
+    }
+
+
+def refresh_emdb_structures():
+    """Query EMDB, store the result (with the previous ids for "new since last
+    check") and return the stored payload. Raises EmdbError on failure, in
+    which case the previously stored payload is kept."""
+    previous = load_cache_payload(EMDB_STRUCTURES_CACHE_KEY)
+    finder_run = load_cache_payload(PUBLICATION_FINDER_CACHE_KEY) or {}
+    review = load_emdb_review_state()
+    report = {}
+    result = emdb_structures.compute_structures(
+        get_site_publications(),
+        finder_candidates=finder_run.get("candidates"),
+        approved_ids=review["approved"],
+        dismissed_ids=review["dismissed"],
+        report=report,
+    )
+    payload = emdb_structures.build_payload(
+        result, previous=previous if isinstance(previous, dict) else None,
+        checked_at=_utc_now().strftime("%Y-%m-%d %H:%M:%S"), report=report,
+    )
+    save_cache_payload(EMDB_STRUCTURES_CACHE_KEY, payload)
+    return payload
 
 
 def get_managed_publications():
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "SELECT citation, doi_url, published_year FROM managed_publications "
+        "SELECT id, citation, doi_url, published_year FROM managed_publications "
         "WHERE is_visible=1 ORDER BY COALESCE(published_year, 0) DESC, id DESC"
     )
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return rows
+
+
+def _publication_dedupe_keys(item):
+    keys = []
+    doi = normalize_doi(item.get("doi"))
+    if doi:
+        keys.append(("doi", doi))
+    text = normalize_title(item.get("text") or item.get("html") or "")
+    if text:
+        keys.append(("text", text))
+    return keys
+
+
+def get_site_publications(managed_rows=None):
+    """The website's Publications list: visible managed entries first, then
+    the curated (hard-coded) list, without duplicates (same DOI or same
+    citation text).
+
+    Items are dicts with "year" (0 = not stated), "doi" (URL or None),
+    "origin" ("managed" or "curated"), and "text" (managed, plain text) or
+    "html" (curated, trusted markup). Managed items also carry "id".
+    """
+    if managed_rows is None:
+        managed_rows = get_managed_publications()
+    items = [
+        {
+            "id": row["id"], "year": row["published_year"] or 0,
+            "text": row["citation"], "doi": row["doi_url"], "origin": "managed",
+        }
+        for row in managed_rows
+    ]
+    items += [dict(entry, origin="curated") for entry in CURATED_PUBLICATIONS]
+    seen = set()
+    unique = []
+    for item in items:
+        keys = _publication_dedupe_keys(item)
+        if any(key in seen for key in keys):
+            continue
+        seen.update(keys)
+        unique.append(item)
+    return unique
+
+
+def count_site_publications():
+    return len(get_site_publications())
 
 
 def get_managed_instruments():
@@ -293,93 +394,212 @@ def get_active_facility_notices():
     return rows
 
 
-def get_publication_count():
-    """Count unique OpenAlex works matching the facility acknowledgement terms."""
-    if time.time() - _publication_cache["timestamp"] < 3600:
-        return _publication_cache["count"]
+# ── Precomputed site statistics ─────────────────────────────────────────────
+# The home page statistics scan the bookings tables. The full payload is
+# computed by refresh_site_stats.py (daily cron) or a background thread and
+# stored in site_stats_cache, so requests only read one row. The publication
+# count is cheap (managed_publications + the curated list) and is re-read on
+# every request so it always matches the Publications page.
+SITE_STATS_CACHE_KEY = "user_statistics"
+SITE_STATS_MAX_AGE_SECONDS = 24 * 3600
+_site_stats_refresh_lock = threading.Lock()
 
+
+def build_user_statistics_payload(stats, metrics):
+    """Build the /api/user-statistics JSON body (shape relied on by home JS)."""
+    total_users = sum(count for _, count in stats)
+    chart_data = []
+    if total_users > 0:
+        running_percentage = 0
+        for index, (label, count) in enumerate(stats):
+            percentage = (count / total_users) * 100
+            chart_data.append({
+                'label': label,
+                'value': count,
+                'percentage': round(percentage, 1),
+                'color': get_color_for_index(index),
+                'start': round(running_percentage, 1),
+                'end': round(running_percentage + percentage, 1)
+            })
+            running_percentage += percentage
+    return {
+        'success': True,
+        'total': total_users,
+        'data': chart_data,
+        'metrics': metrics,
+    }
+
+
+def compute_site_stats():
+    """Compute the statistics payload (database only)."""
+    return build_user_statistics_payload(get_user_statistics(), get_facility_metrics())
+
+
+def with_current_publication_count(payload):
+    """Return ``payload`` with metrics.publications set to the number of
+    entries on the Publications page (a stored payload may predate an edit)
+    and metrics.structures set to the stored EMDB count, once one exists."""
+    if not payload or not isinstance(payload.get("metrics"), dict):
+        return payload
+    metrics = dict(payload["metrics"])
     try:
-        works = {}
-        for term in ("ACCEM", "cryo-EM IISc"):
-            url = "https://api.openalex.org/works?search=" + quote(term) + "&per-page=200"
-            request = Request(url, headers={"User-Agent": "ACCEM facility dashboard"})
-            with urlopen(request, timeout=15) as response:
-                payload = json.load(response)
-            for work in payload.get("results", []):
-                work_id = work.get("id")
-                if work_id:
-                    works[work_id] = work
+        metrics["publications"] = count_site_publications()
+        structures = get_structures_metric()
+        if structures != STRUCTURES_FALLBACK:
+            metrics["structures"] = structures
+    except Exception as exc:
+        current_app.logger.warning("Publication count failed: %s", exc)
+        return payload
+    return dict(payload, metrics=metrics)
 
-        count = len(works)
-        if count:
-            _publication_cache.update(
-                timestamp=time.time(), count=count, source="OpenAlex"
+
+def _utc_now():
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
+
+
+def load_site_stats():
+    """Return (payload, age_seconds) from site_stats_cache, or (None, None)."""
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT payload, updated_at FROM site_stats_cache WHERE cache_key=?",
+                [SITE_STATS_CACHE_KEY],
             )
-        return _publication_cache["count"]
-    except (OSError, ValueError, KeyError) as exc:
-        current_app.logger.warning("OpenAlex publication lookup failed: %s", exc)
-        return _publication_cache["count"]
-
-
-def get_emdb_structure_count():
-    """Count unique EMDB entries associated with the facility's PIs."""
-    breakdown = get_emdb_structure_breakdown()
-    return len({entry_id for entries in breakdown.values() for entry_id in entries})
-
-
-def get_emdb_structure_breakdown():
-    """Return deduplicated EMDB entry IDs grouped by committee PI."""
-    if time.time() - _structure_breakdown_cache["timestamp"] < 3600:
-        return _structure_breakdown_cache["data"]
-
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as exc:
+        current_app.logger.warning("Site statistics cache read failed: %s", exc)
+        return None, None
+    if not row:
+        return None, None
     try:
-        result = {}
-        for display_name, search_term in EMDB_PIS:
-            ids = set()
-            for page in range(1, 11):
-                url = (
-                    "https://www.ebi.ac.uk/emdb/api/search/"
-                    + quote(search_term)
-                    + f"?rows=100&page={page}"
-                )
-                request = Request(url, headers={"User-Agent": "ACCEM facility dashboard"})
-                with urlopen(request, timeout=15) as response:
-                    payload = json.load(response)
-                page_ids = set()
-                for entry in payload:
-                    entry_id = entry.get("emdb_id") or entry.get("_id")
-                    deposited = entry.get("admin", {}).get("key_dates", {}).get("deposition", "")
-                    year_text = deposited[:4]
-                    metadata = json.dumps(entry, ensure_ascii=False).lower()
-                    has_iisc = "iisc" in metadata or "indian institute of science" in metadata
-                    has_facility = any(
-                        term in metadata
-                        for term in (
-                            "accem",
-                            "cryo-em",
-                            "cryo em",
-                            "cryoelectron",
-                            "advanced centre for cryo",
-                        )
-                    )
-                    if (
-                        entry_id
-                        and has_iisc
-                        and has_facility
-                        and year_text.isdigit()
-                        and 2018 <= int(year_text) <= datetime.date.today().year
-                    ):
-                        page_ids.add(entry_id)
-                ids.update(page_ids)
-                if len(payload) < 100:
-                    break
-            result[display_name] = sorted(ids)
+        payload = json.loads(row["payload"])
+        updated_at = row["updated_at"]
+        if not isinstance(updated_at, datetime.datetime):
+            updated_at = datetime.datetime.fromisoformat(str(updated_at))
+        age = (_utc_now() - updated_at.replace(tzinfo=None)).total_seconds()
+    except (TypeError, ValueError, KeyError) as exc:
+        current_app.logger.warning("Site statistics cache row is invalid: %s", exc)
+        return None, None
+    return payload, age
 
-        _structure_breakdown_cache.update(timestamp=time.time(), data=result)
-        return result
-    except (OSError, ValueError, KeyError, TypeError) as exc:
-        current_app.logger.warning("EMDB structure lookup failed: %s", exc)
-        return _structure_breakdown_cache["data"]
+
+def save_cache_payload(cache_key, payload):
+    """Upsert a JSON payload into site_stats_cache under ``cache_key``."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        ensure_site_stats_cache_table(cur)
+        values = [
+            cache_key,
+            json.dumps(payload),
+            _utc_now().strftime("%Y-%m-%d %H:%M:%S"),
+        ]
+        if _is_sqlite_url():
+            cur.execute(
+                """INSERT INTO site_stats_cache (cache_key, payload, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(cache_key) DO UPDATE SET
+                       payload=excluded.payload, updated_at=excluded.updated_at""",
+                values,
+            )
+        else:
+            cur.execute(
+                """INSERT INTO site_stats_cache (cache_key, payload, updated_at)
+                   VALUES (?, ?, ?)
+                   ON DUPLICATE KEY UPDATE
+                       payload=VALUES(payload), updated_at=VALUES(updated_at)""",
+                values,
+            )
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def load_cache_payload(cache_key):
+    """Return the decoded payload stored under ``cache_key``, or None."""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT payload FROM site_stats_cache WHERE cache_key=?", [cache_key])
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        return None
+    try:
+        return json.loads(row["payload"])
+    except (TypeError, ValueError):
+        return None
+
+
+def save_site_stats(payload):
+    save_cache_payload(SITE_STATS_CACHE_KEY, payload)
+
+
+def refresh_site_stats():
+    """Compute the full payload and store it."""
+    payload = compute_site_stats()
+    save_site_stats(payload)
+    return payload
+
+
+def start_site_stats_refresh():
+    """Refresh in a daemon thread; at most one refresh runs per process.
+
+    Returns the started thread, or None when a refresh is already running.
+    """
+    app = current_app._get_current_object()
+    # Disabled by default under app.testing so unrelated tests never start
+    # threads; tests of this behaviour enable it explicitly.
+    if not app.config.get("SITE_STATS_BACKGROUND_REFRESH", not app.testing):
+        return None
+    if not _site_stats_refresh_lock.acquire(blocking=False):
+        return None
+
+    def run():
+        try:
+            with app.app_context():
+                refresh_site_stats()
+        except Exception:
+            app.logger.exception("Background site statistics refresh failed")
+        finally:
+            _site_stats_refresh_lock.release()
+
+    thread = threading.Thread(target=run, name="site-stats-refresh", daemon=True)
+    try:
+        thread.start()
+    except Exception:
+        _site_stats_refresh_lock.release()
+        raise
+    return thread
+
+
+def get_cached_site_stats():
+    """Return the stored payload (possibly stale) or None.
+
+    A missing or stale payload schedules a background refresh. The
+    publication count is always the current Publications-page count.
+    """
+    payload, age = load_site_stats()
+    if payload is None or age is None or age > SITE_STATS_MAX_AGE_SECONDS:
+        start_site_stats_refresh()
+    return with_current_publication_count(payload)
+
+
+def get_site_stats_payload():
+    """Stored payload if any; otherwise the database-only payload computed now."""
+    payload = get_cached_site_stats()
+    if payload is not None:
+        return payload
+    return compute_site_stats()
+
 
 @public_bp.route("/")
 def index():
@@ -389,42 +609,67 @@ def index():
 @public_bp.route("/home")
 def home():
     slideshow_images = get_slideshow_images()
-    return render_template("home.html", slideshow_images=slideshow_images, page_content=get_managed_page("home"))
+    return render_template(
+        "home.html",
+        slideshow_images=slideshow_images,
+        page_content=get_managed_page("home"),
+        user_stats=get_cached_site_stats(),
+        structures_count=get_structures_metric(),
+    )
 
 
 @public_bp.route("/api/user-statistics")
 def api_user_statistics():
-    """API endpoint to fetch user statistics as JSON for dynamic chart updates."""
+    """Serve the precomputed statistics payload."""
     try:
-        stats = get_user_statistics()
-        
-        # Calculate percentages and prepare chart data
-        total_users = sum(count for _, count in stats)
-        chart_data = []
-        
-        if total_users > 0:
-            running_percentage = 0
-            for index, (label, count) in enumerate(stats):
-                percentage = (count / total_users) * 100
-                chart_data.append({
-                    'label': label,
-                    'value': count,
-                    'percentage': round(percentage, 1),
-                    'color': get_color_for_index(index),
-                    'start': round(running_percentage, 1),
-                    'end': round(running_percentage + percentage, 1)
-                })
-                running_percentage += percentage
-        
+        return jsonify(get_site_stats_payload())
+    except Exception:
+        current_app.logger.exception("User statistics API error")
         return jsonify({
-            'success': True,
-            'total': total_users,
-            'data': chart_data,
-            'metrics': get_facility_metrics(),
-        })
-    except Exception as exc:
-        current_app.logger.error(f"API error: {exc}")
-        return jsonify({'success': False, 'error': str(exc)}), 500
+            'success': False,
+            'error': 'Statistics are temporarily unavailable.',
+        }), 500
+
+
+PUBLIC_SITEMAP_ENDPOINTS = (
+    "public.home", "public.about", "public.team", "public.facility",
+    "public.workflow", "public.equipments", "public.publications",
+    "public.events", "public.community_gallery", "public.grid_inventory",
+    "public.rates", "public.faq", "public.contact",
+    "register.register", "freezing.freezing_schedule",
+    "screening.screening_list", "imaging.list_view",
+)
+
+
+@public_bp.route("/robots.txt")
+def robots_txt():
+    body = "\n".join((
+        "User-agent: *",
+        "Allow: /",
+        "Disallow: /admin",
+        f"Sitemap: {url_for('public.sitemap_xml', _external=True)}",
+        "",
+    ))
+    return Response(body, mimetype="text/plain")
+
+
+@public_bp.route("/sitemap.xml")
+def sitemap_xml():
+    from xml.sax.saxutils import escape
+
+    urls = []
+    for endpoint in PUBLIC_SITEMAP_ENDPOINTS:
+        try:
+            urls.append(url_for(endpoint, _external=True))
+        except Exception:  # endpoint not registered (e.g. partial app)
+            continue
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + "".join(f"  <url><loc>{escape(url)}</loc></url>\n" for url in urls)
+        + "</urlset>\n"
+    )
+    return Response(body, mimetype="application/xml")
 
 
 @public_bp.route("/downloads/iisc-users.csv")
@@ -471,9 +716,30 @@ def equipments():
     return render_template("equipments.html", managed_instruments=get_managed_instruments(), page_content=get_managed_page("equipments"))
 
 
+_EMDB_ID_RE = re.compile(r"\bEMD-(\d{4,6})\b")
+
+
+def link_emdb_ids(text):
+    """Escape a citation (unless it is already trusted Markup) and link any
+    EMDB accession such as EMD-12345 to its EBI entry page."""
+    safe = text if isinstance(text, Markup) else escape(text or "")
+    return Markup(_EMDB_ID_RE.sub(
+        lambda m: (
+            f'<a href="https://www.ebi.ac.uk/emdb/EMD-{m.group(1)}" '
+            f'target="_blank" rel="noopener noreferrer">EMD-{m.group(1)}</a>'
+        ),
+        str(safe),
+    ))
+
+
 @public_bp.route("/publication")
 def publications():
-    return render_template("pub.html", managed_publications=get_managed_publications(), page_content=get_managed_page("publications"))
+    return render_template(
+        "pub.html",
+        publications=get_site_publications(),
+        page_content=get_managed_page("publications"),
+        link_emdb=link_emdb_ids,
+    )
 
 
 @public_bp.route("/events")
@@ -484,3 +750,191 @@ def events():
 @public_bp.route("/community-gallery")
 def community_gallery():
     return render_template("community_gallery.html")
+
+
+def format_inr(amount):
+    """Format an amount as rupees with Indian digit grouping (e.g. Rs 1,23,456)."""
+    from decimal import Decimal, ROUND_HALF_UP
+
+    value = Decimal(amount).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    sign = "-" if value < 0 else ""
+    value = abs(value)
+    whole, _, paise = f"{value:.2f}".partition(".")
+    if len(whole) > 3:
+        head, tail = whole[:-3], whole[-3:]
+        groups = []
+        while len(head) > 2:
+            groups.insert(0, head[-2:])
+            head = head[:-2]
+        if head:
+            groups.insert(0, head)
+        whole = ",".join(groups + [tail])
+    text = f"\u20b9{whole}" if paise == "00" else f"\u20b9{whole}.{paise}"
+    return sign + text
+
+
+RATE_CATEGORIES = (
+    ("internal", "Internal (IISc)"),
+    ("academic", "Academic (other educational institutes)"),
+    ("industry", "Industry"),
+)
+
+# Worked example on /rates, computed by revenue.calculate_charge_sheet (the
+# function behind every issued charge sheet) so the page cannot drift.
+RATES_WORKED_EXAMPLE = {
+    "user_category": "academic",
+    "service_stage": "Data Collection",
+    "number_of_grids": 2,
+    "grid_source": "facility",
+    "grid_type": "normal_holey_carbon",
+    "actual_slots": 1,
+    "clip_base_source": "facility",
+}
+
+RATES_FREEZING_EXAMPLE = {
+    "user_category": "academic",
+    "service_stage": "Freezing / Grid Registration",
+    "number_of_grids": 4,
+    "grid_source": "self_owned",
+}
+
+
+def public_rate_table():
+    """Single source for the public "Charge sheet" table on /rates.
+
+    The billing code is authoritative: every amount is read from
+    revenue.CHARGE_CONFIG / PROCESSING_RATE / GST_RATE, and the data-processing
+    eligibility rule comes from revenue.calculate_charge_sheet.  Each value list
+    is in RATE_CATEGORIES order; a Decimal is INR before GST, a str is shown as-is.
+    """
+    from revenue import CHARGE_CONFIG, GST_RATE, calculate_charge_sheet
+
+    keys = [key for key, _ in RATE_CATEGORIES]
+
+    def config(getter):
+        return [getter(CHARGE_CONFIG[key]) for key in keys]
+
+    def processing(key):
+        amount = calculate_charge_sheet(
+            key, "Data Collection", 1, "self_owned", actual_slots=1, processing_requested=True,
+        )["processing_charge"]
+        return amount if amount else "Not applicable"
+
+    return {
+        "categories": [label for _, label in RATE_CATEGORIES],
+        "gst_rate": GST_RATE,
+        "gst": {
+            key: (f"plus {int(CHARGE_CONFIG[key]['gst_rate'] * 100)}% GST"
+                  if CHARGE_CONFIG[key]["gst_rate"] else "No GST")
+            for key in keys
+        },
+        "rows": [
+            {"id": "slot", "label": "Cryo-Electron Microscope analysis",
+             "unit": "per 24-hour slot, screening and data collection",
+             "values": config(lambda c: c["slot"])},
+            {"id": "grid_normal", "label": "Cryo-EM holey carbon grid",
+             "unit": "per grid, facility-provided",
+             "values": config(lambda c: c["grid"]["normal_holey_carbon"])},
+            {"id": "grid_gold", "label": "Gold / carbon-coated / graphene-oxide grid",
+             "unit": "per grid, facility-provided",
+             "values": config(lambda c: c["grid"]["gold_carbon_graphene"])},
+            {"id": "clip_base", "label": "C-clip and base ring",
+             "unit": "per unclipped grid, screening and data collection",
+             "values": config(lambda c: c["clip_base"])},
+            {"id": "clip_base_note", "note": True,
+             "label": ("Charged for each grid that is not already clipped. Not charged if "
+                       "your lab provides the C-clip and base ring.")},
+            {"id": "processing", "label": "Data processing / image analysis",
+             "unit": "if requested", "values": [processing(key) for key in keys]},
+            # Handling charges are grouped together at the bottom of the table.
+            {"id": "handling_freezing",
+             "label": "Handling charge \u2014 Grid freezing (Glow discharger & Vitrobot)",
+             "unit": "per 4 grids, pro-rated per grid",
+             "row_note": "Charged on the freezing booking.",
+             "values": config(lambda c: c["handling_per_4"])},
+            {"id": "handling_clipping", "label": "Handling charge \u2014 Grid clipping",
+             "unit": "per 4 grids, pro-rated per grid",
+             "row_note": ("Charged on the screening / clipping or data-collection booking, "
+                          "in addition to the C-clip and base ring."),
+             "values": config(lambda c: c["handling_per_4"])},
+        ],
+    }
+
+
+def _rates_effective_date():
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    except Exception:  # tzdata unavailable: IST is a fixed UTC+05:30 offset
+        return (datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(hours=5, minutes=30)).date()
+
+
+def build_rates_context():
+    from revenue import CHARGE_CONFIG, calculate_charge_sheet
+    from charge_sheet import _billing_lines
+
+    table = public_rate_table()
+    keys = [key for key, _ in RATE_CATEGORIES]
+    rows = []
+    for row in table["rows"]:
+        if row.get("note"):
+            rows.append(row)
+            continue
+        cells = []
+        for key, value in zip(keys, row["values"]):
+            if isinstance(value, str):
+                cells.append({"text": value, "gst": ""})
+            else:
+                gst = "" if key == "internal" else table["gst"][key]
+                cells.append({"text": format_inr(value), "gst": gst})
+        rows.append({**row, "cells": cells})
+
+    def worked_example(key, params, title):
+        charges = calculate_charge_sheet(**params)
+        return {
+            "key": key,
+            "title": title,
+            "lines": [(name, qty, format_inr(amount))
+                      for name, qty, amount in _billing_lines(charges, charges["service_stage"])],
+            "subtotal": format_inr(charges["subtotal"]),
+            "gst_percent": int(CHARGE_CONFIG[charges["user_category"]]["gst_rate"] * 100),
+            "gst": format_inr(charges["gst"]),
+            "total": format_inr(charges["grand_total"]),
+        }
+
+    labels = dict(RATE_CATEGORIES)
+    collection = RATES_WORKED_EXAMPLE
+    freezing = RATES_FREEZING_EXAMPLE
+    examples = [
+        worked_example("example", collection,
+                       f"{labels[collection['user_category']]} user, data collection with "
+                       f"{collection['number_of_grids']} facility-provided holey carbon grids "
+                       f"(not pre-clipped) and {collection['actual_slots']} 24-hour slot"),
+        worked_example("freezing-example", freezing,
+                       f"{labels[freezing['user_category']]} user, freezing booking for "
+                       f"{freezing['number_of_grids']} of their own grids"),
+    ]
+    return {
+        "categories": table["categories"],
+        "gst_labels": [table["gst"][key] for key in keys],
+        "rows": rows,
+        "examples": examples,
+        "effective_date": _rates_effective_date(),
+    }
+
+
+@public_bp.route("/rates")
+def rates():
+    return render_template("rates.html", **build_rates_context())
+
+
+@public_bp.route("/faq")
+def faq():
+    from blueprints.freezing import GRID_LIMIT_PER_DAY
+    return render_template("faq.html", freezing_grid_limit=GRID_LIMIT_PER_DAY)
+
+
+@public_bp.route("/contact")
+def contact():
+    return render_template("contact.html")

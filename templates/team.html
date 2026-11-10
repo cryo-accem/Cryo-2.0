@@ -2,24 +2,51 @@
 {% block title %}ACCEM | {{ page_content.title if page_content else 'Team' }}{% endblock %}
 {% block content %}
 <main>
-  <section class="page-content">
+  <section class="page-content tm-page">
     <header class="page-header page-header--team"><div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'People' }}</div><h1>{{ page_content.title if page_content else 'Our team' }}</h1><p>{{ page_content.intro if page_content else 'The core team provides cryo-EM services and supports users throughout their projects.' }}</p></div></header>
     {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
-    <div class="team-grid">
-      <article class="team-card"><div class="team-photo"><img src="{{ url_for('static', filename='images/somnath-dutta.webp') }}" alt="Dr. Somnath Dutta" loading="lazy" decoding="async"><span class="team-status">FACULTY IN-CHARGE</span></div><div class="team-details"><span class="team-role">Scientific leadership</span><strong>Dr. Somnath Dutta</strong><span>MBU, Indian Institute of Science<br>Bengaluru, India</span><a class="team-email" href="mailto:somnath@iisc.ac.in"><i class="fa-solid fa-envelope" aria-hidden="true"></i><span>somnath@iisc.ac.in</span></a></div></article>
-      <article class="team-card"><div class="team-photo"><img src="{{ url_for('static', filename='images/Drose.webp') }}" alt="Drose" loading="lazy" decoding="async"><span class="team-status">EM MANAGER</span></div><div class="team-details"><span class="team-role">Facility operations</span><strong>Mr. Drose Ignatious Shane</strong><span>MBU, Indian Institute of Science<br>Bengaluru, India</span><a class="team-email" href="mailto:cryoem.iisc@gmail.com"><i class="fa-solid fa-envelope" aria-hidden="true"></i><span>cryoem.iisc@gmail.com</span></a></div></article>
-    </div>
-    <div class="advisory">
-      <div class="advisory-heading"><span class="advisory-icon"><i class="fa-solid fa-shield-halved"></i></span><div><h2>Scientific Advisory Committee</h2><p>Guidance from leading researchers across structural biology and materials science.</p></div></div>
-      <div class="advisory-list">
-        <p><strong>Dr. Somnath Dutta</strong><span>Associate Professor · Molecular Biophysics Unit, IISc</span></p>
-        <p><strong>Dr. Siddhartha P. Sarma</strong><span>Professor · Molecular Biophysics Unit, IISc</span></p>
-        <p><strong>Dr. Raghavan Varadarajan</strong><span>Professor · Molecular Biophysics Unit, IISc</span></p>
-        <p><strong>Dr. Vinothkumar Kutti Ragunath</strong><span>Assistant Professor · NCBS, Bengaluru</span></p>
-        <p><strong>Dr. Vidya Mangala Prasad</strong><span>Assistant Professor · Molecular Biophysics Unit, IISc</span></p>
-        <p><strong>Dr. N. Ravishankar</strong><span>Professor · Materials Research Centre, IISc</span></p>
+    <section class="tm-section" aria-labelledby="tm-core-title">
+      <div class="tm-head">
+        <span class="tm-head__icon"><i class="fa-solid fa-users" aria-hidden="true"></i></span>
+        <div><span class="tm-kicker">Facility</span><h2 id="tm-core-title">Core team</h2></div>
       </div>
-    </div>
+      <div class="tm-grid">
+        <article class="tm-card">
+          <div class="tm-card__photo"><img src="{{ url_for('static', filename='images/somnath-dutta-300w.webp') }}" srcset="{{ url_for('static', filename='images/somnath-dutta-200w.webp') }} 200w, {{ url_for('static', filename='images/somnath-dutta-300w.webp') }} 300w, {{ url_for('static', filename='images/somnath-dutta-350w.webp') }} 350w" sizes="(max-width: 600px) 112px, 132px" width="350" height="353" alt="Dr. Somnath Dutta" decoding="async"></div>
+          <div class="tm-card__body">
+            <span class="tm-kicker">Scientific leadership</span>
+            <h3>Dr. Somnath Dutta</h3>
+            <span class="tm-badge">FACULTY IN-CHARGE</span>
+            <p class="tm-card__affil">MBU, Indian Institute of Science<br>Bengaluru, India</p>
+            <a class="tm-email" href="mailto:somnath@iisc.ac.in"><i class="fa-solid fa-envelope" aria-hidden="true"></i><span>somnath@iisc.ac.in</span></a>
+          </div>
+        </article>
+        <article class="tm-card">
+          <div class="tm-card__photo"><img src="{{ url_for('static', filename='images/Drose-300w.webp') }}" srcset="{{ url_for('static', filename='images/Drose-200w.webp') }} 200w, {{ url_for('static', filename='images/Drose-300w.webp') }} 300w, {{ url_for('static', filename='images/Drose-384w.webp') }} 384w" sizes="(max-width: 600px) 112px, 132px" width="384" height="384" alt="Mr. Drose Ignatious Shane" loading="lazy" decoding="async"></div>
+          <div class="tm-card__body">
+            <span class="tm-kicker">Facility operations</span>
+            <h3>Mr. Drose Ignatious Shane</h3>
+            <span class="tm-badge">EM MANAGER</span>
+            <p class="tm-card__affil">MBU, Indian Institute of Science<br>Bengaluru, India</p>
+            <a class="tm-email" href="mailto:cryoem.iisc@gmail.com"><i class="fa-solid fa-envelope" aria-hidden="true"></i><span>cryoem.iisc@gmail.com</span></a>
+          </div>
+        </article>
+      </div>
+    </section>
+    <section class="tm-section tm-advisory" aria-labelledby="tm-advisory-title">
+      <div class="tm-head">
+        <span class="tm-head__icon"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i></span>
+        <div><span class="tm-kicker">Advisory</span><h2 id="tm-advisory-title">Scientific Advisory Committee</h2><p>Guidance from leading researchers across structural biology and materials science.</p></div>
+      </div>
+      <ul class="tm-advisors">
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. Somnath Dutta</strong><span>Associate Professor · Molecular Biophysics Unit, IISc</span></div></li>
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. Siddhartha P. Sarma</strong><span>Professor · Molecular Biophysics Unit, IISc</span></div></li>
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. Raghavan Varadarajan</strong><span>Professor · Molecular Biophysics Unit, IISc</span></div></li>
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. Vinothkumar Kutti Ragunath</strong><span>Assistant Professor · NCBS, Bengaluru</span></div></li>
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. Vidya Mangala Prasad</strong><span>Assistant Professor · Molecular Biophysics Unit, IISc</span></div></li>
+          <li><span class="tm-advisor__icon"><i class="fa-solid fa-user" aria-hidden="true"></i></span><div><strong>Dr. N. Ravishankar</strong><span>Professor · Materials Research Centre, IISc</span></div></li>
+      </ul>
+    </section>
   </section>
 </main>
 {% endblock %}

@@ -2,44 +2,91 @@
 {% block title %}ACCEM | {{ page_content.title if page_content else 'Equipment' }}{% endblock %}
 {% block content %}
 <main>
-  <section class="page-content">
+  <section class="page-content eq-page">
     <header class="page-header page-header--equipment"><div><div class="eyebrow">{{ page_content.eyebrow if page_content else 'Infrastructure' }}</div><h1>{{ page_content.title if page_content else 'Equipment & capabilities' }}</h1><p>{{ page_content.intro if page_content else 'Specialised instrumentation for sample preparation, imaging and structural analysis.' }}</p></div></header>
     {% if page_content and page_content.additional_content %}<section class="managed-page-content prose">{{ page_content.additional_content }}</section>{% endif %}
+
+    <nav class="eq-jump" aria-label="Equipment sections">
+      <a href="#eq-imaging"><i class="fa-solid fa-microscope" aria-hidden="true"></i>Imaging</a>
+      <a href="#eq-sample-prep"><i class="fa-solid fa-snowflake" aria-hidden="true"></i>Sample preparation</a>
+      <a href="#eq-data"><i class="fa-solid fa-server" aria-hidden="true"></i>Data processing</a>
+      {% if managed_instruments %}<a href="#eq-managed"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i>Managed instruments</a>{% endif %}
+    </nav>
+
+    <section class="eq-section" id="eq-imaging" aria-labelledby="eq-imaging-title">
+      <div class="eq-head">
+        <span class="eq-head__icon"><i class="fa-solid fa-microscope" aria-hidden="true"></i></span>
+        <div><span class="eq-kicker">Imaging</span><h2 id="eq-imaging-title">Current instrumentation</h2><p>High-resolution imaging and direct electron detection for demanding cryo-EM projects.</p></div>
+      </div>
+      <div class="eq-feature-grid">
+        <article class="eq-feature">
+          <figure class="eq-feature__photo">
+            <img src="{{ url_for('static', filename='images/talos_arctica-800w.webp') }}" srcset="{{ url_for('static', filename='images/talos_arctica-600w.webp') }} 600w, {{ url_for('static', filename='images/talos_arctica-800w.webp') }} 800w, {{ url_for('static', filename='images/talos_arctica-1200w.webp') }} 1200w, {{ url_for('static', filename='images/talos_arctica.webp') }} 1375w" sizes="(max-width: 900px) calc(100vw - 44px), 560px" width="1375" height="1144" alt="Talos Arctica 200kV Cryo-TEM" decoding="async">
+            <figcaption>200 kV</figcaption>
+          </figure>
+          <div class="eq-feature__body">
+            <span class="eq-kicker">Cryo-TEM</span>
+            <h3>Talos Arctica - 200kV Cryo-TEM</h3>
+            <p>Optimized for high-resolution imaging of biological macromolecules, single-particle analysis and cryo-electron tomography.</p>
+            <h4>Equipped with</h4>
+            <ul class="eq-checks"><li><i class="fa-solid fa-check" aria-hidden="true"></i>200 kV accelerating voltage</li><li><i class="fa-solid fa-check" aria-hidden="true"></i>Autoloader</li><li><i class="fa-solid fa-check" aria-hidden="true"></i>Optimized low-dose imaging</li><li><i class="fa-solid fa-check" aria-hidden="true"></i>Stage tilt optimized for both SPA and tomography</li></ul>
+          </div>
+        </article>
+        <article class="eq-feature">
+          <figure class="eq-feature__photo">
+            <img src="{{ url_for('static', filename='images/direct_detector-800w.webp') }}" srcset="{{ url_for('static', filename='images/direct_detector-400w.webp') }} 400w, {{ url_for('static', filename='images/direct_detector-600w.webp') }} 600w, {{ url_for('static', filename='images/direct_detector-800w.webp') }} 800w, {{ url_for('static', filename='images/direct_detector-1200w.webp') }} 1200w, {{ url_for('static', filename='images/direct_detector-1920w.webp') }} 1920w" sizes="(max-width: 900px) calc(100vw - 44px), 560px" width="1920" height="1440" alt="Gatan K2 Summit direct electron detector" loading="lazy" decoding="async">
+            <figcaption>4k × 4k</figcaption>
+          </figure>
+          <div class="eq-feature__body">
+            <span class="eq-kicker">Detector</span>
+            <h3>Direct Electron Detector (Gatan K2 Summit)</h3>
+            <p>A 4k × 4k direct electron detector for electron counting, super-resolution and dose-fractionated movie acquisition.</p>
+            <h4>Direct electron detection</h4>
+            <p>High detective quantum efficiency, low noise and seamless integration with the Talos Arctica for high-throughput data collection.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="eq-section" id="eq-sample-prep" aria-labelledby="eq-sample-prep-title">
+      <div class="eq-head">
+        <span class="eq-head__icon"><i class="fa-solid fa-snowflake" aria-hidden="true"></i></span>
+        <div><span class="eq-kicker">Grid preparation</span><h2 id="eq-sample-prep-title">Sample preparation</h2><p>Infrastructure for reproducible grid preparation and cryogenic handling.</p></div>
+      </div>
+      <div class="eq-tile-grid">
+        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/pelco_easiGlow-400w.webp') }}" srcset="{{ url_for('static', filename='images/pelco_easiGlow-200w.webp') }} 200w, {{ url_for('static', filename='images/pelco_easiGlow-300w.webp') }} 300w, {{ url_for('static', filename='images/pelco_easiGlow-400w.webp') }} 400w, {{ url_for('static', filename='images/pelco_easiGlow-600w.webp') }} 600w, {{ url_for('static', filename='images/pelco_easiGlow-1920w.webp') }} 1920w" sizes="(max-width: 600px) calc(100vw - 34px), (max-width: 1100px) 45vw, 280px" width="1920" height="1440" alt="PELCO easiGlow glow discharge system" loading="lazy" decoding="async"><div><h3>PELCO easiGlow</h3><p>Glow discharge treatment for consistent grid surface preparation.</p></div></article>
+        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/fei_vitrobot-400w.webp') }}" srcset="{{ url_for('static', filename='images/fei_vitrobot-200w.webp') }} 200w, {{ url_for('static', filename='images/fei_vitrobot-300w.webp') }} 300w, {{ url_for('static', filename='images/fei_vitrobot-400w.webp') }} 400w, {{ url_for('static', filename='images/fei_vitrobot-719w.webp') }} 719w" sizes="(max-width: 600px) calc(100vw - 34px), (max-width: 1100px) 45vw, 280px" width="719" height="1024" alt="FEI Vitrobot" loading="lazy" decoding="async"><div><h3>FEI Vitrobot</h3><p>Semi-automated plunge freezing under controlled temperature and humidity.</p></div></article>
+        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/black-512w.webp') }}" srcset="{{ url_for('static', filename='images/black-200w.webp') }} 200w, {{ url_for('static', filename='images/black-300w.webp') }} 300w, {{ url_for('static', filename='images/black-512w.webp') }} 512w" sizes="(max-width: 600px) calc(100vw - 34px), (max-width: 1100px) 45vw, 280px" width="512" height="342" alt="Quorum Q150T ES Plus" loading="lazy" decoding="async"><div><h3>Quorum Q150T ES Plus</h3><p>Dual-function sputter and carbon coating for grid preparation.</p></div></article>
+        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/sample-400w.webp') }}" srcset="{{ url_for('static', filename='images/sample-200w.webp') }} 200w, {{ url_for('static', filename='images/sample-300w.webp') }} 300w, {{ url_for('static', filename='images/sample-400w.webp') }} 400w, {{ url_for('static', filename='images/sample-600w.webp') }} 600w, {{ url_for('static', filename='images/sample-800w.webp') }} 800w" sizes="(max-width: 600px) calc(100vw - 34px), (max-width: 1100px) 45vw, 280px" width="800" height="416" alt="Sample preparation infrastructure" loading="lazy" decoding="async"><div><h3>Sample preparation infrastructure</h3><p>Clipping, autogrid loading and cryogenic storage infrastructure.</p></div></article>
+      </div>
+    </section>
+
+    <section class="eq-section" id="eq-data" aria-labelledby="eq-data-title">
+      <div class="eq-head">
+        <span class="eq-head__icon"><i class="fa-solid fa-server" aria-hidden="true"></i></span>
+        <div><span class="eq-kicker">Computing</span><h2 id="eq-data-title">Data processing</h2><p>Computing resources for scalable reconstruction and structure determination.</p></div>
+      </div>
+      <div class="eq-tile-grid eq-tile-grid--wide">
+        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/server-800w.webp') }}" srcset="{{ url_for('static', filename='images/server-200w.webp') }} 200w, {{ url_for('static', filename='images/server-300w.webp') }} 300w, {{ url_for('static', filename='images/server-400w.webp') }} 400w, {{ url_for('static', filename='images/server-600w.webp') }} 600w, {{ url_for('static', filename='images/server-800w.webp') }} 800w, {{ url_for('static', filename='images/server-1200w.webp') }} 1200w" sizes="(max-width: 700px) calc(100vw - 34px), 480px" width="1200" height="628" alt="Data processing servers" loading="lazy" decoding="async"><div><h3>Cluster &amp; high-throughput data processing servers</h3><p>CPU and GPU resources with high-speed storage for demanding cryo-EM datasets.</p></div></article>
+      </div>
+    </section>
+
     {% if managed_instruments %}
-    <section class="managed-content-section">
-      <div class="section-heading"><h2>Managed instruments</h2><p>Equipment entries maintained by the ACCEM team.</p></div>
-      <div class="equipment-card-grid">
+    <section class="eq-section managed-content-section" id="eq-managed" aria-labelledby="eq-managed-title">
+      <div class="eq-head">
+        <span class="eq-head__icon"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i></span>
+        <div><span class="eq-kicker">Also available</span><h2 id="eq-managed-title">Managed instruments</h2><p>Equipment entries maintained by the ACCEM team.</p></div>
+      </div>
+      <div class="eq-tile-grid eq-tile-grid--managed">
         {% for instrument in managed_instruments %}
         <article class="equipment-tile{% if not instrument.image_url %} equipment-tile--text-only{% endif %}">
           {% if instrument.image_url %}<img src="{{ instrument.image_url }}" alt="{{ instrument.name }}" loading="lazy" decoding="async">{% endif %}
-          <div><h3>{{ instrument.name }}</h3>{% if instrument.category %}<small>{{ instrument.category }}</small>{% endif %}<p>{{ instrument.description }}</p>{% if instrument.specifications %}<p>{{ instrument.specifications }}</p>{% endif %}</div>
+          <div><h3>{{ instrument.name }}</h3>{% if instrument.category %}<small>{{ instrument.category }}</small>{% endif %}<p>{{ instrument.description }}</p>{% if instrument.specifications %}<p class="eq-spec">{{ instrument.specifications }}</p>{% endif %}</div>
         </article>
         {% endfor %}
       </div>
     </section>
     {% endif %}
-    <section class="equipment-featured">
-      <div class="section-heading"><h2>Current instrumentation</h2><p>High-resolution imaging and direct electron detection for demanding cryo-EM projects.</p></div>
-      <article class="equipment-hero-card equipment-hero-card--primary">
-        <img src="{{ url_for('static', filename='images/talos_arctica.webp') }}" alt="Talos Arctica 200kV Cryo-TEM" loading="lazy" decoding="async">
-        <div class="equipment-hero-copy"><h2>Talos Arctica - 200kV Cryo-TEM</h2><p>Optimized for high-resolution imaging of biological macromolecules, single-particle analysis and cryo-electron tomography.</p><h3>Equipped with</h3><ol><li>200 kV accelerating voltage</li><li>Autoloader</li><li>Optimized low-dose imaging</li><li>Stage tilt optimized for both SPA and tomography</li></ol></div>
-      </article>
-      <article class="equipment-hero-card equipment-hero-card--reverse equipment-hero-card--detector">
-        <div class="equipment-hero-copy"><h2>Direct Electron Detector (Gatan K2 Summit)</h2><p>A 4k × 4k direct electron detector for electron counting, super-resolution and dose-fractionated movie acquisition.</p><h3>Direct electron detection</h3><p>High detective quantum efficiency, low noise and seamless integration with the Talos Arctica for high-throughput data collection.</p></div>
-        <img src="{{ url_for('static', filename='images/direct_detector.webp') }}" alt="Gatan K2 Summit direct electron detector" loading="lazy" decoding="async">
-      </article>
-    </section>
-    <section class="equipment-groups">
-      <div class="equipment-group"><div class="section-heading"><h2>Sample preparation</h2><p>Infrastructure for reproducible grid preparation and cryogenic handling.</p></div><div class="equipment-card-grid">
-        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/pelco_easiGlow.webp') }}" alt="PELCO easiGlow glow discharge system" loading="lazy" decoding="async"><div><h3>PELCO easiGlow</h3><p>Glow discharge treatment for consistent grid surface preparation.</p></div></article>
-        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/fei_vitrobot.webp') }}" alt="FEI Vitrobot" loading="lazy" decoding="async"><div><h3>FEI Vitrobot</h3><p>Semi-automated plunge freezing under controlled temperature and humidity.</p></div></article>
-        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/black.webp') }}" alt="Quorum Q150T ES Plus" loading="lazy" decoding="async"><div><h3>Quorum Q150T ES Plus</h3><p>Dual-function sputter and carbon coating for grid preparation.</p></div></article>
-        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/sample.webp') }}" alt="Sample preparation infrastructure" loading="lazy" decoding="async"><div><h3>Sample preparation infrastructure</h3><p>Clipping, autogrid loading and cryogenic storage infrastructure.</p></div></article>
-      </div></div>
-      <div class="equipment-group"><div class="section-heading"><h2>Data processing</h2><p>Computing resources for scalable reconstruction and structure determination.</p></div><div class="equipment-card-grid equipment-card-grid--single">
-        <article class="equipment-tile"><img src="{{ url_for('static', filename='images/server.webp') }}" alt="Data processing servers" loading="lazy" decoding="async"><div><h3>Cluster &amp; high-throughput data processing servers</h3><p>CPU and GPU resources with high-speed storage for demanding cryo-EM datasets.</p></div></article>
-      </div></div>
-    </section>
   </section>
 </main>
 {% endblock %}
