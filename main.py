@@ -3,7 +3,7 @@ import datetime
 import hashlib
 import secrets
 from hmac import compare_digest
-from flask import Flask, abort, request, session
+from flask import Flask, abort, flash, jsonify, redirect, request, session, url_for
 from werkzeug.security import safe_join
 from flask_compress import Compress
 
@@ -175,7 +175,41 @@ def create_app() -> Flask:
         expected = session.get("_csrf_token")
         supplied = request.form.get("_csrf_token") or request.headers.get("X-CSRF-Token")
         if not expected or not supplied or not compare_digest(expected, supplied):
+            return _expired_form_response()
+
+    def _expired_form_response():
+        """A form posted after its session expired: explain, don't show a bare 400.
+
+        Pages left open past the session lifetime (30 minutes for staff) post
+        a token the server no longer has.  Staff go back to the sign-in page,
+        scripts get JSON, and public visitors return to the page they were on.
+        """
+        endpoint = request.endpoint or ""
+        if session.get("_csrf_token") or session.get("admin_logged_in"):
+            # The session is alive but the token is missing or wrong: this is
+            # not an expired page, so refuse as before.
             abort(400, description="Invalid or missing CSRF token.")
+        staff_area = endpoint.startswith(("admin.", "inventory."))
+        wants_json = (
+            request.is_json
+            or request.accept_mimetypes.best == "application/json"
+            or endpoint in {"admin.billing_preview"}
+            or endpoint.startswith("admin.assistant")
+        )
+        if wants_json:
+            message = (
+                "Your session has expired. Please sign in again."
+                if staff_area else "This page has expired. Please reload it and try again."
+            )
+            return jsonify({"error": message}), (401 if staff_area else 400)
+        if staff_area:
+            flash("Your session expired, so nothing was saved. Please sign in again.", "error")
+            return redirect(url_for("admin.login"))
+        flash("This page had been open for a long time, so the form expired and was not sent. Please fill it in again.", "error")
+        referrer = request.referrer or ""
+        if referrer.startswith(request.host_url):
+            return redirect(referrer)
+        return redirect(url_for("public.home"))
 
     @app.after_request
     def add_security_headers(response):

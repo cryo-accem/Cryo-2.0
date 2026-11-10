@@ -7,7 +7,7 @@
       {% for item in name_suggestions %}
         {% set params = {'username': item.name, 'booking_name': booking_name} %}
         {% if selection_mode %}{% set _ = params.update({'select': '1', 'slot_type': slot_type}) %}{% if admin_selection %}{% set _ = params.update({'admin_selection': '1'}) %}{% endif %}{% endif %}
-        <a class="lookup-name-choice" href="{{ url_for('public.grid_inventory', **params) }}"><strong>{{ item.name }}</strong><small>{{ item.grid_count }} grid{{ '' if item.grid_count == 1 else 's' }} · Yes, this is me</small></a>
+        <a class="lookup-name-choice" href="{{ url_for('public.grid_inventory', **params) }}"><strong>{{ item.name }}</strong><small>{{ item.grid_count }} grid{{ '' if item.grid_count == 1 else 's' }} on record · Yes, this is me</small></a>
       {% endfor %}
     </div>
   </div>
@@ -113,7 +113,7 @@
   });
   returnButton?.addEventListener("click", () => {
     if (window.opener && !window.opener.closed) window.close();
-    else history.back();
+    else window.location.href = {{ url_for('register.register')|tojson }};
   });
   update();
 })();

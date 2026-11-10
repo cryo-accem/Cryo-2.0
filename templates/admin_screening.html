@@ -328,8 +328,14 @@
       const data = await response.json();
       if (requestId !== previewRequest) return;
       if (!response.ok) throw new Error(data.error || "Billing preview could not be calculated.");
+      if (data.non_billable) {
+        summary.textContent = "Non-billable PI: no charges are recorded for this booking.";
+        errorMessage.hidden = true;
+        confirmButton.disabled = false;
+        return;
+      }
       const finalAmount = csicToggle.checked ? Number(csicAmount.value) : Number(data.grand_total);
-      if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+      if (!Number.isFinite(finalAmount) || (csicToggle.checked && finalAmount <= 0)) {
         throw new Error("Enter a valid final CSIC invoice amount.");
       }
       const discount = csicToggle.checked && finalAmount < Number(data.grand_total) - 0.005;

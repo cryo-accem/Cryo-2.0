@@ -42,7 +42,7 @@
       status.hidden = false;
       status.textContent = mismatch
         ? `Actual grids is ${actual}: tick the ${needed} reserved grid${needed === 1 ? "" : "s"} that were used (${ticked} ticked now).`
-        : `${ticked} of ${cards.length} reserved grids used. The other ${cards.length - ticked} go back to storage unused — not clipped or billed.`;
+        : `${ticked} of ${cards.length} reserved grids used. The other ${cards.length - ticked} go back still Frozen — not clipped or billed.`;
     }
     status.classList.toggle("is-error", mismatch);
     const first = cards[0].querySelector("[data-used-toggle]");
@@ -81,7 +81,7 @@
 
     const note = document.createElement("p");
     note.className = "completion-unused-note";
-    note.textContent = "Not used — this grid goes back to storage as it was. It is not clipped or billed. Check the place below.";
+    note.textContent = "Not inserted — this grid goes back to its place still Frozen (its status before this booking), not Stored. It is not clipped or billed. Check the place below.";
     note.hidden = true;
     toggleLabel.after(note);
 

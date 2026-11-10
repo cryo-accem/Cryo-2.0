@@ -16,6 +16,7 @@ decide what appears on the website.
 splits them against the website's Publications list.
 """
 
+from concurrent.futures import ThreadPoolExecutor
 import csv
 import difflib
 import html
@@ -94,7 +95,8 @@ FIELD_LABELS = {
 
 EUROPE_PMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
-REQUEST_TIMEOUT_SECONDS = 10
+REQUEST_TIMEOUT_SECONDS = 25  # searches run in the background, so slow sources can finish
+MAX_PARALLEL_REQUESTS = 6
 USER_AGENT = "ACCEM-publication-finder/1.0"
 EUROPE_PMC_PAGE_SIZE = 1000
 EUROPE_PMC_MAX_PAGES = 3
@@ -547,11 +549,9 @@ def find_candidates(report=None):
     """
     if report is None:
         report = {}
-    report["queries"] = []
-    matched = []
-    failures = 0
     queries = build_queries()
-    for query in queries:
+
+    def run_query(query):
         entry = {key: query[key] for key in ("id", "tag", "field", "source", "query")}
         try:
             if query["source"] == "Europe PMC":
@@ -565,11 +565,22 @@ def find_candidates(report=None):
                     if _openalex_has_iisc(work, institution)
                 ]
             entry.update(hit_count=hit_count, kept=len(records), error=None)
-            matched.extend((record, query) for record in records)
-        except (OSError, ValueError, urllib.error.URLError) as exc:
-            failures += 1
-            entry.update(hit_count=None, kept=0, error=str(exc)[:200])
-        report["queries"].append(entry)
+            return entry, records
+        except Exception as exc:  # one bad source/record must not sink the whole search
+            entry.update(hit_count=None, kept=0, error=f"{type(exc).__name__}: {exc}"[:200])
+            return entry, []
+
+    # The sources are queried in parallel (each request waits on the network),
+    # which keeps a full search well inside the web server's request time.
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        outcomes = list(pool.map(run_query, queries))
+    report["queries"] = [entry for entry, _ in outcomes]
+    matched = [
+        (record, query)
+        for query, (_, records) in zip(queries, outcomes)
+        for record in records
+    ]
+    failures = sum(1 for entry in report["queries"] if entry["error"])
 
     if failures == len(queries):
         raise FinderError("No publication source could be reached.")
@@ -589,8 +600,8 @@ def find_candidates(report=None):
             if candidate.get("doi") in flagged_dois or normalize_title(candidate["title"]) in flagged_titles:
                 candidate["mentions_national_facility"] = True
         national_entry.update(hit_count=hit_count, kept=0, error=None)
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        national_entry.update(hit_count=None, kept=0, error=str(exc)[:200])
+    except Exception as exc:
+        national_entry.update(hit_count=None, kept=0, error=f"{type(exc).__name__}: {exc}"[:200])
     report["queries"].append(national_entry)
     return candidates
 
@@ -751,9 +762,25 @@ CSV_COLUMNS = (
 )
 
 
+class _SafeDictWriter(csv.DictWriter):
+    """DictWriter that stops spreadsheet apps reading cells as formulas.
+
+    Titles and author names come from external sources; a cell starting with
+    =, +, - or @ is prefixed with an apostrophe (as in the inventory CSVs).
+    """
+
+    def writerow(self, rowdict):
+        def cell(value):
+            text = "" if value is None else str(value)
+            if text.startswith(("\t", "\r", "\n")) or text.lstrip(" \t").startswith(("=", "+", "-", "@")):
+                return "'" + text
+            return value
+        return super().writerow({key: cell(value) for key, value in rowdict.items()})
+
+
 def results_csv(comparison):
     output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    writer = _SafeDictWriter(output, fieldnames=CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     for group in ("not_on_website", "on_website"):
         for candidate in comparison.get(group) or []:

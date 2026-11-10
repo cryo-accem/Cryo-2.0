@@ -336,9 +336,25 @@ CSV_COLUMNS = (
 )
 
 
+class _SafeDictWriter(csv.DictWriter):
+    """DictWriter that stops spreadsheet apps reading cells as formulas.
+
+    Titles and author names come from external sources; a cell starting with
+    =, +, - or @ is prefixed with an apostrophe (as in the inventory CSVs).
+    """
+
+    def writerow(self, rowdict):
+        def cell(value):
+            text = "" if value is None else str(value)
+            if text.startswith(("\t", "\r", "\n")) or text.lstrip(" \t").startswith(("=", "+", "-", "@")):
+                return "'" + text
+            return value
+        return super().writerow({key: cell(value) for key, value in rowdict.items()})
+
+
 def payload_csv(payload):
     output = io.StringIO(newline="")
-    writer = csv.DictWriter(output, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+    writer = _SafeDictWriter(output, fieldnames=CSV_COLUMNS, extrasaction="ignore")
     writer.writeheader()
     new_ids = set(payload.get("new_ids") or [])
     for status, entries in (("counted", payload.get("entries") or []),

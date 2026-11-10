@@ -423,7 +423,39 @@ def billing_preview():
         )
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    return jsonify({key: str(value) for key, value in charges.items() if key not in {"user_category", "service_stage", "grid_source", "grid_type"}})
+    result = {key: str(value) for key, value in charges.items() if key not in {"user_category", "service_stage", "grid_source", "grid_type"}}
+    if _preview_booking_is_non_billable():
+        # Completion stores no charges for the non-billable PI, so the
+        # preview must not show a bill either.
+        money = {"grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
+                 "freezing_charge", "clipping_charge", "processing_charge", "subtotal",
+                 "gst_amount", "grand_total", "total_billed"}
+        result = {key: ("0.00" if key in money else value) for key, value in result.items()}
+        result["non_billable"] = "1"
+    return jsonify(result)
+
+
+_PREVIEW_BOOKING_TABLES = {
+    "screening": "screening_bookings",
+    "data_collection": "bookings",
+    "freezing": "freezing_bookings",
+}
+
+
+def _preview_booking_is_non_billable():
+    table = _PREVIEW_BOOKING_TABLES.get(request.values.get("preview_service", "").strip())
+    booking_id = request.values.get("preview_booking_id", "").strip()
+    if not table or not booking_id.isdigit():
+        return False
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute(f"SELECT pi_name FROM {table} WHERE id=?", [int(booking_id)])
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    return bool(row) and is_non_billable_booking(row)
 
 
 # ── Main Dashboard ───────────────────────────────────────────────────────────
@@ -2162,6 +2194,12 @@ def _save_managed_publication(citation, doi_url, year_text, publication_id=None)
     conn = get_db()
     cur = conn.cursor()
     if publication_id:
+        # MySQL reports changed (not matched) rows, so check existence first.
+        cur.execute("SELECT 1 FROM managed_publications WHERE id=?", [publication_id])
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            return False, "That publication no longer exists. Reload the page."
         cur.execute(
             "UPDATE managed_publications SET citation=?, doi_url=?, published_year=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
             [citation, doi_url or None, published_year, publication_id],
@@ -2200,10 +2238,14 @@ def delete_publication(publication_id):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM managed_publications WHERE id=?", [publication_id])
+    removed = cur.rowcount
     conn.commit()
     cur.close()
     conn.close()
-    flash("Publication removed.", "success")
+    if removed:
+        flash("Publication removed.", "success")
+    else:
+        flash("That publication was already removed.", "error")
     return redirect(url_for("admin.maintenance"))
 
 
@@ -2244,6 +2286,7 @@ def publication_finder_page():
     emdb = _load_emdb_payload()
     return render_template(
         "admin_publication_finder.html",
+        finder_status=_finder_status(),
         just_added=session.pop("finder_added", None),
         just_dismissed=session.pop("finder_dismissed", None),
         dismissed=sorted(
@@ -2264,35 +2307,151 @@ def publication_finder_page():
     )
 
 
+PUBLICATION_FINDER_STATUS_KEY = "publication_finder_status"
+# A search that has not reported back in this long is treated as abandoned
+# (e.g. the server restarted mid-search), so a new one may be started.
+_FINDER_STALE_SECONDS = 600
+
+
+def _finder_status():
+    try:
+        status = load_cache_payload(PUBLICATION_FINDER_STATUS_KEY)
+    except Exception:
+        return None
+    if not isinstance(status, dict):
+        return None
+    if status.get("state") == "running":
+        started = float(status.get("started_epoch") or 0)
+        if time.time() - started > _FINDER_STALE_SECONDS:
+            status = dict(status, state="failed",
+                          message="The last search did not finish. Please run it again.")
+    return status
+
+
+_FINDER_LOCK_KEY = "publication_finder_lock"
+
+
+def _acquire_finder_lock():
+    """Atomically claim the right to run a search (one at a time, all workers).
+
+    Inserting the lock row fails if another request already holds it, so two
+    quick clicks (even on different server workers) cannot start two searches.
+    """
+    from database import ensure_site_stats_cache_table
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        ensure_site_stats_cache_table(cur)
+        for _attempt in range(2):
+            try:
+                cur.execute(
+                    "INSERT INTO site_stats_cache (cache_key, payload, updated_at) VALUES (?, ?, ?)",
+                    [_FINDER_LOCK_KEY, json.dumps({"epoch": time.time()}),
+                     datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")],
+                )
+                conn.commit()
+                return True
+            except (sqlite3.IntegrityError, pymysql.err.IntegrityError):
+                conn.rollback()
+                cur.execute("SELECT payload FROM site_stats_cache WHERE cache_key=?", [_FINDER_LOCK_KEY])
+                row = cur.fetchone()
+                try:
+                    held_since = float(json.loads(row["payload"]).get("epoch", 0)) if row else 0
+                except (TypeError, ValueError):
+                    held_since = 0
+                if time.time() - held_since <= _FINDER_STALE_SECONDS:
+                    return False
+                # Abandoned lock (e.g. server restarted mid-search): clear it.
+                cur.execute("DELETE FROM site_stats_cache WHERE cache_key=?", [_FINDER_LOCK_KEY])
+                conn.commit()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _release_finder_lock():
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM site_stats_cache WHERE cache_key=?", [_FINDER_LOCK_KEY])
+        conn.commit()
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _run_publication_finder_job(app):
+    """Run the publication search and store its results (or the failure)."""
+    with app.app_context():
+        started = time.monotonic()
+        report = {}
+        try:
+            candidates = publication_finder.find_candidates(report)
+            for candidate in candidates:
+                candidate["key"] = _candidate_key(candidate)
+            run = {
+                "ran_at": now_ist().strftime("%Y-%m-%d %H:%M"),
+                "duration_seconds": round(time.monotonic() - started, 1),
+                "queries": report.get("queries", []),
+                "candidates": candidates,
+            }
+            save_cache_payload(PUBLICATION_FINDER_CACHE_KEY, run)
+            failed = [query["id"] for query in run["queries"] if query.get("error")]
+            message = (
+                f"Search finished with {len(candidates)} candidates, but {len(failed)} "
+                "source request(s) failed; results may be incomplete."
+                if failed else f"Search finished: {len(candidates)} candidate publications found."
+            )
+            status = {"state": "done", "ok": not failed, "message": message}
+        except publication_finder.FinderError as exc:
+            status = {"state": "failed", "message": f"Publication search failed: {exc} Please try again later."}
+        except Exception:
+            app.logger.exception("Publication finder search failed")
+            status = {"state": "failed", "message": "Publication search failed unexpectedly. Please try again."}
+        status["finished_at"] = now_ist().strftime("%Y-%m-%d %H:%M")
+        try:
+            save_cache_payload(PUBLICATION_FINDER_STATUS_KEY, status)
+        except Exception:
+            app.logger.exception("Could not store the publication finder status")
+        try:
+            _release_finder_lock()
+        except Exception:
+            app.logger.exception("Could not release the publication finder lock")
+
+
 @admin_bp.route("/publications/finder/run", methods=["POST"])
 def run_publication_finder():
+    """Start a publication search in the background.
+
+    A full search queries Europe PMC and OpenAlex many times and can take
+    longer than the web server allows for one request, so the page returns at
+    once and refreshes itself until the search reports back.
+    """
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
-    started = time.monotonic()
-    report = {}
-    try:
-        candidates = publication_finder.find_candidates(report)
-    except publication_finder.FinderError as exc:
-        flash(f"Publication search failed: {exc} Please try again later.", "error")
+    if not _acquire_finder_lock():
+        flash("A publication search is already running. Results will appear here shortly.", "success")
         return redirect(url_for("admin.publication_finder"))
-    for candidate in candidates:
-        candidate["key"] = _candidate_key(candidate)
-    run = {
-        "ran_at": now_ist().strftime("%Y-%m-%d %H:%M"),
-        "duration_seconds": round(time.monotonic() - started, 1),
-        "queries": report.get("queries", []),
-        "candidates": candidates,
-    }
-    save_cache_payload(PUBLICATION_FINDER_CACHE_KEY, run)
-    failed = [query["id"] for query in run["queries"] if query.get("error")]
-    if failed:
-        flash(
-            f"Search finished with {len(candidates)} candidates, but {len(failed)} "
-            "source request(s) failed; results may be incomplete.",
-            "error",
-        )
+    save_cache_payload(PUBLICATION_FINDER_STATUS_KEY, {
+        "state": "running",
+        "started_epoch": time.time(),
+        "started_at": now_ist().strftime("%Y-%m-%d %H:%M"),
+    })
+    app = current_app._get_current_object()
+    if app.testing:
+        _run_publication_finder_job(app)  # deterministic in tests
+        status = _finder_status() or {}
+        flash(status.get("message", "Search finished."), "success" if status.get("ok") else "error")
     else:
-        flash(f"Search finished: {len(candidates)} candidate publications found.", "success")
+        try:
+            threading.Thread(
+                target=_run_publication_finder_job, args=(app,), daemon=True,
+                name="publication-finder",
+            ).start()
+        except Exception:
+            _release_finder_lock()
+            raise
     return redirect(url_for("admin.publication_finder"))
 
 
@@ -2488,6 +2647,12 @@ def save_instrument():
     conn = get_db()
     cur = conn.cursor()
     if instrument_id:
+        cur.execute("SELECT 1 FROM managed_instruments WHERE id=?", [instrument_id])
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            flash("That instrument no longer exists. Reload the page.", "error")
+            return redirect(url_for("admin.maintenance"))
         cur.execute(
             """UPDATE managed_instruments SET name=?, category=?, description=?,
                specifications=?, image_url=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
@@ -2516,10 +2681,14 @@ def delete_instrument(instrument_id):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("DELETE FROM managed_instruments WHERE id=?", [instrument_id])
+    removed = cur.rowcount
     conn.commit()
     cur.close()
     conn.close()
-    flash("Instrument removed.", "success")
+    if removed:
+        flash("Instrument removed.", "success")
+    else:
+        flash("That instrument was already removed.", "error")
     return redirect(url_for("admin.maintenance"))
 
 
@@ -4541,6 +4710,17 @@ def edit_completed_booking(service_key, booking_id):
         )
         normal_grids = request.form.get("normal_grids", "").strip() or None
         gold_grids = request.form.get("gold_grids", "").strip() or None
+        # The form pre-fills the saved per-type counts.  If all grids are one
+        # type (the other count is 0/blank), that type simply follows Actual
+        # grids; the counts must add up only for a real normal + gold mix.
+        if all(value is None or value.isdigit() for value in (normal_grids, gold_grids)):
+            normal_count, gold_count = int(normal_grids or 0), int(gold_grids or 0)
+            if not (normal_count and gold_count):
+                if normal_count:
+                    grid_type = "normal_holey_carbon"
+                elif gold_count:
+                    grid_type = "gold_carbon_graphene"
+                normal_grids = gold_grids = None
         clipped_grids = request.form.get("clipped_grids", "0").strip() or "0"
         if not clipped_grids.isdigit() or int(clipped_grids) > actual_grids:
             raise ValueError("Clipped grids must be zero or no more than the actual grids.")
@@ -4895,8 +5075,19 @@ def send_charge_sheet(service_key, booking_id):
         cc=cc,
         attachments=[(filename, "application/pdf", pdf)],
     )
-    flash("Charge Sheet queued for email delivery.")
+    flash(*_charge_sheet_sent_message("Charge Sheet"))
     return redirect(url_for("admin.history"))
+
+
+def _charge_sheet_sent_message(label):
+    """Honest send confirmation: say so when this server cannot email."""
+    if current_app.config.get("GOOGLE_APPS_SCRIPT_URL") and current_app.config.get("GOOGLE_APPS_SCRIPT_TOKEN"):
+        return f"{label} queued for email delivery.", "success"
+    return (
+        f"{label} was saved, but email is not set up on this server, so it was NOT emailed. "
+        "Use Preview Charge Sheet to download it and send it manually.",
+        "warning",
+    )
 
 
 def _store_sent_charges(cur, table, booking_id, row, charges, csic_original_amount, charge_sheet_id):
@@ -5158,7 +5349,7 @@ def send_combined_charge_sheet():
         f"Dear {first['user_name']},\n\nPlease find attached the combined Charge Sheet for your completed Cryo-EM bookings.\n\nRegards,\nCryo-EM Facility",
         attachments=[("charge-sheet-combined.pdf", "application/pdf", pdf)],
     )
-    flash(f"Combined charge sheet {charge_sheet_id} queued for email delivery.")
+    flash(*_charge_sheet_sent_message(f"Combined charge sheet {charge_sheet_id}"))
     return redirect(url_for("admin.history"))
 
 

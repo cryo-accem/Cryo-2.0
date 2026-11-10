@@ -263,8 +263,9 @@ async function searchMatchingGrids(owner) {
     const result = await response.json();
     if (!Array.isArray(result.grids)) throw new Error('Grid search returned an invalid response.');
     renderAvailableGrids(result.grids, Array.isArray(result.suggestions) ? result.suggestions : [], inventoryOwner);
+    // Only clear a count that was filled in from picked grids; keep a typed one.
+    if (inventoryGridCount.readOnly) inventoryGridCount.value = '';
     inventoryGridCount.readOnly = false;
-    inventoryGridCount.value = '';
     return result.grids;
   } catch (error) {
     if (error.name === 'AbortError') return [];
@@ -338,6 +339,42 @@ document.querySelectorAll('.reg-type-card').forEach(card => {
   card.addEventListener('click', () => setRegType(card.dataset.value));
 });
 toggleRegType(); toggleEsmField();
+
+// Clear also resets the chosen service and the grid picker.
+document.querySelector('.booking-form').addEventListener('reset', () => {
+  window.setTimeout(() => {
+    setRegType('');
+    inventoryOwner = '';
+    inventoryGridCount.readOnly = false;
+    showGridSearchMessage('Enter your name above to check for matching grids.');
+    toggleEsmField();
+  });
+});
+
+// After a rejected booking the server sends the entries back once, so the
+// visitor only fixes what was wrong instead of starting over.
+(function restoreDraft() {
+  const draft = {{ register_draft|tojson }};
+  if (!draft) return;
+  const form = document.querySelector('.booking-form');
+  ['user_name', 'pi_name', 'email', 'origin', 'esm', 'sample_name', 'grids', 'days', 'freezing_date', 'grids_freezing']
+    .forEach(name => {
+      const field = form.elements.namedItem(name);
+      if (field && draft[name]) field.value = draft[name];
+    });
+  toggleEsmField();
+  if (['freezing', 'screening', 'datacollecting'].includes(draft.reg_type)) setRegType(draft.reg_type);
+  const codes = Array.isArray(draft.inventory_grid_codes) ? draft.inventory_grid_codes : [];
+  if ((draft.reg_type === 'screening' || draft.reg_type === 'datacollecting') && draft.user_name) {
+    searchMatchingGrids().then(() => {
+      inventoryGridResults.querySelectorAll('input[name="inventory_grid_codes"]').forEach(box => {
+        if (codes.includes(box.value)) box.checked = true;
+      });
+      if (codes.length) updateGridCount();
+      else if (draft.grids) inventoryGridCount.value = draft.grids;
+    });
+  }
+})();
 
 (function setupFreezingCalendar() {
   const calendar = document.getElementById('freezing-calendar');

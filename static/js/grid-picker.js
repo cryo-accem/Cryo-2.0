@@ -138,7 +138,7 @@
       button.type = "button";
       button.append(
         el("strong", "", item.name),
-        el("small", "", `${item.grid_count} grid${item.grid_count === 1 ? "" : "s"} · Yes, this is me`),
+        el("small", "", `${item.grid_count} grid${item.grid_count === 1 ? "" : "s"} on record · Yes, this is me`),
       );
       button.addEventListener("click", () => onPick(item.name));
       list.append(button);

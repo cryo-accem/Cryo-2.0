@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Publication finder{% endblock %}
+{% block head_extra %}{% if finder_status and finder_status.state == 'running' %}<meta http-equiv="refresh" content="6">{% endif %}{% endblock %}
 {% macro candidate_rows(candidates, show_add) %}
   {% for c in candidates %}
   <tr>
@@ -63,12 +64,17 @@
       </div>
     </div>
     <div class="pubfinder-run__actions">
-      <form method="post" action="{{ url_for('admin.run_publication_finder') }}" data-busy-label="Searching… (about 10–20 seconds)">
+      {% if finder_status and finder_status.state == 'running' %}
+      <p class="pubfinder-status pubfinder-status--running" role="status"><span class="pubfinder-spinner" aria-hidden="true"></span><span><strong>Search running</strong> — started {{ finder_status.started_at }} IST. This page refreshes by itself; results appear here in about a minute.</span></p>
+      {% else %}
+      <form method="post" action="{{ url_for('admin.run_publication_finder') }}" data-busy-label="Starting search…">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
         <button class="button" type="submit"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> <span data-busy-text>Run search</span></button>
       </form>
+      {% endif %}
       {% if run %}<a class="button secondary" href="{{ url_for('admin.download_publication_finder_csv') }}"><i class="fa-solid fa-download" aria-hidden="true"></i> Download CSV</a>{% endif %}
-      <p class="pubfinder-muted">The search takes about 10–20 seconds; keep this page open until it finishes.{% if run %} Last run {{ run.ran_at }} IST ({{ run.duration_seconds }} s).{% else %} No search has been run yet.{% endif %}</p>
+      {% if finder_status and finder_status.state in ('done', 'failed') and finder_status.message %}<p class="pubfinder-status pubfinder-status--{{ 'ok' if finder_status.state == 'done' and finder_status.ok else 'warn' }}" role="status">{{ finder_status.message }}{% if finder_status.finished_at %} <small>({{ finder_status.finished_at }} IST)</small>{% endif %}</p>{% endif %}
+      <p class="pubfinder-muted">The search runs in the background and takes about a minute; you can leave this page and come back.{% if run %} Last run {{ run.ran_at }} IST ({{ run.duration_seconds }} s).{% else %} No search has been run yet.{% endif %}</p>
     </div>
     {% if run and run.queries %}
     <details class="pubfinder-queries">

@@ -176,7 +176,7 @@ def new_grid():
                 flash("The sample or grid type could not be validated. No grids were registered.", "error")
         else:
             flash(
-                f"Registered {len(result['grid_codes'])} grids in batch {result['batch_code']}.",
+                f"Registered {len(result['grid_codes'])} grid{'' if len(result['grid_codes']) == 1 else 's'}.",
                 "success",
             )
             return redirect(url_for("inventory.grid_detail", grid_code=result["grid_codes"][0]))
@@ -508,7 +508,7 @@ def complete_grid_session(session_id, grid_code):
     except (sqlite3.IntegrityError, pymysql.err.IntegrityError) as exc:
         flash(_integrity_message(exc), "error")
     else:
-        flash(f"{grid_code} outcome recorded as {outcome}.", "success")
+        flash(f"{grid_code} {'stored' if outcome == 'store' else 'discarded'}; outcome recorded.", "success")
     return redirect(url_for("inventory.session_detail", session_id=session_id))
 
 

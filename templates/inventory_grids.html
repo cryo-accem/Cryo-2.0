@@ -79,13 +79,16 @@ document.querySelector("[data-select-all]")?.addEventListener("change", (event) 
 gridCheckboxes.forEach((box) => box.addEventListener("change", updateBulkSelection));
 updateBulkSelection();
 function confirmBulkAction(form, event) {
-  const selected = [...form.querySelectorAll('input[name="selected_grid_codes"]:checked')].map((box) => box.value);
+  const boxes = [...form.querySelectorAll('input[name="selected_grid_codes"]:checked')];
+  const selected = boxes.map((box) => box.value);
+  // Name grids by researcher and sample in the question, never by reference code.
+  const names = [...new Set(boxes.map((box) => (box.getAttribute("aria-label") || "").replace(/^Select /, "")))].join("\n");
   if (!selected.length) { alert("Select at least one grid."); return false; }
   if (selected.length > 200) { alert("Select no more than 200 grids."); return false; }
   if (event.submitter?.dataset.bulkAction === "discard") {
-    return confirm(`Permanently mark ${selected.length} selected grid(s) as discarded? Discarded grids cannot be booked or stored again.\n\n${selected.join(", ")}`);
+    return confirm(`Permanently mark ${selected.length} selected grid(s) as discarded? Discarded grids cannot be booked or stored again.\n\n${names}`);
   }
-  return confirm(`Set ${selected.length} selected grid(s) to ${form.clipped.value === "1" ? "Clipped" : "Not clipped"}?\n\n${selected.join(", ")}`);
+  return confirm(`Set ${selected.length} selected grid(s) to ${form.clipped.value === "1" ? "Clipped" : "Not clipped"}?\n\n${names}`);
 }
 </script>
 {% endblock %}

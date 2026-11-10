@@ -225,6 +225,7 @@
     const response = await fetch("{{ url_for('admin.billing_preview') }}", {method: "POST", body: new URLSearchParams(new FormData(form))});
     const data = await response.json();
     if (!response.ok) { summary.textContent = data.error || "Complete the required billing fields."; summary.hidden = false; document.querySelector("[data-confirm-completion]").disabled = true; return; }
+    if (data.non_billable) { summary.textContent = "Non-billable PI: no charges are recorded for this booking."; summary.hidden = false; document.querySelector("[data-confirm-completion]").disabled = false; return; }
     summary.innerHTML = `Grid Charge: ₹${Number(data.grid_charge).toFixed(2)}<br>Handling Charge: ₹${Number(data.handling_charge).toFixed(2)}<br>C-clip + Base ring: ₹${Number(data.clip_base_charge).toFixed(2)}<br>Slot Charge: ₹${Number(data.slot_charge).toFixed(2)}<br>Subtotal: ₹${Number(data.subtotal).toFixed(2)}<br>GST: ₹${Number(data.gst).toFixed(2)}<br><strong>Grand Total: ₹${Number(data.grand_total).toFixed(2)}</strong>`;
     summary.hidden = false; document.querySelector("[data-confirm-completion]").disabled = false;
   };

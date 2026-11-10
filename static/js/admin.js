@@ -41,7 +41,8 @@ document.querySelectorAll('[data-history-tabs]').forEach((tabs) => {
 // Long-running form posts (e.g. the publication finder search): disable the
 // button and show progress text so the request is not submitted twice.
 document.querySelectorAll('form[data-busy-label]').forEach((form) => {
-  form.addEventListener('submit', () => {
+  form.addEventListener('submit', (event) => {
+    if (event.defaultPrevented) return;
     const button = form.querySelector('button[type="submit"]');
     if (!button) return;
     button.disabled = true;

@@ -16,6 +16,7 @@
   <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-wght-normal.woff2', v='5.1.0') }}" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/site.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='vendor/fontawesome/fa-subset.css') }}">
+  {% block head_extra %}{% endblock %}
   <title>{% block title %}{% if page_content %}ACCEM | {{ page_content.title }}{% else %}ACCEM | Cryo-Electron Microscopy{% endif %}{% endblock %}</title>
 </head>
 <body class="{% if request.path.startswith('/admin') and request.path != '/admin/' %}admin-area{% endif %}">
@@ -104,7 +105,10 @@
   <span id="main-content" class="skip-target" tabindex="-1"></span>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
-    <div class="flash-messages" role="status">{% for category, message in messages %}<div class="flash-message flash-message--{{ category }}">{{ message|humanize_grids }}</div>{% endfor %}</div>
+    {# The booking form and the login page show their own messages in-form. #}
+    {% set in_form = ['registration'] if request.endpoint == 'register.register' else (['login'] if request.endpoint == 'admin.login' else []) %}
+    {% set page_messages = messages | rejectattr('0', 'in', in_form) | list %}
+    {% if page_messages %}<div class="flash-messages" role="status" aria-live="polite">{% for category, message in page_messages %}<div class="flash-message flash-message--{{ category }}" data-flash><span>{{ message|humanize_grids }}</span><button type="button" class="flash-message__close" aria-label="Dismiss message" data-flash-close>&times;</button></div>{% endfor %}</div>{% endif %}
     {% endif %}
   {% endwith %}
   {% block content %}{% endblock %}

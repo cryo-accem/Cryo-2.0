@@ -264,8 +264,27 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
                 pf._get_json(pf.EUROPE_PMC_SEARCH_URL, {"query": "x"})
         self.assertEqual(urlopen.call_count, 2)
         request = urlopen.call_args.args[0]
-        self.assertEqual(urlopen.call_args.kwargs["timeout"], 10)
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], pf.REQUEST_TIMEOUT_SECONDS)
         self.assertEqual(request.get_header("User-agent"), "ACCEM-publication-finder/1.0")
+
+    def test_one_crashing_source_does_not_fail_the_search(self):
+        import http.client
+        calls = []
+
+        def flaky(query):
+            calls.append(query)
+            if "AFF:" in query:
+                raise http.client.IncompleteRead(b"")  # not an OSError
+            return 0, []
+
+        with patch.object(pf, "search_europe_pmc", side_effect=flaky), \
+                patch.object(pf, "search_openalex_fulltext", return_value=(0, [])):
+            report = {}
+            pf.find_candidates(report)
+        errors = [q for q in report["queries"] if q["error"]]
+        self.assertTrue(errors)
+        self.assertTrue(all("IncompleteRead" in q["error"] for q in errors))
+        self.assertLess(len(errors), len(report["queries"]))
 
     def test_search_tags_drive_the_queries(self):
         queries = {q["id"]: q for q in pf.build_queries()}

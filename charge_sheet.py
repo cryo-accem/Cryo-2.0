@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
-    Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
 )
 
 
@@ -413,7 +413,7 @@ def _external_pdf(row, service, category, is_industry):
     story = []
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET / PROFORMA INVOICE", styles["Institution"]))
-    story.append(Spacer(1, 16))
+    story.append(Spacer(1, 8))
 
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
@@ -442,10 +442,10 @@ def _external_pdf(row, service, category, is_industry):
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("SPAN", (1, 1), (3, 1)), ("SPAN", (1, 3), (3, 3)),
         ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(table)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
 
     rows = [[_paragraph("<b>S.No</b>", styles["Small"]), _paragraph("<b>Particulars</b>", styles["Small"]),
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
@@ -488,23 +488,39 @@ def _external_pdf(row, service, category, is_industry):
         ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME", (2, 2), (3, 2), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(summary_table)
-    story.append(Spacer(1, 14))
-    story.append(_paragraph("<b>PAYMENT INSTRUCTIONS</b>", styles["Section"]))
-    story.append(_paragraph("Please make the payment using the bank details provided below. After completing the transaction, "
-                            "kindly email the transaction/reference number, transaction date, amount transferred, and valid proof "
-                            "of transaction/payment to the Cryo-EM Facility.", styles["Small"]))
-    bank = [[_paragraph(f"<b>{label}</b>", styles["Bank"]), _paragraph(value, styles["Bank"])] for label, value in BANK_DETAILS]
-    bank_table = Table(bank, colWidths=[52 * mm, 128 * mm])
+    story.append(Spacer(1, 8))
+    # Bank details in two side-by-side columns (half the height), kept in one
+    # block with the instructions so a long sheet never splits them.
+    payment = [
+        _paragraph("<b>PAYMENT INSTRUCTIONS</b>", styles["Section"]),
+        _paragraph("Please make the payment using the bank details provided below. After completing the transaction, "
+                   "kindly email the transaction/reference number, transaction date, amount transferred, and valid proof "
+                   "of transaction/payment to the Cryo-EM Facility.", styles["Small"]),
+        Spacer(1, 3),
+    ]
+    half = (len(BANK_DETAILS) + 1) // 2
+    left, right = BANK_DETAILS[:half], BANK_DETAILS[half:]
+    bank = []
+    for index in range(half):
+        row = [_paragraph(f"<b>{left[index][0]}</b>", styles["Bank"]), _paragraph(left[index][1], styles["Bank"])]
+        if index < len(right):
+            row += [_paragraph(f"<b>{right[index][0]}</b>", styles["Bank"]), _paragraph(right[index][1], styles["Bank"])]
+        else:
+            row += ["", ""]
+        bank.append(row)
+    bank_table = Table(bank, colWidths=[30 * mm, 60 * mm, 30 * mm, 60 * mm])
     bank_table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c6d0d8")),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f7f9")),
+        ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f3f7f9")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
-    story.append(bank_table)
+    payment.append(bank_table)
+    story.append(KeepTogether(payment))
     doc.build(story, onFirstPage=_external_page, onLaterPages=_external_page)
     return buffer.getvalue()
 

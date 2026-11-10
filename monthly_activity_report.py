@@ -42,6 +42,16 @@ def _grids(row: Mapping[str, object]) -> int:
     return int(_decimal(row.get("number_of_grids") or row.get("actual_grids") or row.get("grids")))
 
 
+def _clipped_by_facility(row: Mapping[str, object]) -> int:
+    """Grids the facility clipped in this booking.
+
+    ``clipped_grids`` records grids that arrived *already* clipped (and so are
+    not charged); every other grid used in screening/data collection was
+    clipped here.
+    """
+    return max(0, _grids(row) - int(_decimal(row.get("clipped_grids"))))
+
+
 def _grid_source(row: Mapping[str, object]) -> str:
     source = str(row.get("grid_source") or "").strip().casefold().replace("-", "_").replace(" ", "_")
     return "facility" if source in {"facility", "facility_provided"} else "outside"
@@ -100,7 +110,7 @@ def _add_service_table(
         return
     rows = []
     for row in events:
-        clipped = int(_decimal(row.get("clipped_grids")))
+        clipped = _clipped_by_facility(row)
         rows.append((
             _format_date(row.get("_report_date")),
             row.get("user_name") or "-",
@@ -151,14 +161,14 @@ def build_monthly_activity_report(
         (service, row)
         for service, events in events_by_service.items()
         for row in events
-        if int(_decimal(row.get("clipped_grids"))) > 0
+        if service != "Freezing" and _clipped_by_facility(row) > 0
     ]
     all_events = [row for events in events_by_service.values() for row in events]
     regular_events = [row for row in all_events if not row.get("is_csic")]
     csic_events = [row for row in all_events if row.get("is_csic")]
     facility_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "facility")
     outside_grids = sum(_grids(row) for row in all_events if _grid_source(row) == "outside")
-    clipped_grids = sum(int(_decimal(row.get("clipped_grids"))) for _, row in clipped_events)
+    clipped_grids = sum(_clipped_by_facility(row) for _, row in clipped_events)
     current_billed = sum((_row_revenue(row) for row in regular_events), ZERO)
     csic_billed = sum((_row_revenue(row) for row in csic_events), ZERO)
     received = sum(
@@ -261,7 +271,7 @@ def build_monthly_activity_report(
                 row.get("user_name") or "-",
                 row.get("pi_name") or "-",
                 row.get("sample_name") or "-",
-                int(_decimal(row.get("clipped_grids"))),
+                _clipped_by_facility(row),
                 # The legacy clipping_charge column holds the C-clip + base ring
                 # charge (billed per unclipped grid), not a charge for clipping.
                 _money(_decimal(

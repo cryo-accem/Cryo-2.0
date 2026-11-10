@@ -1385,6 +1385,37 @@ def _mark_grids_clipped(cursor, grid_ids, actor_id, event_time, notes):
         )
 
 
+def _restore_status_before_booking(cursor, grid, operation_reference, actor_id,
+                                   event_time, notes):
+    """Give an unused grid back the status it had before a booking loaded it."""
+    cursor.execute(
+        "SELECT current_status, clipped FROM inventory_grids WHERE grid_id=?",
+        [grid["grid_id"]],
+    )
+    current = cursor.fetchone()
+    if not current or current["current_status"] != "In Data Collection":
+        return  # never taken out of storage, so its status never changed
+    cursor.execute(
+        """SELECT old_value FROM grid_events
+           WHERE grid_id=? AND operation_reference=? AND new_value='In Data Collection'
+           ORDER BY event_time DESC, event_id DESC LIMIT 1""",
+        [grid["grid_id"], operation_reference],
+    )
+    row = cursor.fetchone()
+    previous = row["old_value"] if row else None
+    if previous not in {"Frozen", "Clipped", "Stored"}:
+        previous = "Clipped" if current["clipped"] else "Frozen"
+    cursor.execute(
+        "UPDATE inventory_grids SET current_status=? WHERE grid_id=?",
+        [previous, grid["grid_id"]],
+    )
+    _event(
+        cursor, grid["grid_id"], "returned_unused", actor_id,
+        old_value="In Data Collection", new_value=previous, notes=notes,
+        operation_reference=operation_reference, event_time=event_time,
+    )
+
+
 def complete_booking_grid_moves(
     cursor, service_type, booking_id, fields, actor_id, booking=None
 ):
@@ -1457,7 +1488,9 @@ def complete_booking_grid_moves(
                 )
         used = grid["grid_code"] in screened
         if not used and outcomes[index] != "discard":
-            # Reserved but not screened: back to storage, not clipped or billed.
+            # Reserved but never inserted: it goes back to its place AND to the
+            # status it had before the booking took it (normally "Frozen"),
+            # not "Stored", and it is not clipped or billed.
             _store_grid(
                 cursor,
                 grid,
@@ -1470,9 +1503,13 @@ def complete_booking_grid_moves(
                 f"Not used in booking #{booking_id}; returned to storage unchanged.",
                 event_time,
                 operation_reference=f"{operation_prefix}-{booking_id}",
-                mark_stored=True,
+                mark_stored=False,
                 allow_microscope_return=allow_microscope_return,
                 return_event_type=return_event_type,
+            )
+            _restore_status_before_booking(
+                cursor, grid, f"{operation_prefix}-{booking_id}", actor_id, event_time,
+                f"Not used in booking #{booking_id}.",
             )
             continue
         if outcomes[index] == "discard":
@@ -1514,14 +1551,14 @@ def complete_booking_grid_moves(
             allow_microscope_return=allow_microscope_return,
             return_event_type=return_event_type,
         )
-    if service_type == "screening":
-        # Screening clips every screened grid, so remember it on the linked
-        # grids; later data collection must not bill the C-clip/base again.
-        _mark_grids_clipped(
-            cursor, [grid["grid_id"] for grid in grids if grid["grid_code"] in screened],
-            actor_id, event_time,
-            f"Clipped during screening booking #{booking_id}.",
-        )
+    # Grids used in the microscope are clipped (and billed the C-clip/base
+    # ring once), so remember it: a later booking must not bill it again.
+    _mark_grids_clipped(
+        cursor, [grid["grid_id"] for grid in grids if grid["grid_code"] in screened],
+        actor_id, event_time,
+        f"Clipped during {'screening' if service_type == 'screening' else 'data collection'} "
+        f"booking #{booking_id}.",
+    )
     add_inventory_grids = fields.get("add_inventory_grids")
     if add_inventory_grids not in {None, "", "1"}:
         raise InventoryError("Choose whether to add additional grids to inventory.")
@@ -2162,7 +2199,7 @@ def _grid_filters(args):
             if key == "grid_type_id" and (
                 len(value) > 10 or not value.isdigit() or int(value) < 1
             ):
-                raise InventoryError(f"Choose a valid {key.replace('_id', '')} filter.")
+                raise InventoryError(f"Choose a valid {key.replace('_id', '').replace('_', ' ')} filter.")
             if key == "grid_type_id":
                 _positive_int(value, "grid type filter")
             if key == "container" and len(value) > 100:

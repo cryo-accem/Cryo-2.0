@@ -316,3 +316,27 @@ initDonutTooltips(document);
     document.addEventListener('visibilitychange', refreshIfStale);
   }
 })();
+
+// Confirmation before destructive form posts. The question is plain text in
+// data-confirm (HTML-escaped by the template), never inline JavaScript, so a
+// sample or user name containing quotes cannot break out or run code.
+document.addEventListener('submit', (event) => {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.dataset.confirm) return;
+  if (!window.confirm(form.dataset.confirm)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }
+}, true);
+
+// Page messages (top-right): close button; success/info messages fade out.
+document.querySelectorAll('[data-flash]').forEach((message) => {
+  const close = () => message.remove();
+  message.querySelector('[data-flash-close]')?.addEventListener('click', close);
+  if (!message.classList.contains('flash-message--error') && !message.classList.contains('flash-message--warning')) {
+    window.setTimeout(() => {
+      message.classList.add('is-leaving');
+      window.setTimeout(close, 400);
+    }, 7000);
+  }
+});

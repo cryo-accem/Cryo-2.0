@@ -82,7 +82,7 @@
             {% if slot.csic_discount_reason %}<small>Discount reason: {{ slot.csic_discount_reason }}</small>{% endif %}
             {% if slot.csic_audit %}<details class="csic-audit"><summary>CSIC change history</summary><ol>{% for event in slot.csic_audit[:5] %}<li><strong>{{ event.action|replace('_', ' ')|title }}</strong>{% if event.calculated_amount %}<br>Calculated: ₹{{ "{:,.2f}".format(event.calculated_amount) }}{% endif %}{% if event.final_amount %} · Final: ₹{{ "{:,.2f}".format(event.final_amount) }}{% endif %}{% if event.discount_reason %}<br>{{ event.discount_reason }}{% endif %}<br><small>{{ event.changed_at }}{% if event.username %} · {{ event.username }}{% endif %}</small></li>{% endfor %}</ol></details>{% endif %}
             {% else %}
-            {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
+            {% if slot.charge_sheet_sent_at %}<span class="status-badge completed">Sent {{ slot.charge_sheet_sent_at|facility_time }}</span>{% else %}<span class="status-badge waiting">Not sent</span>{% endif %}
             {% endif %}
             <form method="post" action="{{ url_for('admin.send_charge_sheet', service_key=service_key, booking_id=slot.id) }}" class="stacked-form">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
@@ -149,7 +149,7 @@
               </form>
             </details>
             {% endif %}
-            <form method="post" action="{{ url_for('admin.delete_completed_booking', service_key=service_key, booking_id=slot.id) }}" onsubmit="return confirm('Delete this completed booking for {{ slot.user_name|e }}? This removes it from history and revenue totals and cannot be undone.');">
+            <form method="post" action="{{ url_for('admin.delete_completed_booking', service_key=service_key, booking_id=slot.id) }}" data-confirm="Delete this completed booking for {{ slot.user_name|e }}? This removes it from history and revenue totals and cannot be undone.">
               <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
               <button class="button small btn-delete" type="submit">Delete Booking</button>
             </form>
@@ -267,7 +267,10 @@
       clip_base_source: box.closest("tr").querySelector("select[name=clip_base_source]")?.value || "facility"
     }));
     payload.value = JSON.stringify(selected);
-    submit.disabled = selected.length === 0;
+    // One combined sheet is for one user: block mixing users before submit.
+    const owners = new Set(boxes.filter((box) => box.checked).map((box) => box.closest("tr").dataset.userEmail));
+    const mixedUsers = owners.size > 1;
+    submit.disabled = selected.length === 0 || mixedUsers;
     billTo.hidden = selected.length === 0;
     billTo.querySelectorAll("input").forEach((input) => { input.disabled = selected.length === 0; });
     if (selected.length && !billToEdited) {
@@ -276,7 +279,9 @@
       try { saved = JSON.parse(firstRow.dataset.billTo || "{}"); } catch (error) { saved = {}; }
       billTo.querySelectorAll("[data-bill-to-input]").forEach((input) => { input.value = saved[input.name] || ""; });
     }
-    count.textContent = selected.length
+    count.textContent = mixedUsers
+      ? "Selected slots belong to different users. A combined charge sheet is for one user; use the user filter."
+      : selected.length
       ? `${selected.length} slot(s) selected`
       : "Select billable slots belonging to one user to create or resend one combined charge sheet.";
   };

@@ -389,7 +389,15 @@ class InventoryBillingWorkflowTests(unittest.TestCase):
 
     def test_only_the_grids_ticked_as_used_are_clipped_others_go_back(self):
         _, codes, _ = self._freeze(4, normal=4)
+        before = {
+            code: self._one("SELECT current_status FROM inventory_grids WHERE grid_code=?", (code,))["current_status"]
+            for code in codes
+        }
         booking_id = self._load_screening(codes)
+        self.assertEqual(
+            self._one("SELECT current_status FROM inventory_grids WHERE grid_code=?", (codes[1],))["current_status"],
+            "In Data Collection",
+        )
         data = self._completion(codes, 2, box="AFTER")
         data["inventory_screened"] = ["1", "0", "1", "0"]
         response = self._complete("screening", booking_id, data)
@@ -405,9 +413,18 @@ class InventoryBillingWorkflowTests(unittest.TestCase):
             ).fetchall()
         }
         self.assertEqual([grids[code]["clipped"] for code in codes], [1, 0, 1, 0])
+        # Used grids were imaged and stored back; unused grids were never
+        # touched, so they keep the status they had before ("Frozen").
+        self.assertEqual(grids[codes[0]]["current_status"], "Stored")
+        self.assertEqual(grids[codes[2]]["current_status"], "Stored")
+        self.assertEqual(grids[codes[1]]["current_status"], before[codes[1]])
+        self.assertEqual(grids[codes[3]]["current_status"], before[codes[3]])
+        self.assertEqual(before[codes[1]], "Frozen")
         for code in codes:
-            self.assertEqual(grids[code]["current_status"], "Stored")
             self.assertEqual(grids[code]["grid_box_name"], "AFTER")
+        # Unused grids can be booked again straight away.
+        api = self.app.test_client().get("/inventory/search?user_name=Grid%20User").get_json()
+        self.assertEqual({item["grid_code"] for item in api["grids"]} & {codes[1], codes[3]}, {codes[1], codes[3]})
         row = self._one("SELECT number_of_grids FROM screening_bookings WHERE id=?", (booking_id,))
         self.assertEqual(row["number_of_grids"], 2)
 

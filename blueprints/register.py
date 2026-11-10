@@ -1,6 +1,6 @@
 import re
 
-from flask import Blueprint, render_template, request, redirect, url_for, flash
+from flask import Blueprint, render_template, request, redirect, session, url_for, flash
 from blueprints.imaging import register_imaging
 from blueprints.freezing import max_freezing_date, register_freezing
 from blueprints.screening import register_screening
@@ -57,18 +57,36 @@ def _booking_grid_selection():
     return [], grids
 
 
+_DRAFT_FIELDS = (
+    "reg_type", "user_name", "pi_name", "email", "origin", "esm", "sample_name",
+    "grids", "days", "freezing_date", "grids_freezing",
+)
+
+
+def _back_to_form():
+    """Return to the booking form after an error, keeping what was typed.
+
+    The entries ride in the session for this one redirect only, so a rejected
+    booking (e.g. a weekend date) does not make the visitor start over.
+    """
+    draft = {key: str(request.form.get(key, ""))[:300] for key in _DRAFT_FIELDS}
+    draft["inventory_grid_codes"] = request.form.getlist("inventory_grid_codes")[:4]
+    session["register_draft"] = draft
+    return redirect(url_for("register.register"))
+
+
 @register_bp.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
         reg_type = request.form.get("reg_type", "")
         if reg_type not in _REG_TYPES:
             flash("Choose a valid booking type.", "registration")
-            return redirect(url_for("register.register"))
+            return _back_to_form()
         try:
             fields = _registration_fields()
         except InventoryError as exc:
             flash(str(exc), "registration")
-            return redirect(url_for("register.register"))
+            return _back_to_form()
         user_name = fields["user_name"]
         pi_name = fields["pi_name"]
         email = fields["email"]
@@ -78,7 +96,13 @@ def register():
         )
         if not origin:
             flash("Choose a valid user origin.", "registration")
-            return redirect(url_for("register.register"))
+            return _back_to_form()
+        if origin in {"External", "Industry"} and not fields["esm"]:
+            flash(
+                "Enter the industry name." if origin == "Industry" else "Enter the institute name.",
+                "registration",
+            )
+            return _back_to_form()
 
         # ── Data Collecting (was Imaging) ────────────────────────────────────
         if reg_type == "datacollecting":
@@ -97,11 +121,11 @@ def register():
                 )
             except (InventoryError, ValueError) as exc:
                 flash(str(exc), "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
 
             if not success:
                 flash(message, "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
             return redirect(url_for("imaging.list_view", success="datacollecting"))
 
         # ── Screening ────────────────────────────────────────────────────────
@@ -117,10 +141,10 @@ def register():
                 )
             except (InventoryError, ValueError) as exc:
                 flash(str(exc), "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
             if not success:
                 flash(message, "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
             return redirect(url_for("screening.screening_list", success="screening"))
 
         # ── Freezing ─────────────────────────────────────────────────────────
@@ -129,7 +153,7 @@ def register():
                 grids = int((request.form.get("grids_freezing") or "0").strip())
             except ValueError:
                 flash("Enter a valid number of grids.", "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
             freezing_date = (request.form.get("freezing_date") or "").strip()
 
             success, message = register_freezing(
@@ -138,9 +162,10 @@ def register():
             )
             if not success:
                 flash(message, "registration")
-                return redirect(url_for("register.register"))
+                return _back_to_form()
             return redirect(url_for("freezing.freezing_schedule", success="freezing"))
 
     return render_template(
-        "register.html", freezing_max_date=max_freezing_date().isoformat()
+        "register.html", freezing_max_date=max_freezing_date().isoformat(),
+        register_draft=session.pop("register_draft", None),
     )

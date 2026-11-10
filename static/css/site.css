@@ -2419,7 +2419,7 @@ html.lightbox-open { overflow: hidden; }
     transition: opacity .16s ease, transform .16s ease, visibility 0s linear .16s;
   }
   .nav-group__menu::before { content: ""; position: absolute; left: 0; right: 0; top: -14px; height: 14px; } /* hover bridge */
-  .nav-group:hover .nav-group__menu, .nav-group:focus-within .nav-group__menu, .nav-group.is-open .nav-group__menu {
+  .nav-group:hover .nav-group__menu, .nav-group:has(.nav-group__menu a:focus) .nav-group__menu, .nav-group.is-open .nav-group__menu {
     opacity: 1; visibility: visible; transform: translate(-50%, 0); transition-delay: 0s;
   }
   .nav-group:hover .nav-group__toggle i, .nav-group.is-open .nav-group__toggle i { transform: rotate(180deg); }
@@ -3694,3 +3694,80 @@ html.lightbox-open { overflow: hidden; }
 .grid-picker-owner button { margin-left: 6px; border: 0; background: none; color: #167da5; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
 .grid-session__dot { color: #8aa1af; }
 .grid-session__sample { padding: 2px 9px; border-radius: 999px; background: #dff1f7; color: #0f5f80; font-weight: 800; }
+
+/* Publication finder: background search status */
+.pubfinder-status { display: flex; align-items: center; gap: 10px; margin: 0; padding: 10px 14px; border-radius: 10px; font-size: 13px; }
+.pubfinder-status--running { background: #eef6f9; color: #17324d; border: 1px solid #cfe3ec; }
+.pubfinder-status--ok { background: #ecf8f1; color: #1d6b45; border: 1px solid #c6e8d5; }
+.pubfinder-status--warn { background: #fff4e5; color: #8a5300; border: 1px solid #f3d9a4; }
+.pubfinder-spinner { flex: none; width: 16px; height: 16px; border: 2px solid #b9d7e4; border-top-color: #167da5; border-radius: 50%; animation: pubfinder-spin .9s linear infinite; }
+@keyframes pubfinder-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pubfinder-spinner { animation: none; } }
+
+/* Page messages: shown top-right above everything (the admin sidebar used
+   to cover them). Errors stay until closed; others fade after 7 s. */
+.flash-messages { position: fixed; top: 16px; right: 16px; z-index: 2000; display: grid; gap: 8px; width: min(440px, calc(100vw - 32px)); }
+.flash-message { display: flex; align-items: flex-start; gap: 10px; padding: 12px 12px 12px 16px; border: 1px solid #b9d7e4; border-left: 4px solid #167da5; border-radius: 10px; background: #fff; color: #17324d; font-size: 14px; line-height: 1.45; box-shadow: 0 10px 28px rgba(3, 20, 43, .18); transition: opacity .4s ease, transform .4s ease; }
+.flash-message > span { flex: 1; }
+.flash-message--success { border-color: #c6e8d5; border-left-color: #23835d; background: #f3fbf6; }
+.flash-message--error { border-color: #f1c7c7; border-left-color: #bf4c4c; background: #fff6f6; }
+.flash-message--warning { border-color: #f3d9a4; border-left-color: #e0a72e; background: #fffaf0; }
+.flash-message.is-leaving { opacity: 0; transform: translateY(-6px); }
+.flash-message__close { flex: none; border: 0; background: none; color: #52687a; font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.flash-message__close:hover { color: #17324d; }
+@media (prefers-reduced-motion: reduce) { .flash-message { transition: none; } }
+
+/* Storage page: only 4 columns now (Sample name, Grid type, Position, Change),
+   so the table fits its box; the relocate form opens as a panel under the
+   row's "Change" link instead of widening the table. */
+.inventory-storage-table { min-width: 0; width: 100%; }
+.inventory-storage-table th:nth-child(n), .inventory-storage-table td:nth-child(n) { min-width: 0; }
+.inventory-storage-table td:last-child { position: relative; }
+.inventory-storage-table .inventory-relocate[open] form { position: absolute; right: 0; top: calc(100% - 4px); z-index: 30; width: 260px; text-align: left; white-space: normal; box-shadow: 0 12px 28px rgba(3, 20, 43, .18); }
+.inventory-storage-table .inventory-relocate summary { font-size: 12px; }
+.inventory-storage-box .table-wrap { overflow: visible; }
+
+/* Publication finder: keep the action buttons on screen on smaller laptops by
+   stacking them and letting the publication column take the slack. */
+@media (max-width: 1300px) {
+  .pubfinder-table td.pubfinder-pub { min-width: 220px; }
+  .pubfinder-table td.pubfinder-match { min-width: 110px; }
+  .pubfinder-table td.pubfinder-action { white-space: normal; }
+  .pubfinder-table td.pubfinder-action .inline-form { display: block; }
+  .pubfinder-table td.pubfinder-action .inline-form + .inline-form { margin-top: 6px; }
+  .pubfinder-table td.pubfinder-action .btn { width: 100%; justify-content: center; white-space: nowrap; }
+}
+
+/* Admin create-slot picker: the grouped picker replaces the older 3-column
+   card grid inside .inventory-grid-picker, so undo those rules here. */
+.inventory-grid-picker.grid-picker { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-height: 480px; overflow: auto; }
+.inventory-grid-picker.grid-picker .grid-session { overflow: visible; flex: none; }
+.inventory-grid-picker.grid-picker label.grid-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 3px 9px; padding: 9px 10px; border-radius: 8px; background: #fff; }
+.inventory-grid-picker.grid-picker .grid-choice__copy strong { display: block; color: #17324d; font-size: 12px; }
+.inventory-grid-picker.grid-picker .grid-choice__copy small, .inventory-grid-picker.grid-picker .grid-choice__location { display: block; color: #5c7280; font-size: 10.5px; }
+.grid-picker .grid-choice > input[type="checkbox"] { width: 16px; height: 16px; min-width: 16px; min-height: 0; margin: 0; padding: 0; }
+.inventory-grid-picker.grid-picker .grid-session__summary strong { display: inline; font-size: 12px; }
+.inventory-grid-picker.grid-picker .grid-session__meta { font-size: 10.5px; }
+@media (max-width: 1300px) {
+  /* Each result becomes a card: year + title on top, details and actions below. */
+  .pubfinder-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .pubfinder-table, .pubfinder-table tbody { display: block; width: 100%; }
+  .pubfinder-table tr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 18px; padding: 14px 4px; border-bottom: 1px solid #e3ecf1; }
+  .pubfinder-table td { display: block; padding: 0; border: 0; background: none; }
+  .pubfinder-table td.pubfinder-year { flex: 0 0 auto; }
+  .pubfinder-table td.pubfinder-pub { flex: 1 1 calc(100% - 70px); min-width: 0; }
+  .pubfinder-table td.pubfinder-match { flex: 1 1 200px; min-width: 0; }
+  .pubfinder-table td.pubfinder-action { flex: 0 0 auto; margin-left: auto; }
+  .pubfinder-table td.pubfinder-action .inline-form { display: inline-block; }
+  .pubfinder-table td.pubfinder-action .inline-form + .inline-form { margin: 0 0 0 6px; }
+  .pubfinder-table td.pubfinder-action .btn { width: auto; }
+}
+@media (max-width: 1300px) {
+  .pubfinder .pubfinder-table tr > td { padding: 0; border: 0; box-shadow: none; min-width: 0; width: auto; }
+  .pubfinder .pubfinder-table td.pubfinder-year { padding-top: 1px; }
+  .pubfinder .pubfinder-table td.pubfinder-pub { flex: 1 1 0; }
+  .pubfinder .pubfinder-table td.pubfinder-links { flex: 0 0 100%; display: flex; gap: 14px; order: 3; }
+  .pubfinder .pubfinder-table td.pubfinder-match { order: 4; }
+  .pubfinder .pubfinder-table td:nth-child(5) { order: 5; }
+  .pubfinder .pubfinder-table td.pubfinder-action { order: 6; }
+}
