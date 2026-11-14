@@ -41,7 +41,7 @@
 {% block content %}
 <main class="portal-page"><section class="page-content pubfinder">
   <header class="page-header page-header--admin">
-    <div><div class="eyebrow">Website content</div><h1>Publication finder</h1><p>Search Europe PMC and OpenAlex for papers that acknowledge ACCEM and compare them with the Publications page.</p></div>
+    <div><div class="eyebrow">Website content</div><h1>Publication finder</h1><p>Search Europe PMC, OpenAlex, PubMed and Crossref for papers that acknowledge ACCEM and compare them with the Publications page.</p></div>
   </header>
 
   <section class="data-panel pubfinder-run">
@@ -55,12 +55,12 @@
             <span class="pubfinder-tags__id">Tag {{ tag.tag }}</span>
             <strong>“{{ tag.label }}”</strong>
             <span class="pubfinder-tags__detail">Any of {% for phrase in tag.phrases %}<code>{{ phrase }}</code>{% if not loop.last %} / {% endif %}{% endfor %}
-              {% if tag.institution %}with {% for word in tag.institution %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% if tag.city %} and {% for word in tag.city %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}{% else %}(the grant code is unique to ACCEM){% endif %}.
-              {% if tag.tag == 'A' %}High confidence in acknowledgements, medium in full text or affiliations.{% elif tag.tag == 'C' %}High confidence; searched in acknowledgement/funding text and full text.{% else %}High confidence anywhere; centre-name phrases are also searched in OpenAlex full text.{% endif %}</span>
+              {% if tag.institution %}with {% for word in tag.institution %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% if tag.city %} and {% for word in tag.city %}<code>{{ word }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}{% else %}(the grant code is unique to ACCEM){% if tag.grant_ids %}; full grant number {% for gid in tag.grant_ids %}<code>{{ gid }}</code>{% if not loop.last %} / {% endif %}{% endfor %}{% endif %}{% endif %}.
+              {% if tag.tag == 'A' %}High confidence in acknowledgements, medium in full text or affiliations (Europe PMC and PubMed).{% elif tag.tag == 'C' %}High confidence; searched in acknowledgement/funding text and full text, and in the grant records of Europe PMC, PubMed and Crossref — these list the grant for papers that are not open access too.{% else %}High confidence anywhere; centre-name phrases are also searched in OpenAlex full text and PubMed affiliations.{% endif %}</span>
           </li>
           {% endfor %}
         </ul>
-        <p class="pubfinder-muted">Searched in Europe PMC acknowledgement/funding text, full text and affiliations. Papers that also thank the <code>{{ excluded_phrase }}</code> (NCBS, a different facility) are flagged for review. Only open-access papers expose their acknowledgements, so this list cannot be complete.</p>
+        <p class="pubfinder-muted">Searched in Europe PMC acknowledgement/funding text, full text, affiliations and grant records; PubMed affiliations and grant numbers; Crossref funder award numbers; and OpenAlex full text. Papers that also thank the <code>{{ excluded_phrase }}</code> (NCBS, a different facility) are flagged for review. Grant numbers and affiliations are indexed for every paper, open access or not; the acknowledgement text itself is only searchable in open-access papers, so a paper that thanks ACCEM in words without citing the grant number can still be missed.</p>
       </div>
     </div>
     <div class="pubfinder-run__actions">

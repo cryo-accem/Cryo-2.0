@@ -22,6 +22,19 @@ def _epmc(doi, title, year=2024, source="MED", authors="Rao A, Iyer B, Dutta S."
     }
 
 
+def _pubmed_summary(uid, doi, title, pmc=None, pubdate="2024 Jan 5", pubtype=("Journal Article",)):
+    ids = [{"idtype": "pubmed", "value": uid}, {"idtype": "doi", "value": doi}]
+    if pmc:
+        ids.append({"idtype": "pmc", "value": pmc})
+    return {
+        "uid": uid, "title": title + ".", "pubdate": pubdate, "sortpubdate": "",
+        "fulljournalname": "Journal of Tests", "source": "J Test", "pubtype": list(pubtype),
+        "authors": [{"name": "Rao A", "authtype": "Author"}, {"name": "Iyer B", "authtype": "Author"},
+                    {"name": "Some Consortium", "authtype": "CollectiveName"}],
+        "articleids": ids,
+    }
+
+
 def _query(tag="A", field="acknowledgement", confidence="high", source="Europe PMC"):
     return {
         "id": f"{tag}:{field}", "tag": tag, "field": field,
@@ -178,9 +191,24 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
     def setUp(self):
         self.block_network()
         self.calls = []
+        no_throttle = patch.object(pf, "NCBI_MIN_INTERVAL_SECONDS", 0)
+        no_throttle.start()
+        self.addCleanup(no_throttle.stop)
 
     def fake_get_json(self, url, params):
         self.calls.append((url, dict(params)))
+        if url == pf.PUBMED_ESEARCH_URL:
+            ids = ["111", "222"] if params["term"] == "(SP22844[gr])" else []
+            return {"esearchresult": {"count": str(len(ids)), "idlist": ids}}
+        if url == pf.PUBMED_ESUMMARY_URL:
+            return {"result": {"uids": ["111", "222"],
+                "111": _pubmed_summary("111", "10.1000/ack", "Acknowledged paper", pmc="PMC111"),
+                "222": _pubmed_summary("222", "10.1000/closed", "Closed access paper", pubdate="2025 Mar 4")}}
+        if url == pf.CROSSREF_WORKS_URL:
+            return {"message": {"total-results": 1, "items": [
+                {"DOI": "10.1000/CROSSREF", "title": ["Funder metadata only paper"],
+                 "issued": {"date-parts": [[2024, 5]]}, "type": "journal-article",
+                 "container-title": ["J Funded"], "author": [{"family": "Rao", "given": "Anil"}]}]}}
         if url == pf.OPENALEX_WORKS_URL:
             return {"meta": {"count": 2}, "results": [
                 {"doi": "https://doi.org/10.64898/2026.02.07.704521", "title": "Dengue antibodies",
@@ -211,7 +239,22 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
                 patch.dict(os.environ, {"PUBLICATION_FINDER_CONTACT": ""}):
             candidates = pf.find_candidates(report)
         by_doi = {c["doi"]: c for c in candidates}
-        self.assertEqual(set(by_doi), {"10.1000/ack", "10.1000/text", "10.64898/2026.02.07.704521"})
+        self.assertEqual(set(by_doi), {
+            "10.1000/ack", "10.1000/text", "10.64898/2026.02.07.704521",
+            "10.1000/closed", "10.1000/crossref",
+        })
+        # PubMed grant hit merges into the Europe PMC record by DOI...
+        self.assertIn("PubMed", by_doi["10.1000/ack"]["sources"])
+        # ...and grant-only papers (not open access) are found with high confidence.
+        closed = by_doi["10.1000/closed"]
+        self.assertEqual((closed["sources"], closed["confidence"], closed["year"]), (["PubMed"], "high", 2025))
+        self.assertEqual(pf.describe_matches(closed), "C: grant number")
+        funded = by_doi["10.1000/crossref"]
+        self.assertEqual((funded["sources"], funded["confidence"]), (["Crossref"], "high"))
+        crossref = [params for url, params in self.calls if url == pf.CROSSREF_WORKS_URL]
+        self.assertEqual([c["filter"] for c in crossref], ["award.number:BT/INF/22/SP22844/2017"])
+        pubmed = [params for url, params in self.calls if url.startswith("https://eutils.ncbi")]
+        self.assertTrue(pubmed and all(c["tool"] == "ACCEM-publication-finder" for c in pubmed))
         self.assertEqual(by_doi["10.1000/ack"]["confidence"], "high")
         self.assertTrue(by_doi["10.1000/ack"]["mentions_national_facility"])
         self.assertEqual(by_doi["10.1000/text"]["confidence"], "medium")
@@ -278,7 +321,9 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
             return 0, []
 
         with patch.object(pf, "search_europe_pmc", side_effect=flaky), \
-                patch.object(pf, "search_openalex_fulltext", return_value=(0, [])):
+                patch.object(pf, "search_openalex_fulltext", return_value=(0, [])), \
+                patch.object(pf, "search_pubmed", return_value=(0, [])), \
+                patch.object(pf, "search_crossref", return_value=(0, [])):
             report = {}
             pf.find_candidates(report)
         errors = [q for q in report["queries"] if q["error"]]
@@ -576,10 +621,80 @@ class GrantCodeSearchTests(unittest.TestCase):
     def test_dbt_builder_grant_code_is_searched_with_high_confidence(self):
         import publication_finder as pf
         queries = [q for q in pf.build_queries() if q["tag"] == "C"]
-        self.assertEqual({q["field"] for q in queries}, {"acknowledgement", "fulltext"})
+        self.assertEqual({q["field"] for q in queries}, {"acknowledgement", "fulltext", "grant"})
         self.assertTrue(all(q["confidence"] == "high" for q in queries))
         ack = next(q for q in queries if q["field"] == "acknowledgement")
         self.assertEqual(ack["query"], "ACK_FUND:(SP22844)")
         # The MBU-wide DST-FIST grant is deliberately not a search term.
         self.assertFalse(any("LSII" in q["query"] for q in pf.build_queries()))
 
+
+
+class PubMedAndGrantSourceTests(NoNetworkMixin, unittest.TestCase):
+    def setUp(self):
+        self.block_network()
+
+    def test_pubmed_queries_use_grant_field_and_affiliation_proximity(self):
+        queries = {q["id"]: q for q in pf.build_queries()}
+        self.assertEqual(queries["C:grant:pubmed"]["query"], "(SP22844[gr])")
+        self.assertEqual(queries["C:grant:pubmed"]["confidence"], "high")
+        b = queries["B:affiliation:pubmed"]["query"]
+        # Exact phrases are not in PubMed's phrase index: proximity instead.
+        self.assertIn('"advanced centre cryo electron microscopy"[ad:~3]', b)
+        self.assertIn('accem[ad]', b)
+        self.assertIn('"indian institute science"[ad:~1]', b)
+        a = queries["A:affiliation:pubmed"]
+        self.assertEqual(a["confidence"], "medium")
+        self.assertIn("(bangalore[ad] OR bengaluru[ad])", a["query"])
+        self.assertEqual(queries["C:grant:europepmc"]["query"], 'GRANT_ID:"BT/INF/22/SP22844/2017"')
+
+    def test_pubmed_record_parsing(self):
+        record = pf._pubmed_record(_pubmed_summary("42", "10.1000/x", "A title", pmc="PMC42"))
+        self.assertEqual(record["title"], "A title")
+        self.assertEqual(record["authors"], "Rao A, Iyer B")  # collective names skipped
+        self.assertEqual((record["pmid"], record["pmcid"], record["doi"], record["year"]), ("42", "PMC42", "10.1000/x", 2024))
+        self.assertEqual(record["source"], "PubMed")
+        self.assertFalse(record["is_preprint"])
+        preprint = pf._pubmed_record(_pubmed_summary("43", "10.1101/2024.01.01.1", "P", pubtype=("Preprint",)))
+        self.assertTrue(preprint["is_preprint"])
+
+    def test_crossref_record_parsing(self):
+        record = pf._crossref_record({
+            "DOI": "10.1101/2024.1", "title": ["Posted"], "type": "posted-content",
+            "issued": {"date-parts": [[2023]]}, "author": [{"family": "Dutta", "given": "Somnath"}],
+        })
+        self.assertEqual((record["doi"], record["year"], record["authors"]), ("10.1101/2024.1", 2023, "Dutta S"))
+        self.assertTrue(record["is_preprint"])
+        self.assertEqual(record["journal"], "Preprint")
+
+    def test_pubmed_term_warning_is_not_a_failure_but_error_is(self):
+        def fake(url, params):
+            if url == pf.PUBMED_ESEARCH_URL:
+                return {"esearchresult": {"count": "0", "idlist": [], "errorlist": {"phrasesnotfound": ["accem"]}}}
+            raise AssertionError(url)
+        with patch.object(pf, "_get_json", side_effect=fake), patch.object(pf, "NCBI_MIN_INTERVAL_SECONDS", 0):
+            self.assertEqual(pf.search_pubmed("accem[ad]"), (0, []))
+        with patch.object(pf, "_get_json", return_value={"esearchresult": {"ERROR": "bad"}}), \
+                patch.object(pf, "NCBI_MIN_INTERVAL_SECONDS", 0):
+            with self.assertRaises(ValueError):
+                pf.search_pubmed("x")
+
+    def test_ncbi_identification_and_optional_api_key(self):
+        with patch.dict(os.environ, {"PUBLICATION_FINDER_CONTACT": "", "NCBI_API_KEY": ""}):
+            params = pf._ncbi_params({"db": "pubmed"})
+        self.assertEqual(params, {"db": "pubmed", "tool": "ACCEM-publication-finder"})
+        with patch.dict(os.environ, {"PUBLICATION_FINDER_CONTACT": "lab@example.org", "NCBI_API_KEY": "k"}):
+            params = pf._ncbi_params({})
+        self.assertEqual((params["email"], params["api_key"]), ("lab@example.org", "k"))
+
+    def test_rate_limited_request_is_retried_once(self):
+        import urllib.error
+        responses = [urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None), io.BytesIO(b'{"ok": 1}')]
+
+        def urlopen(request, timeout):
+            item = responses.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        with patch("urllib.request.urlopen", side_effect=urlopen), patch.object(pf, "RATE_LIMIT_RETRY_SECONDS", 0):
+            self.assertEqual(pf._get_json(pf.PUBMED_ESEARCH_URL, {}), {"ok": 1})

@@ -1,4 +1,4 @@
-"""Search Europe PMC / OpenAlex for papers acknowledging ACCEM and compare
+"""Search Europe PMC / OpenAlex / PubMed / Crossref for papers acknowledging ACCEM and compare
 them with the website's Publications page.
 
 Usage:

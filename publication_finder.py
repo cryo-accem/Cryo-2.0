@@ -7,6 +7,13 @@ Sources (no API keys, standard library only):
   unfielded query searches everything Europe PMC indexes (title, abstract and
   open-access full text).
 * OpenAlex ``fulltext.search`` for the exact centre-name phrases.
+* PubMed (NCBI E-utilities) for the grant code in the "Grants and Funding"
+  field, and the centre and facility names in author affiliations. PubMed has
+  no full text, but it lists funder grant numbers even for papers that are not
+  open access, which Europe PMC's acknowledgement search cannot see.
+* Grant metadata for every paper, open access or not: the full grant number
+  in Europe PMC's ``GRANT_ID`` field and in Crossref's funder ``award.number``
+  (deposited by publishers).
 
 Only open-access papers expose their acknowledgements, so the finder can never
 be exhaustive: it suggests candidates for an admin to review, it does not
@@ -24,6 +31,8 @@ import io
 import json
 import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -32,8 +41,9 @@ import urllib.request
 # The two "tags" below were specified by the facility owner. Each tag is a set
 # of phrase variants that must co-occur with the institution words (and, for
 # tag A, a city word). Every tag is searched in the acknowledgement/funding
-# text, the full text and the affiliations (Europe PMC); tag B's centre-name
-# phrases are also searched in OpenAlex full text.
+# text, the full text and the affiliations (Europe PMC) and in PubMed author
+# affiliations (tag C: PubMed grant numbers); tag B's centre-name phrases are
+# also searched in OpenAlex full text.
 #   * Tag B (the centre's exact name) is always "high" confidence.
 #   * Tag A ("cryo-EM facility" + IISc + city) is "high" in acknowledgements
 #     and "medium" anywhere else (an IISc paper may mention some other cryo-EM
@@ -77,6 +87,9 @@ SEARCH_TAGS = {
     "C": {
         "label": "DBT-BUILDER Program (BT/INF/22/SP22844/2017)",
         "phrases": ("SP22844",),
+        # Grant-metadata fields (Europe PMC GRANT_ID, Crossref award.number)
+        # only match the complete award number, not the short code.
+        "grant_ids": ("BT/INF/22/SP22844/2017",),
         "institution": (),
         "city": (),
     },
@@ -91,10 +104,22 @@ FIELD_LABELS = {
     "acknowledgement": "acknowledgement",
     "fulltext": "full text",
     "affiliation": "affiliation",
+    "grant": "grant number",
 }
 
 EUROPE_PMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
+CROSSREF_WORKS_URL = "https://api.crossref.org/works"
+CROSSREF_MAX_RESULTS = 1000
+PUBMED_ESEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+PUBMED_ESUMMARY_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+PUBMED_MAX_RESULTS = 1000
+PUBMED_SUMMARY_BATCH = 200
+# NCBI allows 3 requests/second without an API key and 10 with one
+# (NCBI_API_KEY). The finder queries in parallel, so PubMed calls share a
+# throttle.
+NCBI_MIN_INTERVAL_SECONDS = 0.35
+NCBI_MIN_INTERVAL_WITH_KEY_SECONDS = 0.11
 REQUEST_TIMEOUT_SECONDS = 25  # searches run in the background, so slow sources can finish
 MAX_PARALLEL_REQUESTS = 6
 USER_AGENT = "ACCEM-publication-finder/1.0"
@@ -218,8 +243,42 @@ def _group(terms, field=None):
     return f"{field}:{group}" if field else group
 
 
+_PUBMED_STOPWORDS = frozenset({"for", "of", "the", "and"})
+
+
+def _pubmed_term(term, field):
+    """One PubMed term restricted to ``field`` (e.g. "ad" = affiliation).
+
+    PubMed's phrase index does not contain the centre-name phrases, and an
+    unmatched quoted phrase silently becomes a loose word search. Multi-word
+    phrases are therefore searched with proximity (all words within a few
+    words of each other in the same affiliation string), which needs no
+    phrase index.
+    """
+    words = [w for w in re.split(r"[\s\-]+", term.lower()) if w and w not in _PUBMED_STOPWORDS]
+    if len(words) == 1:
+        return f"{words[0]}[{field}]" if field != "gr" else f"{term}[gr]"
+    if field == "ad":
+        return f'"{" ".join(words)}"[ad:~{max(1, len(words) - 2)}]'
+    return f'"{term}"[{field}]'
+
+
+def _pubmed_group(terms, field):
+    return "(" + " OR ".join(_pubmed_term(term, field) for term in terms) + ")"
+
+
+def pubmed_query(spec):
+    """PubMed query for a tag: grant codes in [gr], names in affiliations."""
+    if not spec["institution"]:
+        return "grant", _pubmed_group(spec["phrases"], "gr")
+    parts = [_pubmed_group(spec["phrases"], "ad"), _pubmed_group(spec["institution"], "ad")]
+    if spec.get("city"):
+        parts.append(_pubmed_group(spec["city"], "ad"))
+    return "affiliation", " AND ".join(parts)
+
+
 def build_queries(tags=None):
-    """Return the Europe PMC and OpenAlex queries derived from SEARCH_TAGS."""
+    """Return the Europe PMC, OpenAlex and PubMed queries from SEARCH_TAGS."""
     tags = tags or SEARCH_TAGS
     field_codes = {"acknowledgement": "ACK_FUND", "fulltext": None, "affiliation": "AFF"}
     queries = []
@@ -255,6 +314,26 @@ def build_queries(tags=None):
                     "query": f'"{phrase}"',
                     "confidence": "high",
                 })
+        for grant_id in spec.get("grant_ids") or ():
+            queries.append({
+                "id": f"{tag}:grant:europepmc",
+                "tag": tag, "field": "grant", "source": "Europe PMC",
+                "query": f'GRANT_ID:"{grant_id}"', "confidence": "high",
+            })
+            queries.append({
+                "id": f"{tag}:grant:crossref",
+                "tag": tag, "field": "grant", "source": "Crossref",
+                "query": f"award.number:{grant_id}", "confidence": "high",
+            })
+        field, query = pubmed_query(spec)
+        queries.append({
+            "id": f"{tag}:{field}:pubmed",
+            "tag": tag,
+            "field": field,
+            "source": "PubMed",
+            "query": query,
+            "confidence": "high" if tag in ("B", "C") else "medium",
+        })
     return queries
 
 
@@ -275,6 +354,7 @@ def search_terms_summary(tags=None):
             "phrases": list(spec["phrases"]),
             "institution": list(spec["institution"]),
             "city": list(spec.get("city") or ()),
+            "grant_ids": list(spec.get("grant_ids") or ()),
         })
     return summary
 
@@ -282,6 +362,7 @@ def search_terms_summary(tags=None):
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 REQUEST_ATTEMPTS = 2  # one retry: Europe PMC full-text queries occasionally stall
+RATE_LIMIT_RETRY_SECONDS = 1.5
 
 
 def _get_json(url, params):
@@ -294,8 +375,11 @@ def _get_json(url, params):
             with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 return json.load(response)
         except urllib.error.HTTPError as exc:
-            if exc.code < 500 or attempt + 1 == REQUEST_ATTEMPTS:
+            retryable = exc.code >= 500 or exc.code == 429
+            if not retryable or attempt + 1 == REQUEST_ATTEMPTS:
                 raise
+            if exc.code == 429:  # rate limited (NCBI): wait, then retry once
+                time.sleep(RATE_LIMIT_RETRY_SECONDS)
         except OSError:
             if attempt + 1 == REQUEST_ATTEMPTS:
                 raise
@@ -322,6 +406,69 @@ def search_europe_pmc(query):
             break
         cursor = next_cursor
     return hit_count, results
+
+
+_ncbi_lock = threading.Lock()
+_ncbi_last_call = [0.0]
+
+
+def _ncbi_params(params):
+    """Add NCBI's requested tool/email/api_key identification."""
+    params = dict(params, tool="ACCEM-publication-finder")
+    contact = os.environ.get("PUBLICATION_FINDER_CONTACT", "").strip()
+    if contact:
+        params["email"] = contact
+    api_key = os.environ.get("NCBI_API_KEY", "").strip()
+    if api_key:
+        params["api_key"] = api_key
+    return params
+
+
+def _ncbi_get_json(url, params):
+    params = _ncbi_params(params)
+    interval = NCBI_MIN_INTERVAL_WITH_KEY_SECONDS if "api_key" in params else NCBI_MIN_INTERVAL_SECONDS
+    with _ncbi_lock:  # space out calls from parallel queries
+        wait = _ncbi_last_call[0] + interval - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
+        _ncbi_last_call[0] = time.monotonic()
+    return _get_json(url, params)
+
+
+def search_pubmed(query):
+    """Return (hit_count, summaries) for a PubMed query via E-utilities."""
+    found = (_ncbi_get_json(PUBMED_ESEARCH_URL, {
+        "db": "pubmed", "term": query, "retmode": "json", "retmax": PUBMED_MAX_RESULTS,
+    }) or {}).get("esearchresult") or {}
+    # "phrasesnotfound" in errorlist is only a warning (a term absent from the
+    # index; the rest of the query still runs). ERROR means the query failed.
+    if found.get("ERROR"):
+        raise ValueError(f"PubMed rejected the query: {found['ERROR']}")
+    hit_count = int(found.get("count") or 0)
+    ids = list(found.get("idlist") or [])
+    summaries = []
+    for start in range(0, len(ids), PUBMED_SUMMARY_BATCH):
+        batch = ids[start:start + PUBMED_SUMMARY_BATCH]
+        result = (_ncbi_get_json(PUBMED_ESUMMARY_URL, {
+            "db": "pubmed", "id": ",".join(batch), "retmode": "json",
+        }) or {}).get("result") or {}
+        summaries.extend(result[uid] for uid in result.get("uids") or batch if isinstance(result.get(uid), dict))
+    return hit_count, summaries
+
+
+def search_crossref(filter_value):
+    """Return (hit_count, items) for a Crossref works filter (e.g. award.number)."""
+    params = {
+        "filter": filter_value,
+        "rows": CROSSREF_MAX_RESULTS,
+        "select": "DOI,title,issued,type,container-title,author",
+    }
+    contact = os.environ.get("PUBLICATION_FINDER_CONTACT", "").strip()
+    if contact:
+        params["mailto"] = contact  # Crossref's "polite pool"
+    message = (_get_json(CROSSREF_WORKS_URL, params) or {}).get("message") or {}
+    items = message.get("items") or []
+    return int(message.get("total-results") or len(items)), items
 
 
 def search_openalex_fulltext(phrase):
@@ -360,6 +507,64 @@ def _europe_pmc_record(result):
             f"https://europepmc.org/article/{source}/{record_id}" if source and record_id else None
         ),
         "source": "Europe PMC",
+    }
+
+
+def _pubmed_record(summary):
+    article_ids = {
+        (item.get("idtype") or "").lower(): item.get("value")
+        for item in summary.get("articleids") or []
+    }
+    doi = normalize_doi(article_ids.get("doi") or summary.get("elocationid"))
+    pmid = str(summary.get("uid") or article_ids.get("pubmed") or "") or None
+    pmcid = article_ids.get("pmc") or article_ids.get("pmcid") or None
+    if pmcid:
+        pmcid = re.sub(r"^pmc-id:\s*", "", pmcid).split(";")[0].strip() or None
+    authors = [
+        author.get("name") or "" for author in summary.get("authors") or []
+        if (author.get("authtype") or "Author") == "Author"
+    ]
+    year_match = re.match(r"(\d{4})", summary.get("sortpubdate") or summary.get("pubdate") or "")
+    is_preprint = "Preprint" in (summary.get("pubtype") or []) or is_preprint_doi(doi)
+    return {
+        "title": strip_markup(summary.get("title")).rstrip("."),
+        "authors": _short_authors(authors),
+        "_author_keys": [key for key in map(author_key, authors) if key],
+        "journal": strip_markup(summary.get("fulljournalname") or summary.get("source"))
+                   or ("Preprint" if is_preprint else ""),
+        "year": int(year_match.group(1)) if year_match else None,
+        "doi": doi,
+        "pmid": pmid,
+        "pmcid": pmcid,
+        "is_preprint": is_preprint,
+        "europe_pmc_url": f"https://europepmc.org/article/MED/{pmid}" if pmid else None,
+        "source": "PubMed",
+    }
+
+
+def _crossref_record(item):
+    doi = normalize_doi(item.get("DOI"))
+    authors = [
+        " ".join(part for part in (author.get("family"), (author.get("given") or "")[:1]) if part)
+        for author in item.get("author") or []
+    ]
+    parts = ((item.get("issued") or {}).get("date-parts") or [[None]])[0]
+    year = parts[0] if parts and isinstance(parts[0], int) else None
+    is_preprint = item.get("type") == "posted-content" or is_preprint_doi(doi)
+    titles = item.get("title") or [""]
+    journals = item.get("container-title") or [""]
+    return {
+        "title": strip_markup(titles[0]).rstrip("."),
+        "authors": _short_authors(authors),
+        "_author_keys": [key for key in map(author_key, authors) if key],
+        "journal": strip_markup(journals[0]) or ("Preprint" if is_preprint else ""),
+        "year": year,
+        "doi": doi,
+        "pmid": None,
+        "pmcid": None,
+        "is_preprint": is_preprint,
+        "europe_pmc_url": None,
+        "source": "Crossref",
     }
 
 
@@ -557,6 +762,12 @@ def find_candidates(report=None):
             if query["source"] == "Europe PMC":
                 hit_count, results = search_europe_pmc(query["query"])
                 records = [_europe_pmc_record(result) for result in results]
+            elif query["source"] == "Crossref":
+                hit_count, results = search_crossref(query["query"])
+                records = [_crossref_record(item) for item in results if item.get("DOI")]
+            elif query["source"] == "PubMed":
+                hit_count, results = search_pubmed(query["query"])
+                records = [_pubmed_record(summary) for summary in results]
             else:
                 hit_count, results = search_openalex_fulltext(query["query"])
                 institution = SEARCH_TAGS[query["tag"]]["institution"]
