@@ -97,6 +97,7 @@
       <a class="{% if request.path.startswith('/admin/freezing') %}active{% endif %}" href="{{ url_for('admin.freezing_admin') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i><span>Freezing</span></a>
       <a class="{% if request.path.startswith('/admin/inventory') %}active{% endif %}" href="{{ url_for('inventory.dashboard') }}"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>Grid Inventory</span></a>
       <a class="{% if request.path.startswith('/admin/history') %}active{% endif %}" href="{{ url_for('admin.history') }}"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i><span>Billing &amp; Payments</span></a>
+      <a class="{% if request.path.startswith('/admin/proforma') %}active{% endif %}" href="{{ url_for('admin.proforma_estimate') }}"><i class="fa-solid fa-calculator" aria-hidden="true"></i><span>Proforma estimate</span></a>
       <div class="admin-sidebar__label">Website</div>
       <a class="{% if request.path.startswith('/admin/maintenance') %}active{% endif %}" href="{{ url_for('admin.maintenance') }}"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>Maintenance</span></a>
       <a class="{% if request.path.startswith('/admin/publications') %}active{% endif %}" href="{{ url_for('admin.publication_finder') }}"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Publication finder</span></a>

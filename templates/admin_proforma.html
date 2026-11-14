@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}ACCEM | Proforma estimate{% endblock %}
+{% block content %}
+<style>
+  .proforma-result { margin-top: 20px; }
+  .proforma-meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 14px; }
+  .proforma-meta div { display: flex; flex-direction: column; }
+  .proforma-meta small { opacity: .7; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
+  .proforma-table { width: 100%; border-collapse: collapse; }
+  .proforma-table th, .proforma-table td { padding: 8px 10px; border-bottom: 1px solid rgba(127,127,127,.25); text-align: left; }
+  .proforma-table td.amount, .proforma-table th.amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .proforma-table tfoot td { font-weight: 600; }
+  .proforma-table tfoot tr.proforma-total td { font-size: 1.15rem; border-top: 2px solid currentColor; }
+  .proforma-headline { font-size: 1.1rem; margin: 0 0 14px; }
+  .proforma-headline strong { font-size: 1.5rem; }
+  .proforma-note { font-size: .85rem; opacity: .8; margin-top: 12px; }
+  .proforma-check { display: flex; gap: 8px; align-items: center; }
+  @media print {
+    .admin-sidebar, .admin-assistant, .site-header, header.site-header, footer, .proforma-form, .no-print { display: none !important; }
+    .proforma-result { margin: 0; }
+  }
+</style>
+<main class="portal-page"><section class="page-content">
+  <header class="page-header page-header--admin">
+    <div><div class="eyebrow">Billing</div><h1>Proforma estimate</h1><p>Approximate cost for completing a study (freezing, screening and data collection), using the current charge sheet rates.</p></div>
+  </header>
+
+  <section class="data-panel proforma-form">
+    <form method="get" action="{{ url_for('admin.proforma_estimate') }}" class="maintenance-form">
+      <input type="hidden" name="calculate" value="1">
+      <label class="form-field full"><span>User name</span><input name="user_name" maxlength="200" required value="{{ form.user_name }}" placeholder="e.g. Dr. A. Kumar"></label>
+      <label class="form-field"><span>User category</span>
+        <select name="user_category">
+          {% for key, label in categories %}<option value="{{ key }}" {% if form.user_category == key %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label class="form-field"><span>Number of samples</span><input name="number_of_samples" type="number" min="1" step="1" required value="{{ form.number_of_samples }}"></label>
+      <label class="form-field"><span>Number of grids (total)</span><input name="number_of_grids" type="number" min="1" step="1" required value="{{ form.number_of_grids }}"></label>
+      <label class="form-field"><span>Number of microscope slots (24 h each)</span><input name="number_of_slots" type="number" min="0" step="1" required value="{{ form.number_of_slots }}"></label>
+      <label class="form-field"><span>Grids provided by</span>
+        <select name="grid_source">
+          <option value="facility" {% if form.grid_source == 'facility' %}selected{% endif %}>Facility</option>
+          <option value="self_owned" {% if form.grid_source == 'self_owned' %}selected{% endif %}>User / lab</option>
+        </select>
+      </label>
+      <label class="form-field"><span>Grid type (facility grids)</span>
+        <select name="grid_type">
+          <option value="normal_holey_carbon" {% if form.grid_type == 'normal_holey_carbon' %}selected{% endif %}>Holey carbon</option>
+          <option value="gold_carbon_graphene" {% if form.grid_type == 'gold_carbon_graphene' %}selected{% endif %}>Gold / carbon-coated / graphene-oxide</option>
+        </select>
+      </label>
+      <label class="form-field"><span>C-clip and base ring provided by</span>
+        <select name="clip_base_source">
+          <option value="facility" {% if form.clip_base_source == 'facility' %}selected{% endif %}>Facility</option>
+          <option value="self_owned" {% if form.clip_base_source == 'self_owned' %}selected{% endif %}>User / lab</option>
+        </select>
+      </label>
+      <label class="form-field proforma-check"><input type="checkbox" name="processing_requested" value="1" {% if form.processing_requested %}checked{% endif %}> <span>Data processing / image analysis (industry only)</span></label>
+      <div class="form-actions"><button class="button" type="submit"><i class="fa-solid fa-calculator" aria-hidden="true"></i> Calculate estimate</button>{% if estimate or error %}<a class="button button--secondary" href="{{ url_for('admin.proforma_estimate') }}">Clear</a>{% endif %}</div>
+    </form>
+    {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
+  </section>
+
+  {% if estimate %}
+  <section class="data-panel proforma-result" aria-labelledby="proforma-heading">
+    <h2 id="proforma-heading">Proforma invoice (estimate)</h2>
+    <div class="proforma-meta">
+      <div><small>User</small><strong>{{ form.user_name }}</strong></div>
+      <div><small>Category</small><strong>{{ category_labels[estimate.user_category] }}</strong></div>
+      <div><small>Samples</small><strong>{{ estimate.number_of_samples }}</strong></div>
+      <div><small>Grids</small><strong>{{ estimate.number_of_grids }}</strong></div>
+      <div><small>Slots</small><strong>{{ estimate.number_of_slots }}</strong></div>
+      <div><small>Date</small><strong>{{ today.strftime('%d %b %Y') }}</strong></div>
+    </div>
+    <p class="proforma-headline">Approximate value to complete the study: <strong>{{ format_inr(estimate.grand_total) }}</strong>{% if estimate.number_of_samples > 1 %} <span>(about {{ format_inr(estimate.per_sample) }} per sample)</span>{% endif %}</p>
+    <table class="proforma-table">
+      <thead><tr><th>Item</th><th>Quantity</th><th class="amount">Amount</th></tr></thead>
+      <tbody>
+        {% for label, qty, amount in estimate.lines %}<tr><td>{{ label }}</td><td>{{ qty }}</td><td class="amount">{{ format_inr(amount) }}</td></tr>{% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><td colspan="2">Subtotal</td><td class="amount">{{ format_inr(estimate.subtotal) }}</td></tr>
+        <tr><td colspan="2">{% if estimate.gst_rate %}GST ({{ (estimate.gst_rate * 100)|int }}%){% else %}GST (not applicable to internal users){% endif %}</td><td class="amount">{{ format_inr(estimate.gst) }}</td></tr>
+        <tr class="proforma-total"><td colspan="2">Estimated total</td><td class="amount">{{ format_inr(estimate.grand_total) }}</td></tr>
+      </tfoot>
+    </table>
+    {% if form.processing_requested and not estimate.processing_applied %}<p class="proforma-note">Data processing is offered to industry users only{% if estimate.number_of_slots == 0 %} and needs at least one microscope slot{% endif %}, so it is not included.</p>{% endif %}
+    <p class="proforma-note">This is an approximate estimate, not a final bill. Actual charges depend on the grids, slots and services used and are issued on the charge sheet after each booking.</p>
+    <div class="form-actions no-print"><button class="button button--secondary" type="button" onclick="window.print()"><i class="fa-solid fa-print" aria-hidden="true"></i> Print / save as PDF</button></div>
+  </section>
+  {% endif %}
+</section></main>
+{% endblock %}

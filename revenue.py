@@ -392,3 +392,91 @@ def stored_prebilled_grids(row):
     except (TypeError, ValueError):
         return 0
     return max(value, 0)
+
+
+def _whole_count(value, label, minimum):
+    text = str(value if value is not None else "").strip()
+    if not re.fullmatch(r"\+?\d+", text):
+        raise ValueError(f"{label} must be a whole number of at least {minimum}.")
+    number = int(text)
+    if number < minimum:
+        raise ValueError(f"{label} must be a whole number of at least {minimum}.")
+    if number > 10000:
+        raise ValueError(f"{label} is too large.")
+    return number
+
+
+def estimate_study_cost(
+    user_category,
+    number_of_grids,
+    number_of_samples,
+    number_of_slots,
+    grid_source="facility",
+    grid_type="normal_holey_carbon",
+    clip_base_source="facility",
+    processing_requested=False,
+):
+    """Approximate cost of a complete study, for a proforma invoice.
+
+    A study is billed as it would be in practice: one freezing booking for all
+    grids (grid charge + freezing handling), then the microscope bookings
+    (clipping handling, C-clip and base ring, slots, optional processing) with
+    the facility grids counted as already billed at freezing.  Both stages use
+    :func:`calculate_charge_sheet`, so the estimate follows the live rates.
+    Samples do not carry a charge of their own; they set the per-sample figure.
+    """
+    category = pricing_category(user_category)
+    grids = _whole_count(number_of_grids, "Number of grids", 1)
+    samples = _whole_count(number_of_samples, "Number of samples", 1)
+    slots = _whole_count(number_of_slots, "Number of slots", 0)
+    if samples > grids:
+        raise ValueError("Each sample needs at least one grid: grids cannot be fewer than samples.")
+    source = normalize_grid_source(grid_source)
+
+    freezing = calculate_charge_sheet(
+        category, "Freezing / Grid Registration", grids, source, grid_type,
+    )
+    lines = [
+        ("Grid charge", f"{grids} grid(s)" if source == "facility" else f"{grids} grid(s), user provided",
+         freezing["grid_charge"]),
+        ("Handling charge — grid freezing", f"{grids} grid(s)", freezing["handling_charge"]),
+    ]
+    stages = [freezing]
+    if slots:
+        imaging = calculate_charge_sheet(
+            category, "Data Collection", grids, source, grid_type,
+            actual_slots=slots,
+            processing_requested=processing_requested,
+            clip_base_source=clip_base_source,
+            prebilled_grids=grids if source == "facility" else 0,
+        )
+        clip_label = "C-clip and base ring"
+        if imaging["clip_base_source"] == "self_owned":
+            clip_label += " (lab provided)"
+        lines += [
+            ("Handling charge — grid clipping", f"{grids} grid(s)", imaging["handling_charge"]),
+            (clip_label, f"{grids} grid(s)", imaging["clip_base_charge"]),
+            ("Microscope slots (screening + data collection)", f"{slots} 24-hour slot(s)",
+             imaging["slot_charge"]),
+        ]
+        if imaging["processing_charge"]:
+            lines.append(("Data processing / image analysis", "1 service", imaging["processing_charge"]))
+        stages.append(imaging)
+
+    subtotal = _money(sum(stage["subtotal"] for stage in stages))
+    gst = _money(sum(stage["gst"] for stage in stages))
+    total = subtotal + gst
+    return {
+        "user_category": category,
+        "number_of_grids": grids,
+        "number_of_samples": samples,
+        "number_of_slots": slots,
+        "grid_source": source,
+        "lines": lines,
+        "subtotal": subtotal,
+        "gst_rate": CHARGE_CONFIG[category]["gst_rate"],
+        "gst": gst,
+        "grand_total": total,
+        "per_sample": _money(total / samples),
+        "processing_applied": any(stage["processing_charge"] for stage in stages),
+    }

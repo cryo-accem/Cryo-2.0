@@ -35,7 +35,7 @@ from revenue import (
     apply_csic_final_amount, calculate_booking_revenue, calculate_charge_sheet,
     csic_amount_components, is_billable_booking, is_csic_booking,
     is_non_billable_booking, is_payment_received_booking, parse_csic_final_amount,
-    parse_number_of_grids, pricing_category,
+    parse_number_of_grids, pricing_category, estimate_study_cost,
 )
 from revenue import grid_breakdown_json, stored_prebilled_grids
 from blueprints.freezing import GRID_LIMIT_PER_DAY, complete_freezing_booking, register_freezing
@@ -119,6 +119,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.download_database_backup",
     "admin.archive_completed_registrations",
     "admin.billing_preview",
+    "admin.proforma_estimate",
     "admin.set_csic_booking",
     "admin.maintenance",
     "admin.save_publication",
@@ -433,6 +434,60 @@ def billing_preview():
         result = {key: ("0.00" if key in money else value) for key, value in result.items()}
         result["non_billable"] = "1"
     return jsonify(result)
+
+
+_PROFORMA_CATEGORIES = (
+    ("internal", "Internal (IISc)"),
+    ("academic", "External (academic)"),
+    ("industry", "Industry"),
+)
+
+
+@admin_bp.route("/proforma", methods=["GET"])
+def proforma_estimate():
+    """Approximate cost of a complete study, for a proforma invoice.
+
+    Read-only: the form submits by GET and nothing is stored.
+    """
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    from blueprints.public import format_inr
+
+    args = request.args
+    form = {
+        "user_name": args.get("user_name", "").strip()[:200],
+        "user_category": args.get("user_category", "academic"),
+        "number_of_grids": args.get("number_of_grids", "").strip(),
+        "number_of_samples": args.get("number_of_samples", "").strip(),
+        "number_of_slots": args.get("number_of_slots", "").strip(),
+        "grid_source": args.get("grid_source", "facility"),
+        "grid_type": args.get("grid_type", "normal_holey_carbon"),
+        "clip_base_source": args.get("clip_base_source", "facility"),
+        "processing_requested": args.get("processing_requested") == "1",
+    }
+    estimate = None
+    error = None
+    if args.get("calculate"):
+        try:
+            if not form["user_name"]:
+                raise ValueError("Enter the user name.")
+            estimate = estimate_study_cost(
+                form["user_category"], form["number_of_grids"], form["number_of_samples"],
+                form["number_of_slots"], form["grid_source"], form["grid_type"],
+                form["clip_base_source"], form["processing_requested"],
+            )
+        except ValueError as exc:
+            error = str(exc)
+    return render_template(
+        "admin_proforma.html",
+        form=form,
+        estimate=estimate,
+        error=error,
+        categories=_PROFORMA_CATEGORIES,
+        category_labels=dict(_PROFORMA_CATEGORIES),
+        format_inr=format_inr,
+        today=today_ist(),
+    )
 
 
 _PREVIEW_BOOKING_TABLES = {
