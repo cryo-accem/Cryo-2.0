@@ -121,6 +121,7 @@ _ALLOWED_ADMIN_ENDPOINTS = {
     "admin.billing_preview",
     "admin.proforma_estimate",
     "admin.set_csic_booking",
+    "admin.reprice_unsent_charges",
     "admin.maintenance",
     "admin.save_publication",
     "admin.delete_publication",
@@ -4483,6 +4484,87 @@ def _grid_breakdown(row):
     return (normal or None), (gold or None)
 
 
+def _current_rate_charges(row, service):
+    """Charges for a completed booking at today's rates (as a first send bills it)."""
+    normal_grids, gold_grids = _grid_breakdown(row)
+    return calculate_charge_sheet(
+        row.get("origin", ""), service,
+        row.get("number_of_grids") or row.get("actual_grids") or row.get("grids"),
+        row.get("grid_source"), row.get("grid_type"),
+        row.get("actual_slots") or 1,
+        bool(row.get("processing_requested")),
+        clipped_grids=row.get("clipped_grids") or 0,
+        clip_base_source=row.get("clip_base_source") or "facility",
+        normal_grids=normal_grids,
+        gold_grids=gold_grids,
+        prebilled_grids=stored_prebilled_grids(row),
+    )
+
+
+_STORED_CHARGE_KEYS = (
+    "grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
+    "processing_charge", "grand_total",
+)
+
+
+def _stale_unsent_charges(service_key, rows):
+    """Unsent bills whose stored amounts differ from today's rates.
+
+    A charge sheet that has been sent keeps what it billed.  Until it is sent,
+    the sheet is recalculated at the current rates, so the stored amounts
+    (shown on Billing and counted in revenue) should match them.  CSIC
+    bookings keep their agreed final amount and non-billable PIs stay at zero.
+    """
+    service = _CHARGE_SHEET_TABLES[service_key][1]
+    stale = []
+    for row in rows:
+        if (row.get("charge_sheet_sent_at") or not row.get("grid_source")
+                or not is_billable_booking(row) or is_csic_booking(row)):
+            continue
+        try:
+            charges = _current_rate_charges(row, service)
+        except ValueError:
+            continue  # incomplete details: the admin fixes these on send
+        if any(_money(row.get(key) or 0) != charges[key] for key in _STORED_CHARGE_KEYS):
+            stale.append((row, charges))
+    return stale
+
+
+@admin_bp.route("/history/reprice-unsent", methods=["POST"])
+def reprice_unsent_charges():
+    """Bring every unsent bill's stored amounts up to the current rates."""
+    if not session.get("admin_logged_in"):
+        return redirect(url_for("admin.login"))
+    conn = get_db()
+    cur = conn.cursor()
+    updated = 0
+    for service_key, (table, _, _) in _CHARGE_SHEET_TABLES.items():
+        completed = "" if service_key == "freezing" else " AND status='completed'"
+        cur.execute(f"SELECT * FROM {table} WHERE charge_sheet_sent_at IS NULL{completed}")
+        for row, charges in _stale_unsent_charges(service_key, _history_rows(cur.fetchall())):
+            cur.execute(
+                f"UPDATE {table} SET grid_charge=?, handling_charge=?, clip_base_charge=?, "
+                "slot_charge=?, freezing_charge=?, clipping_charge=?, processing_charge=?, "
+                "subtotal=?, gst_amount=?, grand_total=?, total_billed=? "
+                "WHERE id=? AND charge_sheet_sent_at IS NULL",
+                [str(charges[key]) for key in (
+                    "grid_charge", "handling_charge", "clip_base_charge", "slot_charge",
+                    "freezing_charge", "clipping_charge", "processing_charge", "subtotal",
+                    "gst_amount", "grand_total", "total_billed",
+                )] + [row["id"]],
+            )
+            updated += 1
+    conn.commit()
+    cur.close()
+    conn.close()
+    if updated:
+        flash(f"Updated {updated} unsent bill{'s' if updated != 1 else ''} to the current rates.",
+              "success")
+    else:
+        flash("Every unsent bill already matches the current rates.", "success")
+    return redirect(url_for("admin.history"))
+
+
 @admin_bp.route("/billing/csic/<service_key>/<int:booking_id>", methods=["POST"])
 def set_csic_booking(service_key, booking_id):
     if not session.get("admin_logged_in"):
@@ -5665,6 +5747,18 @@ def history():
         "screening": completed_screening,
     }
     totals = {key: len(rows) for key, rows in all_by_service.items()}
+    stale_unsent = [
+        (row, charges)
+        for key, rows in all_by_service.items()
+        for row, charges in _stale_unsent_charges(key, rows)
+    ]
+    rate_update = {
+        "count": len(stale_unsent),
+        "change": sum(
+            (charges["grand_total"] - _money(row.get("grand_total") or 0)
+             for row, charges in stale_unsent), Decimal("0"),
+        ),
+    }
     for rows in all_by_service.values():
         for row in rows:
             row["payment_received"] = is_payment_received_booking(row)
@@ -5755,6 +5849,7 @@ def history():
 
     return render_template(
         "history.html",
+        rate_update=rate_update,
         history_url=history_url,
         totals=totals,
         tables=tables,

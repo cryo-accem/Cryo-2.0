@@ -11,6 +11,15 @@ from charge_sheet import _billing_lines
 from main import create_app
 from revenue import apply_csic_final_amount, calculate_charge_sheet, is_non_billable_booking
 
+# Charge sheets need the PI's "To" address before they can be sent.
+BILL_TO = {
+    "bill_to_name": "Prof. Test PI",
+    "bill_to_designation": "Professor",
+    "bill_to_department": "Molecular Biophysics Unit",
+    "bill_to_institute": "Indian Institute of Science",
+    "bill_to_city": "Bangalore 560012",
+}
+
 
 class AdminCsicBillingTests(unittest.TestCase):
     def setUp(self):
@@ -391,7 +400,7 @@ class AdminCsicBillingTests(unittest.TestCase):
         with patch("blueprints.admin.send_email"):
             response = self.client.post(
                 f"/admin/charge-sheet/screening/{booking_id}",
-                data={"_csrf_token": token, "grid_source": "facility"},
+                data={**BILL_TO, "_csrf_token": token, "grid_source": "facility"},
             )
         self.assertEqual(response.status_code, 302)
         with self.app.app_context():

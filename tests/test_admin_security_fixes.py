@@ -15,6 +15,15 @@ import database
 from blueprints import admin as admin_module
 from main import create_app
 
+# Charge sheets need the PI's "To" address before they can be sent.
+BILL_TO = {
+    "bill_to_name": "Prof. Test PI",
+    "bill_to_designation": "Professor",
+    "bill_to_department": "Molecular Biophysics Unit",
+    "bill_to_institute": "Indian Institute of Science",
+    "bill_to_city": "Bangalore 560012",
+}
+
 
 class AdminSecurityFixesTests(unittest.TestCase):
     def setUp(self):
@@ -184,14 +193,14 @@ class AdminSecurityFixesTests(unittest.TestCase):
         for payload in ("[1]", '["x"]', '[{"service_key": "imaging", "booking_id": "1; DROP"}]', "{}"):
             response = self.client.post(
                 "/admin/charge-sheet/combined",
-                data={"_csrf_token": token, "selected_slots": payload},
+                data={**BILL_TO, "_csrf_token": token, "selected_slots": payload},
             )
             self.assertEqual(response.status_code, 302, payload)
 
         with patch("blueprints.admin.send_email") as send:
             response = self.client.post(
                 "/admin/charge-sheet/combined",
-                data={"_csrf_token": token, "selected_slots": json.dumps([
+                data={**BILL_TO, "_csrf_token": token, "selected_slots": json.dumps([
                     {"service_key": "imaging", "booking_id": internal_id},
                     {"service_key": "imaging", "booking_id": external_id},
                 ])},
@@ -217,7 +226,7 @@ class AdminSecurityFixesTests(unittest.TestCase):
         ):
             self.client.post(
                 f"/admin/charge-sheet/imaging/{booking_id}",
-                data={"_csrf_token": token, "grid_source": "self_owned", "clip_base_source": "self_owned"},
+                data={**BILL_TO, "_csrf_token": token, "grid_source": "self_owned", "clip_base_source": "self_owned"},
             )
             send.assert_called_once()
         sent_row = make_pdf.call_args.args[0]
@@ -244,14 +253,14 @@ class AdminSecurityFixesTests(unittest.TestCase):
         ):
             self.client.post(
                 f"/admin/charge-sheet/imaging/{booking_id}",
-                data={"_csrf_token": token, "clip_base_source": "self_owned"},
+                data={**BILL_TO, "_csrf_token": token, "clip_base_source": "self_owned"},
             )
         stored = self._query(
             "SELECT clip_base_source, clip_base_charge, charge_sheet_sent_at FROM bookings WHERE id=?",
             [booking_id],
         )[0]
         self.assertEqual(stored["clip_base_source"], "facility")
-        self.assertEqual(Decimal(str(stored["clip_base_charge"])), Decimal("5000.00"))
+        self.assertEqual(Decimal(str(stored["clip_base_charge"])), Decimal("6000.00"))  # 2 own grids x 3,000
         self.assertIsNotNone(stored["charge_sheet_sent_at"])
 
     # ── Fix 2: archive sends the backup synchronously and keeps unpaid rows ─

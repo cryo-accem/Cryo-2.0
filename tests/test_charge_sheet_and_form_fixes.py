@@ -17,6 +17,15 @@ from inventory_service import facility_today
 from main import create_app
 from revenue import calculate_charge_sheet
 
+# Charge sheets need the PI's "To" address before they can be sent.
+BILL_TO = {
+    "bill_to_name": "Prof. Test PI",
+    "bill_to_designation": "Professor",
+    "bill_to_department": "Molecular Biophysics Unit",
+    "bill_to_institute": "Indian Institute of Science",
+    "bill_to_city": "Bangalore 560012",
+}
+
 
 def _next_weekday(days_ahead):
     day = facility_today() + datetime.timedelta(days=days_ahead)
@@ -418,7 +427,7 @@ class ChargeSheetSendingTests(_AppTestCase):
         ]
         with patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf, \
                 patch("blueprints.admin.send_email") as send:
-            response = self.client.post("/admin/charge-sheet/combined", data={
+            response = self.client.post("/admin/charge-sheet/combined", data={**BILL_TO,
                 "_csrf_token": self._admin_csrf(), "selected_slots": json.dumps(selections),
             })
         self.assertEqual(response.status_code, 302)
@@ -455,7 +464,7 @@ class ChargeSheetSendingTests(_AppTestCase):
                 patch("blueprints.admin.send_email") as send:
             response = self.client.post(
                 f"/admin/charge-sheet/screening/{booking_id}",
-                data={"_csrf_token": token}, follow_redirects=True,
+                data={**BILL_TO, "_csrf_token": token}, follow_redirects=True,
             )
         self.assertIn(b"already been sent", response.data)
         send.assert_not_called()
@@ -468,8 +477,8 @@ class ChargeSheetSendingTests(_AppTestCase):
         token = self._admin_csrf()
         with patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf, \
                 patch("blueprints.admin.send_email") as send:
-            self.client.post(f"/admin/charge-sheet/screening/{booking_id}", data={"_csrf_token": token})
-            self.client.post(f"/admin/charge-sheet/screening/{booking_id}", data={"_csrf_token": token})
+            self.client.post(f"/admin/charge-sheet/screening/{booking_id}", data={**BILL_TO, "_csrf_token": token})
+            self.client.post(f"/admin/charge-sheet/screening/{booking_id}", data={**BILL_TO, "_csrf_token": token})
         self.assertEqual(send.call_count, 2)
         first_id = make_pdf.call_args_list[0].args[0]["charge_sheet_id"]
         self.assertEqual(make_pdf.call_args_list[1].args[0]["charge_sheet_id"], first_id)
@@ -491,7 +500,7 @@ class ChargeSheetSendingTests(_AppTestCase):
         with self._race_next_id("bookings", dc), \
                 patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF"), \
                 patch("blueprints.admin.send_email") as send:
-            response = self.client.post("/admin/charge-sheet/combined", data={
+            response = self.client.post("/admin/charge-sheet/combined", data={**BILL_TO,
                 "_csrf_token": token, "selected_slots": json.dumps(selections),
             }, follow_redirects=True)
         self.assertIn(b"billed by another request", response.data)
@@ -600,7 +609,7 @@ class HistoryEditRecalculationTests(_AppTestCase):
         with patch("blueprints.admin.generate_charge_sheet", return_value=b"%PDF") as make_pdf, \
                 patch("blueprints.admin.send_email"):
             self.client.post(f"/admin/charge-sheet/screening/{booking_id}",
-                             data={"_csrf_token": self._admin_csrf()})
+                             data={**BILL_TO, "_csrf_token": self._admin_csrf()})
         sent_row = make_pdf.call_args.args[0]
         self.assertEqual(Decimal(str(sent_row["grand_total"])), total)
         self.assertEqual(

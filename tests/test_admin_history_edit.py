@@ -9,6 +9,15 @@ from unittest.mock import patch
 import database
 from main import create_app
 
+# Charge sheets need the PI's "To" address before they can be sent.
+BILL_TO = {
+    "bill_to_name": "Prof. Test PI",
+    "bill_to_designation": "Professor",
+    "bill_to_department": "Molecular Biophysics Unit",
+    "bill_to_institute": "Indian Institute of Science",
+    "bill_to_city": "Bangalore 560012",
+}
+
 
 class AdminHistoryEditTests(unittest.TestCase):
     def setUp(self):
@@ -304,7 +313,7 @@ class AdminHistoryEditTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/admin/charge-sheet/imaging/1",
-                data={
+                data={**BILL_TO,
                     "_csrf_token": self._csrf_token(),
                     "grid_source": "facility",
                     "grid_type": "normal_holey_carbon",
@@ -351,7 +360,7 @@ class AdminHistoryEditTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/admin/charge-sheet/combined",
-                data={
+                data={**BILL_TO,
                     "_csrf_token": self._csrf_token(),
                     "selected_slots": json.dumps([{"service_key": "imaging", "booking_id": 1}]),
                 },
@@ -398,7 +407,7 @@ class AdminHistoryEditTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/admin/charge-sheet/combined",
-                data={
+                data={**BILL_TO,
                     "_csrf_token": self._csrf_token(),
                     "selected_slots": json.dumps([
                         {"service_key": "imaging", "booking_id": first},
@@ -420,7 +429,7 @@ class AdminHistoryEditTests(unittest.TestCase):
         ):
             self.client.post(
                 "/admin/charge-sheet/combined",
-                data={
+                data={**BILL_TO,
                     "_csrf_token": self._csrf_token(),
                     "selected_slots": json.dumps([{"service_key": "imaging", "booking_id": booking}]),
                 },

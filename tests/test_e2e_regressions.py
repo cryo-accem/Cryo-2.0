@@ -9,6 +9,15 @@ import database
 from main import create_app
 from revenue import billed_origin
 
+# Charge sheets need the PI's "To" address before they can be sent.
+BILL_TO = {
+    "bill_to_name": "Prof. Test PI",
+    "bill_to_designation": "Professor",
+    "bill_to_department": "Molecular Biophysics Unit",
+    "bill_to_institute": "Indian Institute of Science",
+    "bill_to_city": "Bangalore 560012",
+}
+
 
 class BilledOriginTests(unittest.TestCase):
     def test_keeps_origin_when_category_matches_or_is_absent(self):
@@ -110,7 +119,7 @@ class WorkflowRegressionTests(unittest.TestCase):
         with patch("blueprints.admin.generate_charge_sheet", side_effect=RuntimeError("pdf")), \
                 patch("blueprints.admin.send_email") as send:
             response = self.client.post(
-                f"/admin/charge-sheet/imaging/{booking}", data={"_csrf_token": token}
+                f"/admin/charge-sheet/imaging/{booking}", data={**BILL_TO, "_csrf_token": token}
             )
         self.app.testing = True
         self.assertEqual(response.status_code, 500)

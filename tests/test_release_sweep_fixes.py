@@ -180,6 +180,46 @@ class SweepFixTests(unittest.TestCase):
         self.assertEqual(page.count('data-sheet="sent"'), 1)
         self.assertEqual(page.count('data-sheet="none"'), 1)
 
+    def test_unsent_bills_can_be_brought_to_current_rates_but_sent_ones_stay(self):
+        # Stored at the old rates: C-clip + base ring charged on top of 2
+        # facility grids (academic, screening, 1 slot) = 27,730 incl. GST.
+        conn = database.get_db()
+        ids = {}
+        for name, sent in (("Unsent Old", None), ("Sent Old", "2026-11-01 10:00:00")):
+            cur = conn.execute(
+                """INSERT INTO screening_bookings (user_name, pi_name, email, origin, sample_name,
+                   grids, status, completion_date, charge_sheet_sent_at, number_of_grids,
+                   actual_grids, actual_slots, grid_source, grid_type, clip_base_source,
+                   grid_breakdown, grid_charge, handling_charge, clip_base_charge, slot_charge,
+                   freezing_charge, clipping_charge, processing_charge, subtotal, gst_amount,
+                   grand_total, total_billed)
+                   VALUES (?, 'Some PI', 'x@example.com', 'External', 'S', 2, 'completed',
+                   '2026-11-01', ?, 2, 2, 1, 'facility', 'normal_holey_carbon', 'facility',
+                   '{"normal_holey_carbon": 2, "gold_carbon_graphene": 0}', 6000, 500, 5000,
+                   12000, 6000, 5000, 0, 23500, 4230, 27730, 27730)""",
+                (name, sent),
+            )
+            ids[name] = cur.lastrowid
+        conn.commit()
+        conn.close()
+        page = self.client.get("/admin/history").get_data(as_text=True)
+        # The sent row folds its charge sheet fields away under "Edit charge
+        # sheet details"; only the unsent row, which still needs the PI's
+        # address, opens them.
+        self.assertIn(">Edit charge sheet details<", page)
+        self.assertEqual(page.count('class="sheet-details" open'), 1)
+        self.assertIn("1 unsent bill still shows older rates.", page)
+        self.assertIn("−₹5,900.00 in total", page)
+        self.client.post("/admin/history/reprice-unsent", data={"_csrf_token": self._csrf()})
+        conn = database.get_db()
+        rows = {r["id"]: r for r in conn.execute(
+            "SELECT id, clip_base_charge, grand_total FROM screening_bookings").fetchall()}
+        conn.close()
+        self.assertEqual(float(rows[ids["Unsent Old"]]["clip_base_charge"]), 0)
+        self.assertEqual(float(rows[ids["Unsent Old"]]["grand_total"]), 21830)
+        self.assertEqual(float(rows[ids["Sent Old"]]["grand_total"]), 27730)
+        self.assertNotIn("older rates", self.client.get("/admin/history").get_data(as_text=True))
+
     def _csrf(self):
         page = self.client.get("/admin/maintenance").data
         return re.search(rb'name="_csrf_token"\s+value="([^"]+)"', page).group(1).decode()

@@ -117,3 +117,16 @@ document.querySelectorAll('[data-history-filters]').forEach((form) => {
     form.querySelectorAll('[name]').forEach((field) => { field.disabled = false; });
   });
 });
+
+// Billing: the charge sheet's grid and address fields sit in a closed
+// dropdown. If sending finds one of them missing, open it so the browser can
+// point at the field instead of failing silently.
+document.querySelectorAll('[data-sheet-details]').forEach((details) => {
+  const form = details.closest('form');
+  form?.addEventListener('invalid', () => {
+    details.open = true;
+    details.querySelectorAll('details').forEach((inner) => {
+      if (inner.querySelector(':invalid')) inner.open = true;
+    });
+  }, true);
+});

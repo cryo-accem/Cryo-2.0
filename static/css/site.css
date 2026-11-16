@@ -223,6 +223,8 @@ a { color: inherit; }
   .attention-panel { grid-template-columns: 1fr; }
   .attention-panel__items { grid-template-columns: 1fr; }
   .table-tools { align-items: stretch; flex-direction: column; }
+  /* Stacked: a width basis would otherwise become the item's height. */
+  .combined-charge-toolbar > .combined-user-filter, .combined-charge-toolbar > .combined-selection-status { flex-basis: auto; max-width: none; }
   .table-tools select { width: 100%; }
   .team-card { align-items: flex-start; }
   .team-details { padding-top: 3px; }
@@ -709,10 +711,12 @@ a { color: inherit; }
 .table-search input:focus, .table-tools select:focus { outline: 0; border-color: #62b8d0; box-shadow: 0 0 0 3px rgba(72, 200, 232, .14); }
 .table-tools select { width: 170px; color: #526b7d; }
 .combined-charge-panel { margin-bottom: 24px; }
-.combined-charge-toolbar { gap: 14px; padding: 0; }
-.combined-user-filter { flex: 0 1 260px; }
+/* Wraps instead of squeezing: below ~700px of panel width the help text
+   moves onto its own line rather than shrinking to a one-word column. */
+.combined-charge-toolbar { flex-wrap: wrap; gap: 10px 14px; padding: 0; }
+.combined-user-filter { flex: 1 1 220px; max-width: 320px; }
 .combined-user-filter select { width: 100%; padding-left: 35px; }
-.combined-selection-status { flex: 1; min-width: 0; color: #61798a; font-size: 11px; line-height: 1.4; }
+.combined-selection-status { flex: 1 1 260px; min-width: 0; color: #61798a; font-size: 11px; line-height: 1.4; }
 .combined-charge-toolbar .button { flex: 0 0 auto; white-space: nowrap; }
 .history-filter-bar { margin-bottom: 18px; padding: 12px; border: 1px solid #dce8ee; border-radius: 10px; background: #f8fbfd; }
 .history-filter-bar .table-search { min-width: 180px; }
@@ -875,7 +879,6 @@ a { color: inherit; }
 @media (max-width: 700px) {
   .history-summary { grid-template-columns: 1fr; }
   .combined-charge-toolbar { align-items: stretch; }
-  .combined-user-filter { flex-basis: auto; }
   .combined-selection-status { text-align: center; }
   .combined-charge-toolbar .button { width: 100%; }
   .history-panel { padding: 16px 12px; }
@@ -1025,6 +1028,8 @@ a { color: inherit; }
 .data-table .stacked-form input,
 .data-table .stacked-form textarea {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box; /* padding stays inside the box, so fields fit their panel */
   min-height: 34px;
   padding: 8px 10px;
   border: 1px solid #d5e0e8;
@@ -1057,10 +1062,16 @@ a { color: inherit; }
 .history-edit .stacked-form { max-height: 420px; overflow-y: auto; padding-right: 3px; }
 .history-edit .stacked-form label { display: grid; gap: 4px; color: #5c7280; font-size: 9px; font-weight: 700; }
 /* Charge-sheet "To" (PI billing address) fields */
+.sheet-details { min-width: 190px; }
+.sheet-details summary { width: fit-content; color: #167da5; font-size: 10px; font-weight: 800; cursor: pointer; }
+.sheet-details[open] { padding: 10px; border: 1px solid #dce8ee; border-radius: 10px; background: #f8fbfd; }
+.sheet-details[open] { min-width: 230px; box-sizing: border-box; }
+.sheet-details__body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+.sheet-details .bill-to { min-width: 0; }
 .bill-to { min-width: 200px; border: 1px solid #dce8ee; border-radius: 10px; background: #f8fbfd; padding: 6px 10px; }
 .bill-to summary { color: #167da5; font-size: 10px; font-weight: 800; cursor: pointer; }
 .bill-to[open] { display: grid; gap: 6px; padding-bottom: 10px; }
-.bill-to__needed { margin-left: 4px; padding: 1px 6px; border-radius: 999px; background: #fff1d6; color: #8a5300; font-size: 9px; }
+.bill-to__needed { display: inline-block; margin-left: 4px; padding: 1px 6px; white-space: nowrap; line-height: 1.5; border-radius: 999px; background: #fff1d6; color: #8a5300; font-size: 9px; }
 .bill-to__hint { margin: 0; color: #5c7280; font-size: 9px; line-height: 1.4; }
 .bill-to label { display: grid; gap: 3px; color: #5c7280; font-size: 9px; font-weight: 700; }
 .bill-to input { width: 100%; min-width: 0; }
@@ -1070,8 +1081,8 @@ a { color: inherit; }
 .history-edit .stacked-form .history-edit__check { display: flex; align-items: center; gap: 7px; }
 .history-edit .stacked-form .history-edit__check input { width: auto; min-height: 0; }
 .csic-booking-toggle { margin: 0 0 8px; }
-.csic-toggle { display: inline-flex; align-items: center; gap: 8px; color: #506879; font-size: 10px; font-weight: 700; cursor: pointer; }
-.csic-toggle input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+.csic-toggle { position: relative; display: inline-flex; align-items: center; gap: 8px; color: #506879; font-size: 10px; font-weight: 700; cursor: pointer; }
+.csic-toggle input { position: absolute; top: 0; left: 0; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
 .csic-toggle__track { position: relative; width: 36px; height: 20px; flex: 0 0 auto; border-radius: 999px; background: #b7c6cd; transition: background .18s ease; }
 .csic-toggle__track::after { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: #fff; content: ""; transition: transform .18s ease; }
 .csic-toggle input:checked + .csic-toggle__track { background: #167da5; }
@@ -3824,3 +3835,8 @@ a.inventory-breakdown--link:focus-visible { outline: 3px solid #2f6f9f; outline-
   .history-filter-bar .table-search, .history-filter-bar select, .history-filter-bar .button { flex: 0 0 auto; width: 100%; max-width: none; box-sizing: border-box; text-align: center; }
   .history-filter-bar .table-search input { width: 100%; }
 }
+.rate-update { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; padding: 14px 18px; border: 1px solid #f0d58f; border-left: 4px solid #d9a521; border-radius: 12px; background: #fffaf0; color: #5b4514; }
+.rate-update > i { color: #b7861a; font-size: 18px; }
+.rate-update p { flex: 1; margin: 0; font-size: 13px; line-height: 1.5; }
+.rate-update form { margin: 0; flex: 0 0 auto; }
+@media (max-width: 640px) { .rate-update { flex-direction: column; align-items: stretch; } .rate-update > i { display: none; } }
