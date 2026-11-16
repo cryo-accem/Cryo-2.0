@@ -333,7 +333,7 @@ class FindCandidatesTests(NoNetworkMixin, unittest.TestCase):
 
     def test_search_tags_drive_the_queries(self):
         queries = {q["id"]: q for q in pf.build_queries()}
-        self.assertEqual(set(pf.SEARCH_TAGS), {"A", "B", "C"})  # C = DBT-BUILDER grant code
+        self.assertEqual(set(pf.SEARCH_TAGS), {"A", "B", "C", "D"})  # C = DBT-BUILDER, D = DST-FIST + cryo-EM
         ack_a = queries["A:acknowledgement"]["query"]
         self.assertIn('ACK_FUND:("cryo-EM facility" OR "cryo-electron microscopy facility"', ack_a)
         self.assertIn('ACK_FUND:(IISc OR "Indian Institute of Science")', ack_a)
@@ -625,8 +625,20 @@ class GrantCodeSearchTests(unittest.TestCase):
         self.assertTrue(all(q["confidence"] == "high" for q in queries))
         ack = next(q for q in queries if q["field"] == "acknowledgement")
         self.assertEqual(ack["query"], "ACK_FUND:(SP22844)")
-        # The MBU-wide DST-FIST grant is deliberately not a search term.
-        self.assertFalse(any("LSII" in q["query"] for q in pf.build_queries()))
+        # The MBU-wide DST-FIST grant is never searched on its own.
+        self.assertFalse(any("LSII" in q["query"] for q in queries))
+
+    def test_dst_fist_grant_is_searched_only_with_cryo_em_at_medium_confidence(self):
+        import publication_finder as pf
+        queries = [q for q in pf.build_queries() if q["tag"] == "D"]
+        self.assertEqual(len(queries), 1)  # grant records only: no text/PubMed/Crossref queries
+        query = queries[0]
+        self.assertEqual((query["source"], query["field"], query["confidence"]), ("Europe PMC", "grant", "medium"))
+        self.assertTrue(query["query"].startswith('GRANT_ID:"SR/FST/LSII-039/2015" AND ('))
+        self.assertIn('TITLE_ABS:"cryo-EM"', query["query"])
+        self.assertIn('KW:"cryo-electron microscopy"', query["query"])
+        summary = {t["tag"]: t for t in pf.search_terms_summary()}
+        self.assertIn("cryo-EM", summary["D"]["topic"])
 
 
 

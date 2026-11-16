@@ -81,15 +81,32 @@ SEARCH_TAGS = {
     },
     # The facility's official acknowledgement cites this DBT-BUILDER grant.
     # The code is unique to ACCEM, so no institution or city words are needed
-    # and every match is "high" confidence. (The DST-FIST grant
-    # SR/FST/LSII-039/2015 is not searched: it funds the whole Molecular
-    # Biophysics Unit, not only the facility.)
+    # and every match is "high" confidence.
     "C": {
         "label": "DBT-BUILDER Program (BT/INF/22/SP22844/2017)",
         "phrases": ("SP22844",),
         # Grant-metadata fields (Europe PMC GRANT_ID, Crossref award.number)
         # only match the complete award number, not the short code.
         "grant_ids": ("BT/INF/22/SP22844/2017",),
+        "institution": (),
+        "city": (),
+    },
+    # The DST-FIST grant funds the whole Molecular Biophysics Unit, so on its
+    # own it does not mean the facility was used. Combined with cryo-EM in the
+    # title, abstract or keywords it does catch paywalled facility papers whose
+    # only facility-related metadata is this grant (e.g. PMID 42575362, which
+    # thanks ACCEM only in its non-open-access acknowledgement). Grant records
+    # only, "medium" confidence: an admin confirms each one.
+    "D": {
+        "label": "DST-FIST grant (SR/FST/LSII-039/2015) + cryo-EM",
+        "phrases": (),
+        "grant_ids": ("SR/FST/LSII-039/2015",),
+        "topic": (
+            "cryo-EM",
+            "cryoEM",
+            "cryo-electron microscopy",
+            "cryo electron microscopy",
+        ),
         "institution": (),
         "city": (),
     },
@@ -283,6 +300,18 @@ def build_queries(tags=None):
     field_codes = {"acknowledgement": "ACK_FUND", "fulltext": None, "affiliation": "AFF"}
     queries = []
     for tag, spec in tags.items():
+        if spec.get("topic"):
+            # Grant + topic tag: only the grant records, narrowed by topic words.
+            topic = " OR ".join(
+                f"{code}:{_quote(term)}" for term in spec["topic"] for code in ("TITLE_ABS", "KW")
+            )
+            for grant_id in spec["grant_ids"]:
+                queries.append({
+                    "id": f"{tag}:grant:europepmc",
+                    "tag": tag, "field": "grant", "source": "Europe PMC",
+                    "query": f'GRANT_ID:"{grant_id}" AND ({topic})', "confidence": "medium",
+                })
+            continue
         for field, code in field_codes.items():
             if not spec["institution"] and field == "affiliation":
                 continue  # a grant code never appears in author affiliations
@@ -355,6 +384,7 @@ def search_terms_summary(tags=None):
             "institution": list(spec["institution"]),
             "city": list(spec.get("city") or ()),
             "grant_ids": list(spec.get("grant_ids") or ()),
+            "topic": list(spec.get("topic") or ()),
         })
     return summary
 

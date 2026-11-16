@@ -10,6 +10,11 @@ year. "html" is trusted markup (only <em>) rendered with |safe.
 
 CURATED_PUBLICATIONS = (
     {
+        "year": 2026,
+        "html": "Polepalli S, Roy A, Mondal B, Singh A, Dutta S. (2026). Molecular insights into inhibitor action on the catalytic activity of Mycobacterium tuberculosis cystathionine β-synthase enzyme. <em>Int J Biol Macromol</em>, 381(Pt 1), 154013.",
+        "doi": "https://doi.org/10.1016/j.ijbiomac.2026.154013",
+    },
+    {
         "year": 2025,
         "html": "Chatterjee, A., Roy, A., Satheesh, T. et al. Structural insights into pre-pore intermediates of alpha-hemolysin in the lipidic environment. <em>Nat Commun</em> 16, 6348 (2025).",
         "doi": "https://doi.org/10.1038/s41467-025-61741-x",
