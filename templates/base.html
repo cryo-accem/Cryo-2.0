@@ -88,19 +88,37 @@
   {% if request.path.startswith('/admin') and request.path != '/admin/' %}
   <aside class="admin-sidebar" aria-label="Admin navigation">
     <div class="admin-sidebar__identity"><i class="fa-solid fa-shield-halved" aria-hidden="true"></i><div><strong>ACCEM Admin</strong><small>Facility operations</small></div></div>
-    <div class="admin-sidebar__label">Overview</div>
+    {# Sidebar groups: (label, [(endpoint, path prefix, icon, text)]). An item is
+       current when the request path starts with its prefix ("/admin/panel" exact). #}
+    {% set admin_nav = [
+      ('Overview', [
+        ('admin.panel', '/admin/panel', 'fa-table-cells-large', 'Dashboard'),
+      ]),
+      ('Operations', [
+        ('admin.datacollecting', '/admin/datacollecting', 'fa-database', 'Data collecting'),
+        ('admin.screening_admin', '/admin/screening', 'fa-microscope', 'Screening'),
+        ('admin.freezing_admin', '/admin/freezing', 'fa-snowflake', 'Freezing'),
+        ('inventory.dashboard', '/admin/inventory', 'fa-boxes-stacked', 'Grid inventory'),
+      ]),
+      ('Billing', [
+        ('admin.history', '/admin/history', 'fa-file-invoice-dollar', 'Billing & payments'),
+        ('admin.proforma_estimate', '/admin/proforma', 'fa-calculator', 'Proforma estimate'),
+      ]),
+      ('Website', [
+        ('admin.maintenance', '/admin/maintenance', 'fa-screwdriver-wrench', 'Maintenance'),
+        ('admin.publication_finder', '/admin/publications', 'fa-book-open', 'Publication finder'),
+      ]),
+    ] %}
     <nav>
-      <a class="{% if request.path == '/admin/panel' %}active{% endif %}" href="{{ url_for('admin.panel') }}"><i class="fa-solid fa-table-cells-large" aria-hidden="true"></i><span>Dashboard</span></a>
-      <div class="admin-sidebar__label">Operations</div>
-      <a class="{% if request.path.startswith('/admin/datacollecting') %}active{% endif %}" href="{{ url_for('admin.datacollecting') }}"><i class="fa-solid fa-database" aria-hidden="true"></i><span>Data collecting</span></a>
-      <a class="{% if request.path.startswith('/admin/screening') %}active{% endif %}" href="{{ url_for('admin.screening_admin') }}"><i class="fa-solid fa-microscope" aria-hidden="true"></i><span>Screening</span></a>
-      <a class="{% if request.path.startswith('/admin/freezing') %}active{% endif %}" href="{{ url_for('admin.freezing_admin') }}"><i class="fa-solid fa-snowflake" aria-hidden="true"></i><span>Freezing</span></a>
-      <a class="{% if request.path.startswith('/admin/inventory') %}active{% endif %}" href="{{ url_for('inventory.dashboard') }}"><i class="fa-solid fa-boxes-stacked" aria-hidden="true"></i><span>Grid Inventory</span></a>
-      <a class="{% if request.path.startswith('/admin/history') %}active{% endif %}" href="{{ url_for('admin.history') }}"><i class="fa-solid fa-file-invoice-dollar" aria-hidden="true"></i><span>Billing &amp; Payments</span></a>
-      <a class="{% if request.path.startswith('/admin/proforma') %}active{% endif %}" href="{{ url_for('admin.proforma_estimate') }}"><i class="fa-solid fa-calculator" aria-hidden="true"></i><span>Proforma estimate</span></a>
-      <div class="admin-sidebar__label">Website</div>
-      <a class="{% if request.path.startswith('/admin/maintenance') %}active{% endif %}" href="{{ url_for('admin.maintenance') }}"><i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i><span>Maintenance</span></a>
-      <a class="{% if request.path.startswith('/admin/publications') %}active{% endif %}" href="{{ url_for('admin.publication_finder') }}"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Publication finder</span></a>
+      {% for group_label, items in admin_nav %}
+      <div class="admin-sidebar__group" role="group" aria-labelledby="admin-nav-{{ loop.index }}">
+        <div class="admin-sidebar__label" id="admin-nav-{{ loop.index }}">{{ group_label }}</div>
+        {% for endpoint, prefix, icon, text in items %}
+        {% set is_current = request.path == prefix if prefix == '/admin/panel' else request.path.startswith(prefix) %}
+        <a{% if is_current %} class="active" aria-current="page"{% endif %} href="{{ url_for(endpoint) }}"><i class="fa-solid {{ icon }}" aria-hidden="true"></i><span>{{ text }}</span></a>
+        {% endfor %}
+      </div>
+      {% endfor %}
     </nav>
     <a class="admin-sidebar__logout" href="{{ url_for('admin.logout') }}"><i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i><span>Logout</span></a>
   </aside>

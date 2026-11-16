@@ -2,7 +2,7 @@
 {% block title %}ACCEM | Freezing management{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Freezing management</h1><p>Enter the grids actually frozen before charging and completing a booking.</p></div></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Operations</div><h1>Freezing management</h1><p>Enter the grids actually frozen before charging and completing a booking.</p></div></header>
   <div class="data-stack">
     <div class="table-tools" data-admin-filter><label class="table-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i><input type="search" data-table-search placeholder="Search user, PI or sample"></label><select data-origin-filter aria-label="Filter by origin"><option value="">All origins</option><option value="Internal">Internal / Academic</option><option value="External">External</option><option value="Industry">Industrial</option></select></div>
     <section class="data-panel" id="active-freezing-slots" tabindex="-1"><h2>Active freezing slots <span class="status-badge status-badge--confirmed">Confirmed</span></h2>
@@ -68,7 +68,9 @@
     <section class="data-panel" id="completed-freezing-slots" tabindex="-1"><h2>Completed freezing slots <span class="status-badge status-badge--completed">Completed</span></h2>
       {% if completed_slots %}<div class="table-wrap"><table class="data-table"><thead><tr><th>#</th><th>User Name</th><th>PI Name</th><th>Origin</th><th>Sample</th><th>Requested Grids</th><th>Actual Grids</th><th>Freezing Date</th><th>Completed At</th></tr></thead><tbody>
       {% for slot in completed_slots %}<tr data-origin="{{ slot.origin }}"><td>{{ loop.index }}</td><td>{{ slot.user_name }}</td><td>{{ slot.pi_name }}</td><td>{{ slot.origin }}</td><td>{{ slot.sample_name }}</td><td>{{ slot.grids }}</td><td>{{ slot.actual_grids if slot.actual_grids is not none else '—' }}</td><td>{{ slot.freezing_date }}</td><td>{{ slot.completed_at[:10] if slot.completed_at and slot.completed_at is string else slot.completed_at.strftime('%Y-%m-%d') if slot.completed_at else '' }}</td></tr>{% endfor %}
-      </tbody></table></div>{% else %}<div class="empty-message">No completed freezing slots.</div>{% endif %}
+      </tbody></table></div>
+      {% if completed_total > completed_slots|length %}<p class="table-more">Showing the {{ completed_slots|length }} most recent of {{ completed_total }} completed freezing slots. <a href="{{ url_for('admin.history', service='freezing') }}">Search all completed freezing slots in Billing &amp; payments →</a></p>{% endif %}
+      {% else %}<div class="empty-message">No completed freezing slots.</div>{% endif %}
     </section>
   </div>
   <div class="page-actions"><a href="{{ url_for('admin.panel') }}" class="button secondary">← Back to dashboard</a></div>

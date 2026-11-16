@@ -36,8 +36,8 @@ head = """/*!
  * Subset for ACCEM: only the icons used by this site. Regenerate when adding an icon
  * (codepoints from the official css/all.css, glyphs subset with fontTools).
  */
-@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("fa-solid-900.subset.woff2?v=6.5.0-s1") format("woff2")}
-@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("fa-regular-400.subset.woff2?v=6.5.0-s1") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:900;font-display:block;src:url("fa-solid-900.subset.woff2?v=6.5.0-s2") format("woff2")}
+@font-face{font-family:"Font Awesome 6 Free";font-style:normal;font-weight:400;font-display:block;src:url("fa-regular-400.subset.woff2?v=6.5.0-s2") format("woff2")}
 .fa,.fa-classic,.fas,.fa-solid,.far,.fa-regular{-moz-osx-font-smoothing:grayscale;-webkit-font-smoothing:antialiased;display:var(--fa-display,inline-block);font-style:normal;font-variant:normal;line-height:1;text-rendering:auto;font-family:"Font Awesome 6 Free"}
 .fa,.fas,.fa-solid{font-weight:900}
 .far,.fa-regular{font-weight:400}

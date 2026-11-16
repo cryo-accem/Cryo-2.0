@@ -170,9 +170,15 @@ class SweepFixTests(unittest.TestCase):
         self.assertIn('href="/admin/history?sheet=unsent"', panel)
         page = self.client.get("/admin/history?sheet=unsent").get_data(as_text=True)
         self.assertIn("data-sheet-filter", page)
+        # The filter runs on the server, so only bookings still waiting for a
+        # charge sheet are rendered.
+        self.assertEqual(page.count('data-sheet="unsent"'), 2)
+        self.assertEqual(page.count('data-sheet="sent"'), 0)
+        self.assertEqual(page.count('data-sheet="none"'), 0)  # non-billable PI
+        page = self.client.get("/admin/history").get_data(as_text=True)
         self.assertEqual(page.count('data-sheet="unsent"'), 2)
         self.assertEqual(page.count('data-sheet="sent"'), 1)
-        self.assertEqual(page.count('data-sheet="none"'), 1)  # non-billable PI
+        self.assertEqual(page.count('data-sheet="none"'), 1)
 
     def _csrf(self):
         page = self.client.get("/admin/maintenance").data

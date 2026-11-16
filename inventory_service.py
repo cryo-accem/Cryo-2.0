@@ -1083,7 +1083,12 @@ def link_selected_grids_to_booking(
     return len(codes)
 
 
-def booking_grid_links_for_bookings(service_type, booking_ids):
+def booking_grid_links_for_bookings(service_type, booking_ids, cursor=None):
+    """{booking id: [linked grid rows]} for the given bookings.
+
+    Pass an open ``cursor`` to reuse the caller's connection; otherwise a
+    connection is opened and closed here.
+    """
     link_targets = {
         "screening": ("screening_booking_grids", "screening_booking_id"),
         "data_collection": ("data_collection_booking_grids", "booking_id"),
@@ -1095,8 +1100,10 @@ def booking_grid_links_for_bookings(service_type, booking_ids):
         return {}
     link_table, booking_column = link_targets[service_type]
     placeholders = ", ".join("?" for _ in ids)
-    connection = get_db()
-    cursor = connection.cursor()
+    connection = None
+    if cursor is None:
+        connection = get_db()
+        cursor = connection.cursor()
     try:
         cursor.execute(
             f"""SELECT l.{booking_column} AS booking_id, g.grid_code, g.current_status,
@@ -1124,8 +1131,9 @@ def booking_grid_links_for_bookings(service_type, booking_ids):
             linked.setdefault(row["booking_id"], []).append(row)
         return linked
     finally:
-        cursor.close()
-        connection.close()
+        if connection is not None:
+            cursor.close()
+            connection.close()
 
 
 def grid_booking_links(grid_code):
@@ -2014,9 +2022,12 @@ def complete_session_grid(session_id, grid_code, outcome, destination, actor_id,
         connection.close()
 
 
-def list_grid_types():
-    connection = get_db()
-    cursor = connection.cursor()
+def list_grid_types(cursor=None):
+    """Active grid types; pass an open ``cursor`` to reuse the caller's connection."""
+    connection = None
+    if cursor is None:
+        connection = get_db()
+        cursor = connection.cursor()
     try:
         cursor.execute(
             "SELECT grid_type_id, grid_type_name FROM grid_types "
@@ -2024,8 +2035,9 @@ def list_grid_types():
         )
         return cursor.fetchall()
     finally:
-        cursor.close()
-        connection.close()
+        if connection is not None:
+            cursor.close()
+            connection.close()
 
 
 def all_grid_types():
@@ -2387,9 +2399,11 @@ def grid_status_counts():
     return counts
 
 
-def dashboard_data():
-    connection = get_db()
-    cursor = connection.cursor()
+def dashboard_data(cursor=None):
+    connection = None
+    if cursor is None:
+        connection = get_db()
+        cursor = connection.cursor()
     try:
         cursor.execute(
             """SELECT COUNT(*) AS total,
@@ -2427,13 +2441,16 @@ def dashboard_data():
         recent = with_grid_labels(cursor.fetchall())
         return counts, by_type, by_status, recent
     finally:
-        cursor.close()
-        connection.close()
+        if connection is not None:
+            cursor.close()
+            connection.close()
 
 
-def dashboard_storage():
-    connection = get_db()
-    cursor = connection.cursor()
+def dashboard_storage(cursor=None):
+    connection = None
+    if cursor is None:
+        connection = get_db()
+        cursor = connection.cursor()
     try:
         cursor.execute(
             """SELECT g.grid_code, g.current_status, g.clipped,
@@ -2477,8 +2494,9 @@ def dashboard_storage():
         stored.sort(key=_storage_position_sort_key)
         return with_grid_labels(stored), with_grid_labels(not_stored)
     finally:
-        cursor.close()
-        connection.close()
+        if connection is not None:
+            cursor.close()
+            connection.close()
 
 
 PUBLIC_LOOKUP_MIN_LENGTH = 2

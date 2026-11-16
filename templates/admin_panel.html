@@ -3,7 +3,7 @@
 {% block content %}
 <script src="{{ url_for('static', filename='js/grid-picker.js') }}"></script>
 <main class="portal-page"><section class="page-content">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Administration</div><h1>Welcome back{% if admin_name %}, {{ admin_name }}{% endif %}</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Dashboard</div><h1>Welcome back{% if admin_name %}, {{ admin_name }}{% endif %}</h1><p>Manage registrations and monitor facility activity.</p></div><a class="button small secondary" href="#create-slot">Create a slot</a></header>
   {% if attention %}
   <section class="dash-attention" aria-labelledby="dash-attention-title">
     <div class="dash-attention__heading">
@@ -27,7 +27,7 @@
   <section class="revenue-dashboard dash-pending" aria-labelledby="pending-payments-title">
     <div class="revenue-heading">
       <div><span class="chart-kicker">Accounts follow-up</span><h2 id="pending-payments-title" tabindex="-1">Bills awaiting receipt</h2><p>Sent bills not yet marked received in History. Internal debit-head bills are listed separately.</p></div>
-      <a class="button small secondary" href="{{ url_for('admin.history') }}">Review in History</a>
+      <a class="button small secondary" href="{{ url_for('admin.history', receipt='awaiting') }}">Review in Billing</a>
     </div>
     <div class="revenue-cards">
       <div class="revenue-card"><span>Bills awaiting payment</span><strong>{{ pending_payments.payment_count }} bills</strong></div>
@@ -40,7 +40,7 @@
         <caption class="dash-sr-only">Sent bills awaiting payment or debit-head confirmation, newest first</caption>
         <thead><tr><th scope="col">Service</th><th scope="col">User / PI</th><th scope="col">Origin</th><th scope="col">Completed</th><th scope="col">Bill</th><th scope="col">Status</th><th scope="col">Bill total</th><th scope="col">Reminder</th></tr></thead>
         <tbody>
-          {% for item in pending_payments.rows %}
+          {% for item in pending_rows_shown %}
           <tr>
             <td data-label="Service">{{ item.service_label }}</td>
             <td data-label="User / PI"><div><strong>{{ item.user_name }}</strong><small>PI: {{ item.pi_name }}</small></div></td>
@@ -55,6 +55,7 @@
         </tbody>
       </table>
     </div>
+    {% if pending_payments.rows|length > pending_rows_shown|length %}<p class="table-more">Showing the {{ pending_rows_shown|length }} newest of {{ pending_payments.rows|length }} bills awaiting receipt. <a href="{{ url_for('admin.panel', pending='all') }}#pending-payments-title">Show all {{ pending_payments.rows|length }}</a></p>{% endif %}
     {% else %}
     <p class="empty-message">No sent bills are currently awaiting receipt.</p>
     {% endif %}

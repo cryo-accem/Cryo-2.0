@@ -22,7 +22,7 @@ from hmac import compare_digest
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from flask import (
     Blueprint, current_app, render_template, request, send_file, Response, jsonify,
-    redirect, url_for, session, flash,
+    redirect, url_for, session, flash, g,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -167,6 +167,11 @@ _ALLOWED_ADMIN_ENDPOINTS = {
 
 @admin_bp.before_app_request
 def check_admin_session():
+    # Static files are public and fingerprinted; checking the admin session
+    # for each one cost a database connection per asset. Any stale session is
+    # still cleared by the next page request.
+    if request.endpoint == "static":
+        return None
     if "admin_logged_in" in session and request.endpoint:
         expects_json = (
             request.is_json
@@ -179,12 +184,15 @@ def check_admin_session():
             conn = get_db()
             cur = conn.cursor()
             cur.execute(
-                "SELECT must_change_password FROM users WHERE id=? AND role=?",
+                "SELECT username, must_change_password FROM users WHERE id=? AND role=?",
                 [session["admin_user_id"], "admin"],
             )
             user = cur.fetchone()
             cur.close()
             conn.close()
+            if user:
+                # Saves the dashboard greeting a second lookup this request.
+                g.admin_username = user["username"]
         if not user:
             for key in ("admin_logged_in", "admin_user_id", "must_change_password"):
                 session.pop(key, None)
@@ -670,6 +678,10 @@ def _dashboard_attention(cur, today, pending_payments):
     }
 
 
+# Bills awaiting receipt listed on the dashboard before "Show all".
+DASHBOARD_PENDING_PREVIEW = 15
+
+
 @admin_bp.route("/panel")
 def panel():
     if not session.get("admin_logged_in"):
@@ -727,6 +739,13 @@ def panel():
         waiting_chart=waiting_chart,
         waiting_total=waiting_total,
         pending_payments=pending_payments,
+        # The unpaid list grows with every unpaid bill; show the newest few
+        # unless the admin asks for all of them.
+        pending_rows_shown=(
+            pending_payments["rows"]
+            if request.args.get("pending") == "all"
+            else pending_payments["rows"][:DASHBOARD_PENDING_PREVIEW]
+        ),
         revenue=revenue,
         attention=attention,
         admin_name=_signed_in_admin_name(),
@@ -742,15 +761,18 @@ def _signed_in_admin_name():
     user_id = session.get("admin_user_id")
     if user_id is None:
         return ""
-    conn = get_db()
-    cur = conn.cursor()
-    try:
-        cur.execute("SELECT username FROM users WHERE id=?", [user_id])
-        row = cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
-    name = str(row["username"] or "").strip() if row else ""
+    username = g.get("admin_username")
+    if username is None:
+        conn = get_db()
+        cur = conn.cursor()
+        try:
+            cur.execute("SELECT username FROM users WHERE id=?", [user_id])
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+        username = row["username"] if row else ""
+    name = str(username or "").strip()
     return name[:1].upper() + name[1:] if name else ""
 
 
@@ -3397,6 +3419,11 @@ def datacollecting():
     waiting = cur.fetchall()
     cur.execute("SELECT * FROM bookings WHERE status='ongoing'")
     ongoing = cur.fetchall()
+    # Reuse this connection for the inventory lookups (one connection per page).
+    grid_types = [dict(row) for row in list_grid_types(cur)]
+    linked_grids = booking_grid_links_for_bookings(
+        "data_collection", [registration["id"] for registration in ongoing], cur
+    )
     cur.close()
     conn.close()
 
@@ -3404,10 +3431,8 @@ def datacollecting():
         "admin_datacollecting.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
-        inventory_grid_types=[dict(row) for row in list_grid_types()],
-        linked_grids=booking_grid_links_for_bookings(
-            "data_collection", [registration["id"] for registration in ongoing]
-        ),
+        inventory_grid_types=grid_types,
+        linked_grids=linked_grids,
     )
 
 
@@ -3631,6 +3656,10 @@ def delete_dc(booking_id):
 
 # ── Freezing Section ─────────────────────────────────────────────────────────
 
+# Completed freezing rows shown on the freezing schedule page.
+FREEZING_COMPLETED_PREVIEW = 50
+
+
 @admin_bp.route("/freezing")
 def freezing_admin():
     if not session.get("admin_logged_in"):
@@ -3642,8 +3671,16 @@ def freezing_admin():
 
     cur.execute("SELECT * FROM freezing_bookings WHERE status='active'")
     active = cur.fetchall()
-    cur.execute("SELECT * FROM completed_freezing ORDER BY completed_at DESC")
+    # Only the most recent completions are listed here; the full, searchable
+    # list is on the Billing & payments page (freezing tab).
+    cur.execute("SELECT COUNT(*) AS count FROM completed_freezing")
+    completed_total = cur.fetchone()["count"]
+    cur.execute(
+        "SELECT * FROM completed_freezing ORDER BY completed_at DESC LIMIT ?",
+        [FREEZING_COMPLETED_PREVIEW],
+    )
     completed = cur.fetchall()
+    grid_types = list_grid_types(cur)
 
     conn.commit()
     cur.close()
@@ -3653,7 +3690,8 @@ def freezing_admin():
         "admin_freezing.html",
         active_slots=active,
         completed_slots=completed,
-        inventory_grid_types=list_grid_types(),
+        completed_total=completed_total,
+        inventory_grid_types=grid_types,
     )
 
 
@@ -3791,6 +3829,11 @@ def screening_admin():
     waiting = cur.fetchall()
     cur.execute("SELECT * FROM screening_bookings WHERE status='ongoing'")
     ongoing = cur.fetchall()
+    # Reuse this connection for the inventory lookups (one connection per page).
+    grid_types = [dict(row) for row in list_grid_types(cur)]
+    linked_grids = booking_grid_links_for_bookings(
+        "screening", [registration["id"] for registration in ongoing], cur
+    )
     cur.close()
     conn.close()
 
@@ -3798,10 +3841,8 @@ def screening_admin():
         "admin_screening.html",
         waiting_registrations=waiting,
         ongoing_registrations=ongoing,
-        inventory_grid_types=[dict(row) for row in list_grid_types()],
-        linked_grids=booking_grid_links_for_bookings(
-            "screening", [registration["id"] for registration in ongoing]
-        ),
+        inventory_grid_types=grid_types,
+        linked_grids=linked_grids,
     )
 
 
@@ -5534,11 +5575,78 @@ def download_payment_proof(service_key, booking_id):
         return redirect(url_for("admin.history"))
     return send_file(proof_path, as_attachment=True, download_name=secure_filename(row["payment_proof_original_name"] or "payment-proof"))
 
+# Billing & payments page: rows per service table. "All services" shows the
+# most recent rows of each service; a single service tab is paged.
+HISTORY_OVERVIEW_ROWS = 25
+HISTORY_PAGE_SIZE = 50
+_HISTORY_SERVICES = ("imaging", "freezing", "screening")
+_HISTORY_ORIGINS = {"Internal", "External", "Industry"}
+
+
+def _history_sheet_state(row):
+    if not is_billable_booking(row):
+        return "none"
+    return "sent" if row.get("charge_sheet_sent_at") else "unsent"
+
+
+def _history_search_text(row, service_key):
+    """Text the Billing page search box matches against (case-insensitive)."""
+    sheet = _history_sheet_state(row)
+    parts = [
+        row.get("user_name"), row.get("email"), row.get("pi_name"), row.get("origin"),
+        row.get("sample_name"), row.get("esm"), row.get("charge_sheet_id"),
+        row.get("completed_at") if service_key == "freezing" else row.get("completion_date"),
+        "non-billable" if sheet == "none" else ("sent" if sheet == "sent" else "not sent"),
+        "csic" if is_csic_booking(row) else "",
+        "received" if row.get("payment_received") else ("awaiting" if sheet == "sent" else ""),
+    ]
+    return " ".join(str(part) for part in parts if part).casefold()
+
+
+def _history_filters(args):
+    """Validated Billing page filters from the query string."""
+    service = args.get("service", "")
+    origin = args.get("origin", "")
+    sheet = args.get("sheet", "")
+    receipt = args.get("receipt", "")
+    try:
+        page = max(1, int(args.get("page", "1")))
+    except ValueError:
+        page = 1
+    return {
+        "q": (args.get("q") or "").strip()[:100],
+        "origin": origin if origin in _HISTORY_ORIGINS else "",
+        "sheet": sheet if sheet in {"sent", "unsent"} else "",
+        "receipt": receipt if receipt in {"awaiting", "received"} else "",
+        "user": (args.get("user") or "").strip().casefold()[:150],
+        "service": service if service in _HISTORY_SERVICES else "all",
+        "page": page,
+    }
+
+
+def _history_row_matches(row, service_key, filters):
+    if filters["origin"] and str(row.get("origin") or "").casefold() != filters["origin"].casefold():
+        return False
+    if filters["sheet"] and _history_sheet_state(row) != filters["sheet"]:
+        return False
+    if filters["receipt"]:
+        if _history_sheet_state(row) != "sent":
+            return False
+        if bool(row.get("payment_received")) != (filters["receipt"] == "received"):
+            return False
+    if filters["user"] and str(row.get("email") or "").casefold() != filters["user"]:
+        return False
+    if filters["q"] and filters["q"].casefold() not in _history_search_text(row, service_key):
+        return False
+    return True
+
+
 @admin_bp.route("/history")
 def history():
     if not session.get("admin_logged_in"):
         return redirect(url_for("admin.login"))
 
+    filters = _history_filters(request.args)
     conn = get_db()
     cur  = conn.cursor()
     cur.execute(
@@ -5551,23 +5659,59 @@ def history():
         "SELECT * FROM screening_bookings WHERE status='completed' ORDER BY completion_date DESC"
     )
     completed_screening = _history_rows(cur.fetchall())
+    all_by_service = {
+        "imaging": completed_imaging,
+        "freezing": completed_freezing,
+        "screening": completed_screening,
+    }
+    totals = {key: len(rows) for key, rows in all_by_service.items()}
+    for rows in all_by_service.values():
+        for row in rows:
+            row["payment_received"] = is_payment_received_booking(row)
+    # Users for the combined charge sheet picker, from every completed row.
+    users = {}
+    for rows in all_by_service.values():
+        for row in rows:
+            email = str(row.get("email") or "").strip().casefold()
+            if email and email not in users:
+                users[email] = row.get("user_name") or email
+    user_options = sorted(users.items(), key=lambda item: str(item[1]).casefold())
+
+    # Filter, then keep only the rows this page shows; the per-row forms are
+    # the expensive part of the page, so nothing else is rendered.
+    shown_services = _HISTORY_SERVICES if filters["service"] == "all" else (filters["service"],)
+    limit = HISTORY_OVERVIEW_ROWS if filters["service"] == "all" else HISTORY_PAGE_SIZE
+    tables = {}
+    for service_key in _HISTORY_SERVICES:
+        matches = [
+            row for row in all_by_service[service_key]
+            if _history_row_matches(row, service_key, filters)
+        ]
+        pages = max(1, math.ceil(len(matches) / limit))
+        page = min(filters["page"], pages) if filters["service"] == service_key else 1
+        offset = (page - 1) * limit
+        tables[service_key] = {
+            "rows": matches[offset:offset + limit] if service_key in shown_services else [],
+            "matched": len(matches),
+            "offset": offset,
+            "page": page,
+            "pages": pages,
+            "shown": service_key in shown_services,
+        }
+
     csic_audit = {}
     # Audit rows are written with the charge-sheet service keys ("imaging",
     # "screening", "freezing"); older rows may use "data_collection".
     audit_service_keys = {
-        "data_collection": ("imaging", "data_collection"),
+        "imaging": ("imaging", "data_collection"),
         "freezing": ("freezing",),
         "screening": ("screening",),
     }
-    for service_key, rows in (
-        ("data_collection", completed_imaging),
-        ("freezing", completed_freezing),
-        ("screening", completed_screening),
-    ):
+    for service_key, table in tables.items():
         stored_keys = audit_service_keys[service_key]
         key_placeholders = ", ".join("?" for _ in stored_keys)
         booking_ids = [
-            row["id"] for row in rows if is_csic_booking(row)
+            row["id"] for row in table["rows"] if is_csic_booking(row)
         ]
         for offset in range(0, len(booking_ids), 500):
             batch = booking_ids[offset:offset + 500]
@@ -5586,28 +5730,38 @@ def history():
                 csic_audit.setdefault(
                     (service_key, audit["booking_id"]), []
                 ).append(dict(audit))
-    for service_key, rows in (
-        ("data_collection", completed_imaging),
-        ("freezing", completed_freezing),
-        ("screening", completed_screening),
-    ):
-        for row in rows:
-            row["csic_audit"] = csic_audit.get((service_key, row["id"]), [])
-            row["payment_received"] = is_payment_received_booking(row)
+    # The address book learns from every completed booking, but bill-to
+    # suggestions are only needed for the rows on screen.
     address_book = build_address_book(
         completed_imaging + completed_screening + completed_freezing
     )
-    for row in completed_imaging + completed_screening + completed_freezing:
-        row["bill_to"] = suggested_bill_to(row, address_book)
-        row["bill_to_missing"] = missing_bill_to(row["bill_to"], row)
+    for service_key, table in tables.items():
+        for row in table["rows"]:
+            row["csic_audit"] = csic_audit.get((service_key, row["id"]), [])
+            row["bill_to"] = suggested_bill_to(row, address_book)
+            row["bill_to_missing"] = missing_bill_to(row["bill_to"], row)
     cur.close()
     conn.close()
 
+    filtering = any(filters[key] for key in ("q", "origin", "sheet", "receipt", "user"))
+
+    def history_url(**changes):
+        """This page's URL with the current filters, changed by ``changes``."""
+        params = {key: filters[key] for key in ("q", "origin", "sheet", "receipt", "user", "service")}
+        params.update(changes)
+        if params.get("service") == "all":
+            params.pop("service")
+        return url_for("admin.history", **{key: value for key, value in params.items() if value})
+
     return render_template(
         "history.html",
-        completed_imaging=completed_imaging,
-        completed_freezing=completed_freezing,
-        completed_screening=completed_screening,
+        history_url=history_url,
+        totals=totals,
+        tables=tables,
+        filters=filters,
+        filtering=filtering,
+        matched_total=sum(table["matched"] for key, table in tables.items() if table["shown"]),
+        user_options=user_options,
         charge_sheet_tables=_CHARGE_SHEET_TABLES,
         is_non_billable_booking=is_non_billable_booking,
         is_csic_booking=is_csic_booking,

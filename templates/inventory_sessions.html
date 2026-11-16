@@ -2,7 +2,7 @@
 {% block title %}ACCEM | Data collection sessions{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content inventory-page">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Data collection</h1><p>Start a session with selected grids and record Store or Discard separately for each grid.</p></div></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid inventory</div><h1>Data collection</h1><p>Start a session with selected grids and record Store or Discard separately for each grid.</p></div></header>
   <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a class="active" href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
   <section class="inventory-panel"><div class="inventory-panel__heading"><div><span class="chart-kicker">Start new session</span><h2>Session details</h2></div></div>
     {% if available_grids %}<form method="post" class="inventory-form">

@@ -2,7 +2,7 @@
 {% block title %}ACCEM | Grid Inventory{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content inventory-page">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Facility operations</div><h1>Grid Inventory</h1><p>Track frozen grids, storage positions, and data collection history.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register frozen grids</a></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Operations</div><h1>Grid inventory</h1><p>Track frozen grids, storage positions, and data collection history.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register frozen grids</a></header>
   <nav class="inventory-nav" aria-label="Grid inventory pages">
     <a class="active" href="{{ url_for('inventory.dashboard') }}">Overview</a>
     <a href="{{ url_for('inventory.grids') }}">Search grids</a>

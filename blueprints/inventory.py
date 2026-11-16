@@ -4,6 +4,7 @@ import re
 import sqlite3
 
 import pymysql
+from database import get_db
 from flask import (
     Blueprint, Response, abort, current_app, flash, jsonify, redirect, render_template,
     request, session, stream_with_context, url_for,
@@ -104,8 +105,14 @@ def _csv_response(filename, headings, rows):
 
 @inventory_bp.route("/")
 def dashboard():
-    counts, by_type, by_status, recent = dashboard_data()
-    stored_grids, not_stored_grids = dashboard_storage()
+    connection = get_db()
+    cursor = connection.cursor()
+    try:
+        counts, by_type, by_status, recent = dashboard_data(cursor)
+        stored_grids, not_stored_grids = dashboard_storage(cursor)
+    finally:
+        cursor.close()
+        connection.close()
     return render_template(
         "inventory_dashboard.html",
         counts=counts,

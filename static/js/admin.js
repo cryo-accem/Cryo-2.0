@@ -84,3 +84,36 @@ document.querySelectorAll('.revenue-bars').forEach((chart) => {
   chart.tabIndex = 0;
   chart.scrollLeft = chart.scrollWidth;
 });
+
+// Phone layout: the sidebar becomes a horizontal strip, so bring the current
+// page's link into view instead of always showing the first few items.
+(() => {
+  const nav = document.querySelector('.admin-sidebar nav');
+  const active = nav && nav.querySelector('a.active');
+  if (!active) return;
+  const centre = () => {
+    if (nav.scrollWidth <= nav.clientWidth) return;
+    const navBox = nav.getBoundingClientRect();
+    const linkBox = active.getBoundingClientRect();
+    nav.scrollLeft += linkBox.left - navBox.left - (navBox.width - linkBox.width) / 2;
+  };
+  centre();
+  // Link widths change once the web font has loaded; centre again then.
+  if (document.fonts) document.fonts.ready.then(centre);
+})();
+
+// Billing & payments filters run on the server: apply a dropdown as soon as
+// it changes (the search box applies on Enter or with the Apply button).
+document.querySelectorAll('[data-history-filters]').forEach((form) => {
+  form.querySelectorAll('select').forEach((select) => {
+    select.addEventListener('change', () => form.requestSubmit());
+  });
+  // Leave empty filters out of the URL (?receipt=awaiting, not ?q=&origin=&...).
+  form.addEventListener('submit', () => {
+    form.querySelectorAll('[name]').forEach((field) => { if (!field.value) field.disabled = true; });
+  });
+  // Coming back with the browser's Back button restores the page as it was.
+  window.addEventListener('pageshow', () => {
+    form.querySelectorAll('[name]').forEach((field) => { field.disabled = false; });
+  });
+});

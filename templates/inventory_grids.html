@@ -2,7 +2,7 @@
 {% block title %}ACCEM | Search grid inventory{% endblock %}
 {% block content %}
 <main class="portal-page"><section class="page-content inventory-page">
-  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid Inventory</div><h1>Search and manage grids</h1><p>Find grids by researcher, account username, or sample; refine by Falcon, box, position, status, and grid type.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register grids</a></header>
+  <header class="page-header page-header--admin"><div><div class="eyebrow">Grid inventory</div><h1>Search and manage grids</h1><p>Find grids by researcher, account username, or sample; refine by Falcon, box, position, status, and grid type.</p></div><a class="button" href="{{ url_for('inventory.new_grid') }}"><i class="fa-solid fa-plus" aria-hidden="true"></i> Register grids</a></header>
   <nav class="inventory-nav" aria-label="Grid inventory pages"><a href="{{ url_for('inventory.dashboard') }}">Overview</a><a class="active" href="{{ url_for('inventory.grids') }}">Search grids</a><a href="{{ url_for('inventory.storage') }}">Storage</a><a href="{{ url_for('inventory.sessions') }}">Data collection</a><a href="{{ url_for('inventory.activity') }}">Activity history</a></nav>
   <form class="inventory-filter-form" method="get">
     <label class="inventory-filter-wide">Search by researcher, username, or sample<input type="search" name="q" value="{{ filters.get('q','') }}" placeholder="Researcher, username, sample, grid ID, Falcon, or box"></label>
