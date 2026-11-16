@@ -507,7 +507,7 @@ class AdminCsicBillingTests(unittest.TestCase):
             "self_owned",
             actual_slots=1,
         )
-        self.assertEqual(charges["clip_base_charge"], Decimal("15000.00"))
+        self.assertEqual(charges["clip_base_charge"], Decimal("18000.00"))
         row = {
             **charges,
             "grid_source": "self_owned",
@@ -517,7 +517,7 @@ class AdminCsicBillingTests(unittest.TestCase):
             line for line in _billing_lines(row, "Screening")
             if line[0] == "C-clip + Base ring"
         )
-        self.assertEqual(clip_line, ("C-clip + Base ring", "6 grid(s)", Decimal("15000.00")))
+        self.assertEqual(clip_line, ("C-clip + Base ring", "6 grid(s)", Decimal("18000.00")))
 
         partially_clipped = calculate_charge_sheet(
             "academic",
@@ -527,7 +527,7 @@ class AdminCsicBillingTests(unittest.TestCase):
             actual_slots=1,
             clipped_grids=2,
         )
-        self.assertEqual(partially_clipped["clip_base_charge"], Decimal("10000.00"))
+        self.assertEqual(partially_clipped["clip_base_charge"], Decimal("12000.00"))
 
     def test_lab_provided_clip_base_is_not_charged_and_is_labeled_on_invoice(self):
         charges = calculate_charge_sheet(

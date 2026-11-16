@@ -20,7 +20,7 @@ EXPECTED_SHEET = {
     "grid_gold": [CHARGE_CONFIG[k]["grid"]["gold_carbon_graphene"] for k in KEYS],
     "clip_base": [CHARGE_CONFIG[k]["clip_base"] for k in KEYS],
     "handling_clipping": [CHARGE_CONFIG[k]["handling_per_4"] for k in KEYS],
-    "processing": ["Not applicable", "Not applicable", PROCESSING_RATE],
+    "processing": ["Not offered", "Not offered", PROCESSING_RATE],
 }
 
 
@@ -62,27 +62,32 @@ class PublicRatesFaqContactTests(unittest.TestCase):
                                         "industry": "plus 18% GST"})
         # Sanity: the published numbers the owner signed off.
         self.assertEqual(rows["slot"]["values"], [Decimal("3000"), Decimal("12000"), Decimal("50000")])
-        self.assertEqual(rows["clip_base"]["values"], [Decimal("2500"), Decimal("2500"), Decimal("4000")])
+        self.assertEqual(rows["grid_normal"]["values"], [Decimal("4000"), Decimal("3000"), Decimal("6000")])
+        self.assertEqual(rows["grid_gold"]["values"], [Decimal("4500"), Decimal("4000"), Decimal("7000")])
+        # C-clip + base ring alone, charged only when the user provides the grids.
+        self.assertEqual(rows["clip_base"]["values"], [Decimal("2500"), Decimal("3000"), Decimal("4000")])
         self.assertEqual(rows["handling_freezing"]["values"], [Decimal("500"), Decimal("1000"), Decimal("2000")])
         self.assertEqual(rows["handling_freezing"]["row_note"], "Charged on the freezing booking.")
-        self.assertIn("in addition to the C-clip and base ring", rows["handling_clipping"]["row_note"])
+        self.assertIn("in addition to the grid or C-clip and base ring", rows["handling_clipping"]["row_note"])
 
     def test_worked_example_matches_billing_function(self):
         self.assertEqual(RATES_WORKED_EXAMPLE["user_category"], "academic")
         charges = calculate_charge_sheet(**RATES_WORKED_EXAMPLE)
-        self.assertEqual(charges["subtotal"], Decimal("23500.00"))
-        self.assertEqual(charges["gst"], Decimal("4230.00"))
-        self.assertEqual(charges["grand_total"], Decimal("27730.00"))
+        # 2 x 3000 grids (C-clip + base ring included) + 500 handling + 12000 slot
+        self.assertEqual(charges["subtotal"], Decimal("18500.00"))
+        self.assertEqual(charges["gst"], Decimal("3330.00"))
+        self.assertEqual(charges["grand_total"], Decimal("21830.00"))
         html = self._html("/rates")
-        self.assertIn("data-rates-example-subtotal>₹23,500<", html)
-        self.assertIn("data-rates-example-gst>₹4,230<", html)
-        self.assertIn("data-rates-example-total>₹27,730<", html)
+        self.assertIn("data-rates-example-subtotal>₹18,500<", html)
+        self.assertIn("data-rates-example-gst>₹3,330<", html)
+        self.assertIn("data-rates-example-total>₹21,830<", html)
         freezing = calculate_charge_sheet(**RATES_FREEZING_EXAMPLE)
         self.assertEqual(freezing["subtotal"], Decimal("1000.00"))
         self.assertEqual(freezing["gst"], Decimal("180.00"))
         self.assertEqual(freezing["grand_total"], Decimal("1180.00"))
         self.assertIn("data-rates-freezing-example-total>₹1,180<", html)
-        for label in ("Grid Charge", "Handling Charge", "C-clip + Base ring", "Slot Charge"):
+        for label in ("Grid + C-clip + Base ring", "Grid Charge", "Handling Charge",
+                      "C-clip + Base ring", "Slot Charge"):
             self.assertIn(f"<dt>{label} ", html)
 
     def test_rates_page_renders_charge_sheet(self):
@@ -98,11 +103,9 @@ class PublicRatesFaqContactTests(unittest.TestCase):
             # GST applies to the academic and industry cells that carry an amount.
             gst_cells = sum(1 for v in expected[1:] if not isinstance(v, str))
             self.assertEqual(match.group(1).count("plus 18% GST"), gst_cells, row_id)
-        self.assertIn(
-            "Charged for each grid that is not already clipped. Not charged if your lab "
-            "provides the C-clip and base ring.", html)
+        self.assertIn("Facility grids already include the C-clip and base ring.", html)
+        self.assertIn("Cryo-EM holey carbon grid with C-clip and base ring", html)
         self.assertNotIn("or your own", html)
-        self.assertNotIn("with C-clip and base ring", html)
         self.assertNotIn(">Free<", html)
         self.assertIn("Handling charge \u2014 Grid freezing (Glow discharger &amp; Vitrobot)", html)
         self.assertIn("Final amount is as per the issued charge sheet.", html)

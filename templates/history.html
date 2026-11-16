@@ -135,7 +135,7 @@
                 {% if service_key != 'freezing' %}
                 <label>C-clip + base ring source
                   <select name="clip_base_source" required>
-                    <option value="facility" {{ 'selected' if slot.clip_base_source|default('facility') == 'facility' else '' }}>Facility provided (charge applies)</option>
+                    <option value="facility" {{ 'selected' if slot.clip_base_source|default('facility') == 'facility' else '' }}>Facility provided (charged only on user-provided grids)</option>
                     <option value="self_owned" {{ 'selected' if slot.clip_base_source == 'self_owned' else '' }}>Lab / user provided (no charge)</option>
                   </select>
                 </label>

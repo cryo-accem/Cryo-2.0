@@ -12,22 +12,23 @@ from revenue import estimate_study_cost
 class EstimateStudyCostTests(unittest.TestCase):
     def test_academic_study_matches_rate_card(self):
         result = estimate_study_cost("academic", 8, 2, 3)
-        # 8 grids x 3000 + 2 x 8/4 x 1000 handling + 8 x 2500 clip/base + 3 x 12000 slots
-        self.assertEqual(result["subtotal"], Decimal("84000.00"))
-        self.assertEqual(result["gst"], Decimal("15120.00"))
-        self.assertEqual(result["grand_total"], Decimal("99120.00"))
-        self.assertEqual(result["per_sample"], Decimal("49560.00"))
+        # 8 grids x 3000 (C-clip + base ring included) + 2 x 8/4 x 1000 handling
+        # + 3 x 12000 slots
+        self.assertEqual(result["subtotal"], Decimal("64000.00"))
+        self.assertEqual(result["gst"], Decimal("11520.00"))
+        self.assertEqual(result["grand_total"], Decimal("75520.00"))
+        self.assertEqual(result["per_sample"], Decimal("37760.00"))
 
     def test_internal_has_no_gst_and_ignores_processing(self):
         result = estimate_study_cost("internal", 4, 1, 1, processing_requested=True)
         self.assertEqual(result["gst"], Decimal("0.00"))
         self.assertFalse(result["processing_applied"])
-        self.assertEqual(result["grand_total"], Decimal("16000") + 500 + 500 + 10000 + 3000)
+        self.assertEqual(result["grand_total"], Decimal("16000") + 500 + 500 + 3000)
 
     def test_industry_processing_added(self):
         result = estimate_study_cost("industry", 4, 1, 1, processing_requested=True)
         self.assertTrue(result["processing_applied"])
-        self.assertEqual(result["subtotal"], Decimal("24000") + 2000 + 2000 + 16000 + 50000 + 20000)
+        self.assertEqual(result["subtotal"], Decimal("24000") + 2000 + 2000 + 50000 + 20000)
 
     def test_zero_slots_is_freezing_only(self):
         result = estimate_study_cost("external", 4, 1, 0, grid_source="self_owned")
@@ -81,7 +82,7 @@ class ProformaPageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
         self.assertIn("Test User", text)
-        self.assertIn("₹99,120", text)
+        self.assertIn("₹75,520", text)
 
     def test_shows_validation_error(self):
         self._login()

@@ -46,10 +46,10 @@
             <label id="grid-type-label">Grid type<select name="grid_type"><option value="">Select type</option><option value="normal_holey_carbon">Normal Holey Carbon Grid</option><option value="gold_carbon_graphene">Gold / Carbon Coated / Graphene Oxide Grid</option></select></label>
             <fieldset id="grid-breakdown-fields" class="completion-grid-breakdown"><legend>Mixed facility grids (optional)</legend><label>Normal holey carbon grids<input name="normal_grids" type="number" min="0" max="12" step="1"></label><label>Gold / carbon coated / graphene oxide grids<input name="gold_grids" type="number" min="0" max="12" step="1"></label></fieldset>
             <p class="completion-note" id="inventory-billing-note" hidden></p>
-            <label>C-clip + base ring source<select name="clip_base_source" required><option value="facility">Facility provided</option><option value="self_owned">Lab / user provided (no charge)</option></select></label>
+            <label>C-clip + base ring source (user-provided grids only; facility grids include them)<select name="clip_base_source" required><option value="facility">Facility provided</option><option value="self_owned">Lab / user provided (no charge)</option></select></label>
             <label class="completion-checkbox"><input name="clipped_enabled" type="checkbox"> Some grids are already clipped</label>
             <label id="clipped-grids-label" hidden>Clipped grids<input name="clipped_grids" type="number" min="1" step="1" value="0"></label>
-            <label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested (industry only)</label>
+            <label class="completion-checkbox"><input name="processing_requested" value="1" type="checkbox"> Data processing / image analysis requested (offered to industry users only)</label>
             <div class="completion-csic" id="csic-choice" hidden>
               <label class="completion-checkbox"><input name="is_csic" type="checkbox" value="1"> Switch this bill to CSIC revenue</label>
               <label id="csic-final-amount-label" hidden>Final CSIC invoice amount (including GST)<input name="csic_final_amount" type="number" min="0.01" step="0.01" inputmode="decimal"></label>

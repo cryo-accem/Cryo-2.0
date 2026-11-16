@@ -294,18 +294,20 @@ def _billing_lines(row, service):
         quantity = f"{grids or 0} grid(s)"
         if prebilled:
             quantity = f"{max(int(grids or 0) - prebilled, 0)} grid(s); {prebilled} billed at freezing"
-        lines.append(("Grid Charge", quantity, _decimal(grid_amount)))
+        label = "Grid + C-clip + Base ring" if source == "facility" else "Grid Charge"
+        lines.append((label, quantity, _decimal(grid_amount)))
     if stage in {"Freezing / Grid Registration", "Screening / Clipping", "Data Collection"}:
         lines.append(("Handling Charge", f"{grids or 0} grid(s)", _decimal(handling_amount)))
     if stage in {"Screening / Clipping", "Data Collection"}:
         clipped_grids = _value(row, "clipped_grids", 0) or 0
         chargeable_grids = max(int(grids or 0) - int(clipped_grids), 0)
         clip_base_source = str(_value(row, "clip_base_source", "facility") or "facility").casefold()
-        clip_label = (
-            "C-clip + Base ring (Lab / user provided)"
-            if clip_base_source == "self_owned"
-            else "C-clip + Base ring"
-        )
+        if source == "facility":
+            clip_label = "C-clip + Base ring (included with facility grids)"
+        elif clip_base_source == "self_owned":
+            clip_label = "C-clip + Base ring (Lab / user provided)"
+        else:
+            clip_label = "C-clip + Base ring"
         lines.append((clip_label, f"{chargeable_grids} grid(s)", _decimal(clip_amount)))
         lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
     if _decimal(processing_amount):

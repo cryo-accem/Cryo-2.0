@@ -14,6 +14,10 @@ ZERO = Decimal("0.00")
 FOUR = Decimal("4")
 GST_RATE = Decimal("0.18")
 
+# A facility grid is priced together with its C-clip and base ring: the
+# "grid" rates below already include them.  "clip_base" is charged on its own
+# only when the user provides the grids (and the facility supplies the C-clip
+# and base ring).
 CHARGE_CONFIG = {
     "internal": {
         "grid": {"normal_holey_carbon": Decimal("4000"), "gold_carbon_graphene": Decimal("4500")},
@@ -25,7 +29,7 @@ CHARGE_CONFIG = {
     "academic": {
         "grid": {"normal_holey_carbon": Decimal("3000"), "gold_carbon_graphene": Decimal("4000")},
         "handling_per_4": Decimal("1000"),
-        "clip_base": Decimal("2500"),
+        "clip_base": Decimal("3000"),
         "slot": Decimal("12000"),
         "gst_rate": GST_RATE,
     },
@@ -207,8 +211,9 @@ def calculate_charge_sheet(
     ``prebilled_grids`` is the number of this booking's grids whose grid
     charge was already billed at freezing (facility grids registered in
     inventory and later linked to screening or data collection).  They are
-    not charged a grid charge again; handling and C-clip/base-ring charges
-    still apply to every grid.
+    not charged a grid charge again; handling still applies to every grid.
+    The grid charge includes the C-clip and base ring, so those are charged
+    separately only when the user provides the grids.
     """
     category = pricing_category(user_category)
     stage = normalize_service_stage(service_stage)
@@ -276,9 +281,13 @@ def calculate_charge_sheet(
     # The configured rate is for four grids, not a minimum billable quantity.
     handling_charge = Decimal(grids) * config["handling_per_4"] / FOUR
     full_clip_base_charge = config["clip_base"] if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
+    # Facility grids are priced with their C-clip and base ring included (the
+    # grid charge, billed now or already at freezing), so the C-clip and base
+    # ring are charged separately only on user-provided grids.
     clip_base_charge = (
         full_clip_base_charge * Decimal(grids - clipped)
-        if selected_clip_base_source == "facility" else Decimal("0")
+        if source == "self_owned" and selected_clip_base_source == "facility"
+        else Decimal("0")
     )
     slot_charge = config["slot"] * slots if stage in {"Screening / Clipping", "Data Collection"} else Decimal("0")
     # Data processing / image analysis is offered to industry users only; it is not
@@ -437,7 +446,8 @@ def estimate_study_cost(
         category, "Freezing / Grid Registration", grids, source, grid_type,
     )
     lines = [
-        ("Grid charge", f"{grids} grid(s)" if source == "facility" else f"{grids} grid(s), user provided",
+        ("Grid with C-clip and base ring" if source == "facility" else "Grid charge",
+         f"{grids} grid(s)" if source == "facility" else f"{grids} grid(s), user provided",
          freezing["grid_charge"]),
         ("Handling charge — grid freezing", f"{grids} grid(s)", freezing["handling_charge"]),
     ]
@@ -451,7 +461,9 @@ def estimate_study_cost(
             prebilled_grids=grids if source == "facility" else 0,
         )
         clip_label = "C-clip and base ring"
-        if imaging["clip_base_source"] == "self_owned":
+        if source == "facility":
+            clip_label += " (included in the grid charge)"
+        elif imaging["clip_base_source"] == "self_owned":
             clip_label += " (lab provided)"
         lines += [
             ("Handling charge — grid clipping", f"{grids} grid(s)", imaging["handling_charge"]),

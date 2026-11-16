@@ -27,7 +27,8 @@ class PrebilledGridChargeTests(unittest.TestCase):
         )
         self.assertEqual(charges["grid_charge"], Decimal("3000.00"))
         self.assertEqual(charges["handling_charge"], Decimal("750.00"))
-        self.assertEqual(charges["clip_base_charge"], Decimal("7500.00"))
+        # The grid charge (paid now or at freezing) includes the C-clip and base ring.
+        self.assertEqual(charges["clip_base_charge"], Decimal("0.00"))
         self.assertEqual(charges["prebilled_grids"], 2)
 
     def test_fully_prebilled_facility_booking_needs_no_grid_type(self):

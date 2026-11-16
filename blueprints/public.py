@@ -878,7 +878,7 @@ def public_rate_table():
         amount = calculate_charge_sheet(
             key, "Data Collection", 1, "self_owned", actual_slots=1, processing_requested=True,
         )["processing_charge"]
-        return amount if amount else "Not applicable"
+        return amount if amount else "Not offered"
 
     return {
         "categories": [label for _, label in RATE_CATEGORIES],
@@ -892,18 +892,21 @@ def public_rate_table():
             {"id": "slot", "label": "Cryo-Electron Microscope analysis",
              "unit": "per 24-hour slot, screening and data collection",
              "values": config(lambda c: c["slot"])},
-            {"id": "grid_normal", "label": "Cryo-EM holey carbon grid",
+            {"id": "grid_normal", "label": "Cryo-EM holey carbon grid with C-clip and base ring",
              "unit": "per grid, facility-provided",
              "values": config(lambda c: c["grid"]["normal_holey_carbon"])},
-            {"id": "grid_gold", "label": "Gold / carbon-coated / graphene-oxide grid",
+            {"id": "grid_gold",
+             "label": "Gold / carbon-coated / graphene-oxide grid with C-clip and base ring",
              "unit": "per grid, facility-provided",
              "values": config(lambda c: c["grid"]["gold_carbon_graphene"])},
-            {"id": "clip_base", "label": "C-clip and base ring",
+            {"id": "clip_base", "label": "C-clip and base ring only (user-provided grids)",
              "unit": "per unclipped grid, screening and data collection",
              "values": config(lambda c: c["clip_base"])},
             {"id": "clip_base_note", "note": True,
-             "label": ("Charged for each grid that is not already clipped. Not charged if "
-                       "your lab provides the C-clip and base ring.")},
+             "label": ("Facility grids already include the C-clip and base ring. When you "
+                       "bring your own grids, this is charged for each grid that is not "
+                       "already clipped, and not charged if your lab provides the C-clip "
+                       "and base ring.")},
             {"id": "processing", "label": "Data processing / image analysis",
              "unit": "if requested", "values": [processing(key) for key in keys]},
             # Handling charges are grouped together at the bottom of the table.
@@ -915,7 +918,7 @@ def public_rate_table():
             {"id": "handling_clipping", "label": "Handling charge \u2014 Grid clipping",
              "unit": "per 4 grids, pro-rated per grid",
              "row_note": ("Charged on the screening / clipping or data-collection booking, "
-                          "in addition to the C-clip and base ring."),
+                          "in addition to the grid or C-clip and base ring."),
              "values": config(lambda c: c["handling_per_4"])},
         ],
     }
@@ -970,7 +973,7 @@ def build_rates_context():
         worked_example("example", collection,
                        f"{labels[collection['user_category']]} user, data collection with "
                        f"{collection['number_of_grids']} facility-provided holey carbon grids "
-                       f"(not pre-clipped) and {collection['actual_slots']} 24-hour slot"),
+                       f"(C-clip and base ring included) and {collection['actual_slots']} 24-hour slot"),
         worked_example("freezing-example", freezing,
                        f"{labels[freezing['user_category']]} user, freezing booking for "
                        f"{freezing['number_of_grids']} of their own grids"),
