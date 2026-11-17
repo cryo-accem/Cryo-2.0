@@ -347,9 +347,13 @@ class ChargeSheetContentTests(unittest.TestCase):
                                           "normal_holey_carbon", 1))
         story = _sheet_story(row, "Screening")
         billing = _billing_table(story)
-        for _, _, _, amount, total, _ in billing._cellvalues[1:]:
+        for _, _, _, amount, total in billing._cellvalues[1:]:
             self.assertEqual(amount, total)
         self.assertEqual(Decimal(str(row["gst_amount"])), Decimal("0"))
+        # The Debit Head is asked for in a box below the totals, not in a column.
+        self.assertNotIn("Debit Head", _flowable_text(billing))
+        flowables = [inner for flowable in story for inner in getattr(flowable, "_content", [flowable])]
+        self.assertTrue(any(_flowable_text(flowable).startswith("Debit Head") for flowable in flowables))
 
     def test_freezing_sheet_omits_slots_line(self):
         row = {

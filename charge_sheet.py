@@ -563,17 +563,17 @@ def _internal_pdf(row, service):
     story.append(Spacer(1, 8))
     rows = [[_paragraph("<b>S.No</b>", styles["Small"]), _paragraph("<b>Particulars</b>", styles["Small"]),
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
-             _paragraph("<b>Total</b>", styles["Small"]), _paragraph("<b>Debit Head</b>", styles["Small"])]]
+             _paragraph("<b>Total</b>", styles["Small"])]]
     for index, (description, quantity, amount) in enumerate(_billing_lines(row, service), 1):
-        rows.append([str(index), description, quantity, f"INR {amount:,.2f}", f"INR {amount:,.2f}", ""])
+        rows.append([str(index), description, quantity, f"INR {amount:,.2f}", f"INR {amount:,.2f}"])
     if len(rows) == 1:
-        rows.append(["", "No billable services recorded", "", "INR 0.00", "INR 0.00", ""])
-    billing = Table(rows, colWidths=[11 * mm, 55 * mm, 25 * mm, 28 * mm, 27 * mm, 34 * mm], repeatRows=1)
+        rows.append(["", "No billable services recorded", "", "INR 0.00", "INR 0.00"])
+    billing = Table(rows, colWidths=[11 * mm, 74 * mm, 30 * mm, 32 * mm, 33 * mm], repeatRows=1)
     billing.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aaeba")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dcecf3")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#17324d")),
-        ("ALIGN", (2, 1), (-2, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     story.append(billing)
@@ -604,10 +604,30 @@ def _internal_pdf(row, service):
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 10))
-    story.append(_paragraph("<b>Internal users are requested to provide the appropriate Debit Head for processing the charges "
-                            "and copy their PI while submitting the Debit Head details.</b>", styles["Small"]))
+    story.append(KeepTogether([
+        _paragraph("<b>Internal users are requested to provide the appropriate Debit Head for processing the charges "
+                   "and copy their PI while submitting the Debit Head details.</b>", styles["Small"]),
+        Spacer(1, 6),
+        _debit_head_box(styles),
+    ]))
     doc.build(story, onFirstPage=_internal_page, onLaterPages=_internal_page)
     return buffer.getvalue()
+
+
+def _debit_head_box(styles):
+    """A small box for the user to write the Debit Head in."""
+    box = Table(
+        [[_paragraph("<b>Debit Head</b>", styles["Small"]), ""]],
+        colWidths=[30 * mm, 90 * mm], rowHeights=[12 * mm],
+    )
+    box.setStyle(TableStyle([
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#9aaeba")),
+        ("LINEAFTER", (0, 0), (0, 0), 0.6, colors.HexColor("#9aaeba")),
+        ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#edf3f7")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    box.hAlign = "LEFT"
+    return box
 
 
 def generate_charge_sheet(row, service):
