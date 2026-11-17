@@ -350,7 +350,7 @@ def _watermark(canvas, doc):
     if not os.path.exists(logo_path):
         return
     canvas.saveState()
-    canvas.setFillAlpha(0.10)
+    canvas.setFillAlpha(0.05)  # faint IISc logo watermark
     canvas.drawImage(
         logo_path,
         (A4[0] - 120 * mm) / 2,
@@ -618,7 +618,8 @@ def _debit_head_box(styles):
     """A small box for the user to write the Debit Head in."""
     box = Table(
         [[_paragraph("<b>Debit Head</b>", styles["Small"]), ""]],
-        colWidths=[30 * mm, 90 * mm], rowHeights=[12 * mm],
+        # Full width, lined up with the charges and summary tables above.
+        colWidths=[42 * mm, 138 * mm], rowHeights=[12 * mm],
     )
     box.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#9aaeba")),
@@ -626,7 +627,7 @@ def _debit_head_box(styles):
         ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#edf3f7")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]))
-    box.hAlign = "LEFT"
+    # Centred like the tables above, so both edges line up with them.
     return box
 
 
