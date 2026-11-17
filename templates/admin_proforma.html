@@ -188,7 +188,9 @@
       <label class="form-field"><span>PIN code</span><input name="bill_pin" maxlength="12" value="{{ arg('bill_pin', 12) }}" placeholder="e.g. 560012"></label>
       <label class="form-field"><span>Country</span><input name="bill_country" maxlength="100" value="{{ arg('bill_country', 100) }}" placeholder="e.g. India"></label>
       <label class="form-field"><span>Official email</span><input name="bill_email" type="email" maxlength="150" value="{{ arg('bill_email', 150) }}"></label>
-      <label class="form-field"><span>GSTIN (if any)</span><input name="bill_gstin" maxlength="20" value="{{ arg('bill_gstin', 20) }}" placeholder="Organisation's GSTIN, where applicable"></label>
+      {%- set industry_selected = form.user_category == 'industry' %}
+      <label class="form-field"><span>GSTIN <small>(required for industry)</small></span><input name="bill_gstin" maxlength="15" pattern="[0-9]{2}[A-Za-z0-9]{13}" title="15-character GSTIN, e.g. 29AAATI1501J2ZV" value="{{ arg('bill_gstin', 15) }}" placeholder="e.g. 29AAATI1501J2ZV" autocapitalize="characters" data-industry-required{% if industry_selected %} required{% endif %}></label>
+      <label class="form-field"><span>PAN <small>(required for industry)</small></span><input name="bill_pan" maxlength="10" pattern="[A-Za-z]{5}[0-9]{4}[A-Za-z]" title="10-character PAN, e.g. AAATI1501J" value="{{ arg('bill_pan', 10) }}" placeholder="e.g. AAATI1501J" autocapitalize="characters" data-industry-required{% if industry_selected %} required{% endif %}></label>
 
       <div class="form-actions"><button class="button" type="submit"><i class="fa-solid fa-calculator" aria-hidden="true"></i> Calculate estimate</button>{% if estimate or error %}<a class="button button--secondary" href="{{ url_for('admin.proforma_estimate') }}">Clear</a>{% endif %}</div>
     </form>
@@ -250,7 +252,9 @@
             <table class="pi-kv pi-party-meta">
               <tr><th scope="row">Email</th><td>{% if arg('bill_email', 150) %}{{ arg('bill_email', 150) }}{% else %}<span class="pi-placeholder">Not provided</span>{% endif %}</td></tr>
               <tr><th scope="row">User category</th><td>{{ category_display.get(estimate.user_category, category_labels[estimate.user_category]) }}</td></tr>
-              {% if arg('bill_gstin', 20) %}<tr><th scope="row">GSTIN</th><td>{{ arg('bill_gstin', 20) }}</td></tr>{% endif %}
+              {%- set is_industry = estimate.user_category == 'industry' %}
+              {% if arg('bill_gstin', 15) or is_industry %}<tr><th scope="row">GSTIN</th><td>{% if arg('bill_gstin', 15) %}{{ arg('bill_gstin', 15)|upper }}{% else %}<span class="pi-placeholder">Not provided</span>{% endif %}</td></tr>{% endif %}
+              {% if arg('bill_pan', 10) or is_industry %}<tr><th scope="row">PAN</th><td>{% if arg('bill_pan', 10) %}{{ arg('bill_pan', 10)|upper }}{% else %}<span class="pi-placeholder">Not provided</span>{% endif %}</td></tr>{% endif %}
             </table>
           </div>
         </section>
@@ -351,4 +355,20 @@
   </section>
   {% endif %}
 </section></main>
+<script>
+// Industry users need GSTIN and PAN on the proforma's Bill To.
+(() => {
+  const category = document.querySelector('.proforma-form select[name="user_category"]');
+  const fields = document.querySelectorAll(".proforma-form [data-industry-required]");
+  if (!category) return;
+  const sync = () => fields.forEach((input) => { input.required = category.value === "industry"; });
+  category.addEventListener("change", sync);
+  fields.forEach((input) => input.addEventListener("input", () => {
+    const start = input.selectionStart;
+    input.value = input.value.toUpperCase();
+    input.setSelectionRange(start, start);
+  }));
+  sync();
+})();
+</script>
 {% endblock %}
