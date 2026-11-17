@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import pytest
+
 import database
 from main import create_app
 
@@ -180,6 +182,8 @@ class SweepFixTests(unittest.TestCase):
         self.assertEqual(page.count('data-sheet="sent"'), 1)
         self.assertEqual(page.count('data-sheet="none"'), 1)
 
+    # The unsent row opens its details because the PI address is missing.
+    @pytest.mark.requires_bill_to
     def test_unsent_bills_can_be_brought_to_current_rates_but_sent_ones_stay(self):
         # Stored at the old rates: C-clip + base ring charged on top of 2
         # facility grids (academic, screening, 1 slot) = 27,730 incl. GST.
