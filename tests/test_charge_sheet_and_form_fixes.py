@@ -366,9 +366,9 @@ class ChargeSheetContentTests(unittest.TestCase):
         for origin in ("External", "Industry", "Internal"):
             row["origin"] = origin
             text = _sheet_text(row, "Freezing")
-            self.assertNotIn("Actual 24-hour slots", text, origin)
+            self.assertNotIn("Actual slots", text, origin)
             self.assertIn("FRZ-3", text)
-        self.assertIn("Actual 24-hour slots", _sheet_text(self._screening_row(), "Screening"))
+        self.assertIn("Actual slots", _sheet_text(self._screening_row(), "Screening"))
 
     def test_combined_sheet_prefixes_ids_and_lists_grids_per_stage(self):
         freezing = {"id": 1, "combined_service": "Freezing", "number_of_grids": 4}
@@ -440,7 +440,7 @@ class ChargeSheetSendingTests(_AppTestCase):
         self.assertEqual(Decimal(combined["actual_slots"]), Decimal("3"))
         text = _sheet_text(combined, "Combined Services")
         self.assertIn(f"FRZ-{frz}, SCR-{scr}, DC-{dc}", text)
-        self.assertIn("Actual 24-hour slots | 3", text)
+        self.assertIn("Actual slots | 3", text)
 
     def _race_next_id(self, table, booking_id):
         """Wrap _next_charge_sheet_id so another request "wins" first."""

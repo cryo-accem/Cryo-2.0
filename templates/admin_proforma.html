@@ -153,7 +153,7 @@
       </label>
       <label class="form-field"><span>Number of samples</span><input name="number_of_samples" type="number" min="1" step="1" required value="{{ form.number_of_samples }}"></label>
       <label class="form-field"><span>Number of grids (total)</span><input name="number_of_grids" type="number" min="1" step="1" required value="{{ form.number_of_grids }}"></label>
-      <label class="form-field"><span>Number of microscope slots (24 h each)</span><input name="number_of_slots" type="number" min="0" step="1" required value="{{ form.number_of_slots }}"></label>
+      <label class="form-field"><span>Number of microscope slots</span><input name="number_of_slots" type="number" min="0" step="1" required value="{{ form.number_of_slots }}"></label>
       <label class="form-field"><span>Grids provided by</span>
         <select name="grid_source">
           <option value="facility" {% if form.grid_source == 'facility' %}selected{% endif %}>Facility</option>
@@ -267,7 +267,7 @@
               <tr><th scope="row">Number of samples</th><td>{{ estimate.number_of_samples }}</td></tr>
               <tr><th scope="row">Number of grids</th><td>{{ estimate.number_of_grids }}</td></tr>
               <tr><th scope="row">Grids provided by</th><td>{% if facility_grids %}ACCEM facility ({{ grid_type_label }}){% else %}User / lab{% endif %}</td></tr>
-              <tr><th scope="row">Microscope allocation</th><td>{% if estimate.number_of_slots %}{{ estimate.number_of_slots }} slot{{ 's' if estimate.number_of_slots != 1 }} of 24 hours{% else %}None (grid freezing only){% endif %}</td></tr>
+              <tr><th scope="row">Microscope allocation</th><td>{% if estimate.number_of_slots %}{{ estimate.number_of_slots }} slot{{ 's' if estimate.number_of_slots != 1 }}{% else %}None (grid freezing only){% endif %}</td></tr>
               <tr><th scope="row">Proposed study date</th><td>{% if study_date %}{{ study_date[8:10] }}-{{ study_date[5:7] }}-{{ study_date[0:4] }}{% else %}<span class="pi-placeholder">To be scheduled</span>{% endif %}</td></tr>
             </table>
           </div>
@@ -291,7 +291,7 @@
                 {%- if label == 'Grid with C-clip and base ring' %}<small>{{ grid_type_label }} grid; C-clip and base ring are charged together with the grid.</small>
                 {%- elif label == 'Grid charge' %}<small>User-provided grids: no grid purchase charge.</small>
                 {%- elif is_handling and count and amount %}<small>Prorated at ₹{{ money(amount / count * 4) }} per 4 grids.</small>
-                {%- elif is_slot %}<small>24-hour microscope slots; screening and data collection are charged at the same slot rate.</small>
+                {%- elif is_slot %}<small>Screening and data collection are charged at the same slot rate.</small>
                 {%- endif %}</td>
               <td class="qty">{{ count }} {{ unit }}</td>
               <td class="num">{% if amount and count %}{{ money(amount / count) }}{% elif 'included' in label %}Included{% else %}—{% endif %}</td>

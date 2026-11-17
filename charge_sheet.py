@@ -63,15 +63,19 @@ def _industry_signature_block(styles):
 
 
 def _internal_signature_block(styles):
+    # A gap column keeps the PI's signature line apart from the convener's.
     table = Table([
-        [_paragraph("PI Signature", styles["Small"]), _paragraph("Dr. Somnath Dutta", styles["SmallCenter"])],
-        [_paragraph("", styles["Small"]), _paragraph(
+        [_paragraph("PI Signature", styles["SmallCenter"]), "",
+         _paragraph("Dr. Somnath Dutta", styles["SmallCenter"])],
+        [_paragraph("", styles["Small"]), "", _paragraph(
             f"{SIGNATORY_TITLE}<br/>{SIGNATORY_DIVISION}<br/>{SIGNATORY_INSTITUTE}",
             styles["SmallCenter"],
         )],
-    ], colWidths=[95 * mm, 65 * mm])
+    ], colWidths=[60 * mm, 35 * mm, 65 * mm])
     table.setStyle(TableStyle([
-        ("LEFTPADDING", (0, 0), (0, -1), 12 * mm),
+        ("LINEABOVE", (0, 0), (0, 0), 0.5, colors.HexColor("#6b7c8a")),
+        ("LINEABOVE", (2, 0), (2, 0), 0.5, colors.HexColor("#6b7c8a")),
+        ("TOPPADDING", (0, 0), (-1, 0), 4),
     ]))
     table.hAlign = "RIGHT"
     return table
@@ -128,7 +132,7 @@ def _booking_label(row, service):
 
 
 def _is_freezing_sheet(row, service):
-    """A single freezing sheet: freezing has no 24-hour instrument slots."""
+    """A single freezing sheet: freezing has no instrument slots."""
     items = _value(row, "combined_items", []) or []
     if items:
         return all(_service_prefix(item.get("combined_service", "")) == "FRZ" for item in items)
@@ -217,10 +221,12 @@ def _styles():
                               fontSize=12, leading=15, alignment=TA_CENTER, textColor=colors.HexColor("#17324d")))
     styles.add(ParagraphStyle("Small", parent=styles["Normal"], fontSize=8.5, leading=11))
     styles.add(ParagraphStyle("Bank", parent=styles["Small"], fontSize=8, leading=9.5))
+    # Item names in the charges table wrap inside their cell.
+    styles.add(ParagraphStyle("Cell", parent=styles["Normal"], fontSize=9.5, leading=11.5))
     styles.add(ParagraphStyle("SmallRight", parent=styles["Small"], alignment=TA_RIGHT))
     styles.add(ParagraphStyle("SmallCenter", parent=styles["Small"], alignment=TA_CENTER))
     styles.add(ParagraphStyle("Section", parent=styles["Heading3"], fontName="Helvetica-Bold",
-                              fontSize=10, leading=13, textColor=colors.HexColor("#17324d"), spaceBefore=8))
+                              fontSize=10, leading=13, textColor=colors.HexColor("#17324d"), spaceBefore=0, spaceAfter=2))
     return styles
 
 
@@ -310,7 +316,8 @@ def _billing_lines(row, service):
         else:
             clip_label = "C-clip + Base ring"
         lines.append((clip_label, f"{chargeable_grids} grid(s)", _decimal(clip_amount)))
-        lines.append(("Slot Charge", f"{_value(row, 'actual_slots', 0) or 0} 24-hour slot(s)", _decimal(slot_amount)))
+        slots = _value(row, 'actual_slots', 0) or 0
+        lines.append(("Slot Charge", f"{slots} slot{'' if str(slots) == '1' else 's'}", _decimal(slot_amount)))
     if _decimal(processing_amount):
         lines.append(("Data Processing / Image Analysis", "1 service", _decimal(processing_amount)))
     adjustment = _value(row, "csic_adjustment")
@@ -332,17 +339,17 @@ def _header(story, styles):
     )
     header_cells = []
     if os.path.exists(logo_path):
-        header_cells.append(Image(logo_path, width=22 * mm, height=22 * mm))
+        header_cells.append(Image(logo_path, width=18 * mm, height=18 * mm))
     header_cells.append(institution)
     header = Table([header_cells], colWidths=[28 * mm, 152 * mm] if len(header_cells) == 2 else [180 * mm])
     header.setStyle(TableStyle([
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("LINEBELOW", (0, 0), (-1, -1), 1, colors.HexColor("#17324d")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(header)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 5))
 
 
 def _watermark(canvas, doc):
@@ -364,15 +371,19 @@ def _watermark(canvas, doc):
     canvas.restoreState()
 
 
+# The signatory block sits this far above the page edge; the bottom margin
+# above it is left blank so there is room to sign over the name.
+SIGNATURE_BOTTOM = 10 * mm
+SIGNATURE_MARGIN = 46 * mm
+
+
+def _draw_signature(canvas, doc, signature):
+    width, _height = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
+    signature.drawOn(canvas, doc.leftMargin + (doc.width - width) / 2, SIGNATURE_BOTTOM)
+
+
 def _internal_footer(canvas, doc):
-    styles = _styles()
-    signature = _internal_signature_block(styles)
-    width, height = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
-    signature.drawOn(
-        canvas,
-        doc.leftMargin + (doc.width - width) / 2,
-        max(0, doc.bottomMargin - height),
-    )
+    _draw_signature(canvas, doc, _internal_signature_block(_styles()))
 
 
 def _internal_page(canvas, doc):
@@ -381,14 +392,7 @@ def _internal_page(canvas, doc):
 
 
 def _external_footer(canvas, doc):
-    styles = _styles()
-    signature = _external_signature_block(styles)
-    width, height = signature.wrapOn(canvas, doc.width, doc.bottomMargin)
-    signature.drawOn(
-        canvas,
-        doc.leftMargin + (doc.width - width) / 2,
-        max(0, doc.bottomMargin - height),
-    )
+    _draw_signature(canvas, doc, _external_signature_block(_styles()))
 
 
 def _external_signature_block(styles):
@@ -399,6 +403,10 @@ def _external_signature_block(styles):
             styles["SmallCenter"],
         )],
     ], colWidths=[95 * mm, 65 * mm])
+    table.setStyle(TableStyle([
+        ("LINEABOVE", (1, 0), (1, 0), 0.5, colors.HexColor("#6b7c8a")),
+        ("TOPPADDING", (1, 0), (1, 0), 4),
+    ]))
     table.hAlign = "CENTER"
     return table
 
@@ -412,11 +420,11 @@ def _external_pdf(row, service, category, is_industry):
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
-                            topMargin=10 * mm, bottomMargin=30 * mm)
+                            topMargin=10 * mm, bottomMargin=SIGNATURE_MARGIN)
     story = []
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET / PROFORMA INVOICE", styles["Institution"]))
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 5))
 
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
@@ -445,10 +453,10 @@ def _external_pdf(row, service, category, is_industry):
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("SPAN", (1, 1), (3, 1)), ("SPAN", (1, 3), (3, 3)),
         ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(table)
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 5))
 
     rows = [[_paragraph("<b>S.No</b>", styles["Small"]), _paragraph("<b>Particulars</b>", styles["Small"]),
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
@@ -456,18 +464,19 @@ def _external_pdf(row, service, category, is_industry):
     lines = _billing_lines(row, service)
     line_gst = _line_gst(lines, _value(row, "gst_amount", 0))
     for index, ((description, quantity, amount), gst) in enumerate(zip(lines, line_gst), 1):
-        rows.append([str(index), description, quantity, f"INR {amount:,.2f}",
+        rows.append([str(index), _paragraph(description, styles["Cell"]), quantity, f"INR {amount:,.2f}",
                      f"INR {gst:,.2f}", f"INR {amount + gst:,.2f}"])
     if len(rows) == 1:
         rows.append(["", "No billable services recorded", "", "INR 0.00", "", "INR 0.00"])
-    billing = Table(rows, colWidths=[11 * mm, 58 * mm, 25 * mm, 29 * mm, 27 * mm, 30 * mm], repeatRows=1)
+    billing = Table(rows, colWidths=[13 * mm, 61 * mm, 22 * mm, 29 * mm, 26 * mm, 29 * mm], repeatRows=1)
     billing.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aaeba")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dcecf3")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#17324d")),
         ("ALIGN", (2, 1), (-1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("FONTSIZE", (0, 1), (-1, -1), 9.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
     ]))
     story.append(billing)
     subtotal = _decimal(_value(row, "subtotal", None))
@@ -476,7 +485,7 @@ def _external_pdf(row, service, category, is_industry):
     amount_in_words = _amount_words(_value(row, 'grand_total', _value(row, 'total_billed', 0)))
     slots_label, slots_value = (
         ("", "") if is_freezing
-        else ("Actual 24-hour slots", str(_value(row, "actual_slots", 0) or 0))
+        else ("Actual slots", str(_value(row, "actual_slots", 0) or 0))
     )
     summary = [
         [slots_label, slots_value, "Subtotal", f"INR {subtotal:,.2f}"],
@@ -491,10 +500,10 @@ def _external_pdf(row, service, category, is_industry):
         ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME", (2, 2), (3, 2), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
     ]))
     story.append(summary_table)
-    story.append(Spacer(1, 8))
+    story.append(Spacer(1, 6))
     # Bank details in two side-by-side columns (half the height), kept in one
     # block with the instructions so a long sheet never splits them.
     payment = [
@@ -502,7 +511,7 @@ def _external_pdf(row, service, category, is_industry):
         _paragraph("Please make the payment using the bank details provided below. After completing the transaction, "
                    "kindly email the transaction/reference number, transaction date, amount transferred, and valid proof "
                    "of transaction/payment to the Cryo-EM Facility.", styles["Small"]),
-        Spacer(1, 3),
+        Spacer(1, 2),
     ]
     half = (len(BANK_DETAILS) + 1) // 2
     left, right = BANK_DETAILS[:half], BANK_DETAILS[half:]
@@ -514,13 +523,13 @@ def _external_pdf(row, service, category, is_industry):
         else:
             row += ["", ""]
         bank.append(row)
-    bank_table = Table(bank, colWidths=[30 * mm, 60 * mm, 30 * mm, 60 * mm])
+    bank_table = Table(bank, colWidths=[27 * mm, 63 * mm, 32 * mm, 58 * mm])
     bank_table.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#c6d0d8")),
         ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f3f7f9")),
         ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f3f7f9")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
     ]))
     payment.append(bank_table)
     story.append(KeepTogether(payment))
@@ -540,11 +549,11 @@ def _internal_pdf(row, service):
     styles = _styles()
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=15 * mm, leftMargin=15 * mm,
-                            topMargin=12 * mm, bottomMargin=30 * mm)
+                            topMargin=10 * mm, bottomMargin=SIGNATURE_MARGIN)
     story = []
     _header(story, styles)
     story.append(_paragraph("CHARGE SHEET", styles["Institution"]))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 5))
     source = str(_value(row, "grid_source", "") or "").casefold()
     source_label = "Self Owned / User Provided" if source == "self_owned" else "Facility Provided"
     grid_type = _value(row, "grid_type", "")
@@ -565,16 +574,18 @@ def _internal_pdf(row, service):
              _paragraph("<b>Quantity</b>", styles["Small"]), _paragraph("<b>Amount</b>", styles["Small"]),
              _paragraph("<b>Total</b>", styles["Small"])]]
     for index, (description, quantity, amount) in enumerate(_billing_lines(row, service), 1):
-        rows.append([str(index), description, quantity, f"INR {amount:,.2f}", f"INR {amount:,.2f}"])
+        rows.append([str(index), _paragraph(description, styles["Cell"]), quantity,
+                     f"INR {amount:,.2f}", f"INR {amount:,.2f}"])
     if len(rows) == 1:
         rows.append(["", "No billable services recorded", "", "INR 0.00", "INR 0.00"])
-    billing = Table(rows, colWidths=[11 * mm, 74 * mm, 30 * mm, 32 * mm, 33 * mm], repeatRows=1)
+    billing = Table(rows, colWidths=[13 * mm, 72 * mm, 30 * mm, 32 * mm, 33 * mm], repeatRows=1)
     billing.setStyle(TableStyle([
         ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#9aaeba")),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#dcecf3")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#17324d")),
         ("ALIGN", (2, 1), (-1, -1), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("FONTSIZE", (0, 1), (-1, -1), 9.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
     ]))
     story.append(billing)
     story.append(Spacer(1, 8))
@@ -583,7 +594,7 @@ def _internal_pdf(row, service):
     total = _decimal(_value(row, "grand_total", _value(row, "total_billed", 0)))
     amount_in_words = _amount_words(total)
     summary = [
-        [_paragraph("" if is_freezing else "<b>Actual 24-hour slots</b>", styles["Small"]),
+        [_paragraph("" if is_freezing else "<b>Actual slots</b>", styles["Small"]),
          "" if is_freezing else str(_value(row, "actual_slots", 0) or 0),
          _paragraph("<b>Actual grids</b>", styles["Small"]), _paragraph(grid_count, styles["Small"])],
         [_paragraph("<b>Subtotal</b>", styles["Small"]), f"INR {subtotal:,.2f}",
@@ -599,8 +610,8 @@ def _internal_pdf(row, service):
         ("ALIGN", (1, 0), (1, -1), "RIGHT"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME", (1, 1), (1, 1), "Helvetica-Bold"),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(summary_table)
     story.append(Spacer(1, 10))
