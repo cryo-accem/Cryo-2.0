@@ -1,23 +1,140 @@
 {% extends "base.html" %}
 {% block title %}ACCEM | Proforma estimate{% endblock %}
 {% block content %}
+{#- Bill-to and study details are only printed on the document; nothing is stored. -#}
+{%- set args = request.args -%}
+{%- macro arg(name, limit=200) -%}{{ ((args.get(name) or '')|trim)[:limit] }}{%- endmacro -%}
+{#- Amounts in the table: Indian digit grouping, always two decimals, no symbol. -#}
+{%- macro money(value) -%}{%- set text = format_inr(value) -%}{{ text|replace('₹', '') }}{% if '.' not in text %}.00{% endif %}{%- endmacro -%}
 <style>
   .proforma-result { margin-top: 20px; }
-  .proforma-meta { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 0 0 14px; }
-  .proforma-meta div { display: flex; flex-direction: column; }
-  .proforma-meta small { opacity: .7; font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; }
-  .proforma-table { width: 100%; border-collapse: collapse; }
-  .proforma-table th, .proforma-table td { padding: 8px 10px; border-bottom: 1px solid rgba(127,127,127,.25); text-align: left; }
-  .proforma-table td.amount, .proforma-table th.amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .proforma-table tfoot td { font-weight: 600; }
-  .proforma-table tfoot tr.proforma-total td { font-size: 1.15rem; border-top: 2px solid currentColor; }
-  .proforma-headline { font-size: 1.1rem; margin: 0 0 14px; }
-  .proforma-headline strong { font-size: 1.5rem; }
-  .proforma-note { font-size: .85rem; opacity: .8; margin-top: 12px; }
+  .proforma-subhead { grid-column: 1 / -1; margin: 10px 0 -4px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--navy); font-size: 13px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+  .proforma-subhead small { display: block; margin-top: 3px; color: #5b6f84; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
   .proforma-check { display: flex; gap: 8px; align-items: center; }
+  .proforma-toolbar { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+  .proforma-toolbar p { margin: 0; }
+  .proforma-note { font-size: .85rem; opacity: .8; margin: 0 0 12px; }
+
+  /* ---------- Proforma invoice document (screen preview and A4 print) ---------- */
+  .pi-doc {
+    --pi-navy: #0f2d52;
+    --pi-navy-2: #1d4775;
+    --pi-tint: #eef3f9;
+    --pi-panel: #ffffff;
+    --pi-line: #c5d3e2;
+    --pi-line-soft: #dde6ef;
+    --pi-head: #e3ecf6;
+    --pi-total: #d6e6f7;
+    --pi-text: #1a2738;
+    --pi-muted: #53657b;
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 9mm 9mm 7mm;
+    background: var(--pi-tint);
+    border: 1px solid var(--pi-line-soft);
+    color: var(--pi-text);
+    font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+    font-size: 9pt;
+    line-height: 1.45;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .pi-doc *, .pi-doc *::before, .pi-doc *::after { box-sizing: border-box; }
+  .pi-doc p, .pi-doc ol, .pi-doc ul, .pi-doc h2, .pi-doc h3 { margin: 0; }
+
+  .pi-header { display: flex; align-items: center; gap: 5mm; padding: 5mm 6mm; background: var(--pi-navy); color: #fff; }
+  .pi-header img { flex: 0 0 auto; width: 15mm; height: 15mm; object-fit: contain; }
+  .pi-header__text { flex: 1 1 auto; min-width: 0; }
+  .pi-header__centre { font-size: 10.6pt; font-weight: 800; letter-spacing: .03em; line-height: 1.3; }
+  .pi-header__inst { margin-top: 1mm; font-size: 8.5pt; font-weight: 600; letter-spacing: .06em; color: #d3e1f0; }
+  .pi-title { padding: 3.2mm 6mm; background: var(--pi-panel); border: 1px solid var(--pi-line); border-top: 0; text-align: center; color: var(--pi-navy); font-size: 13.5pt; font-weight: 800; letter-spacing: .22em; }
+
+  .pi-meta { display: grid; grid-template-columns: 1.5fr 1fr 1fr; margin-top: 3.5mm; background: var(--pi-panel); border: 1px solid var(--pi-line); }
+  .pi-meta > div { padding: 2.4mm 4mm; border-left: 1px solid var(--pi-line); }
+  .pi-meta > div:first-child { border-left: 0; }
+  .pi-label { display: block; color: var(--pi-muted); font-size: 7pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  .pi-meta strong { display: block; margin-top: .6mm; color: var(--pi-navy); font-size: 9.5pt; font-weight: 700; overflow-wrap: anywhere; }
+  .pi-status { display: inline-block; margin-top: .6mm; padding: .4mm 2.2mm; border: 1px solid var(--pi-navy-2); color: var(--pi-navy); font-size: 8pt; font-weight: 800; letter-spacing: .1em; }
+
+  .pi-section { margin-top: 3.5mm; background: var(--pi-panel); border: 1px solid var(--pi-line); break-inside: avoid; page-break-inside: avoid; }
+  .pi-section--flow { break-inside: auto; page-break-inside: auto; }
+  .pi-section h2 { padding: 1.8mm 4mm; background: var(--pi-navy); color: #fff; font-size: 8.5pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .pi-section__body { padding: 3mm 4mm; }
+  .pi-columns { display: grid; grid-template-columns: 1.12fr 1fr; gap: 3.5mm; margin-top: 3.5mm; }
+  .pi-columns > .pi-section { margin-top: 0; }
+
+  .pi-party { color: var(--pi-navy); font-size: 10pt; font-weight: 700; }
+  .pi-address { margin-top: 1mm; overflow-wrap: anywhere; }
+  .pi-address span { display: block; }
+  .pi-kv { width: 100%; border-collapse: collapse; }
+  .pi-kv th, .pi-kv td { padding: 1.1mm 0; vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+  .pi-kv th { width: 40%; padding-right: 3mm; white-space: nowrap; color: var(--pi-muted); font-size: 7.6pt; font-weight: 600; }
+  .pi-kv tr + tr th, .pi-kv tr + tr td { border-top: 1px solid var(--pi-line-soft); }
+  .pi-party-meta { margin-top: 2.2mm; padding-top: 1mm; border-top: 1px solid var(--pi-line-soft); }
+  .pi-party-meta tr:first-child th, .pi-party-meta tr:first-child td { border-top: 0; }
+  .pi-placeholder { color: #8695a7; }
+
+  .pi-charges { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  .pi-charges th, .pi-charges td { padding: 1.7mm 3mm; border: 1px solid var(--pi-line); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+  .pi-charges tr { break-inside: avoid; page-break-inside: avoid; }
+  .pi-charges thead th { background: var(--pi-head); color: var(--pi-navy); font-size: 7.8pt; font-weight: 700; letter-spacing: .03em; }
+  .pi-charges .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pi-charges .qty { text-align: center; }
+  .pi-charges td small { display: block; margin-top: .5mm; color: var(--pi-muted); font-size: 7.4pt; }
+  .pi-charges tfoot td { font-weight: 600; }
+  .pi-charges tfoot td:first-child { text-align: right; color: var(--pi-muted); font-weight: 600; }
+  .pi-charges tfoot tr.pi-total td { background: var(--pi-total); color: var(--pi-navy); font-size: 10.5pt; font-weight: 800; border-top: 1.5px solid var(--pi-navy-2); }
+  .pi-charges tfoot tr.pi-total td:first-child { color: var(--pi-navy); letter-spacing: .06em; text-transform: uppercase; }
+
+  .pi-bank { width: 100%; border-collapse: collapse; }
+  .pi-bank th, .pi-bank td { padding: 1.1mm 3mm; border: 1px solid var(--pi-line); vertical-align: top; text-align: left; overflow-wrap: anywhere; }
+  .pi-bank th { width: 34%; background: var(--pi-head); color: var(--pi-navy); font-size: 7.8pt; font-weight: 700; }
+  .pi-bank td { font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .pi-list { padding-left: 5mm !important; }
+  .pi-list li { padding-left: 1mm; }
+  .pi-list li + li { margin-top: 1.2mm; }
+
+  .pi-footer { margin-top: 4mm; padding-top: 2mm; border-top: 1px solid var(--pi-line); color: var(--pi-muted); font-size: 7pt; font-weight: 600; letter-spacing: .08em; text-align: center; }
+
+  @media (max-width: 720px) {
+    .pi-doc { padding: 12px; }
+    .pi-meta, .pi-columns { grid-template-columns: 1fr; }
+    .pi-meta > div { border-left: 0; border-top: 1px solid var(--pi-line); }
+    .pi-meta > div:first-child { border-top: 0; }
+  }
+
   @media print {
-    .admin-sidebar, .admin-assistant, .site-header, header.site-header, footer, .proforma-form, .no-print { display: none !important; }
-    .proforma-result { margin: 0; }
+    @page {
+      size: A4 portrait;
+      margin: 11mm 11mm 15mm;
+      @bottom-center {
+        content: "SYSTEM-GENERATED DOCUMENT  |  ADVANCED CENTRE FOR CRYO ELECTRON MICROSCOPY (ACCEM)  |  IISc BENGALURU";
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+        font-size: 6.8pt;
+        font-weight: 600;
+        letter-spacing: .06em;
+        color: #53657b;
+        vertical-align: middle;
+      }
+      @bottom-right {
+        content: "Page " counter(page) " of " counter(pages);
+        font-family: Inter, "Helvetica Neue", Arial, sans-serif;
+        font-size: 6.8pt;
+        color: #53657b;
+        vertical-align: middle;
+      }
+    }
+    html { background: #eef3f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: none !important; }
+    .site-header, .facility-notice, .admin-sidebar, .admin-assistant, .site-footer,
+    .flash-messages, .page-header, .proforma-form, .no-print { display: none !important; }
+    .site-shell, .admin-area .site-shell { width: auto !important; margin: 0 !important; box-shadow: none !important; background: none !important; }
+    .portal-page, .page-content, .admin-area .page-content { margin: 0 !important; padding: 0 !important; background: none !important; }
+    .proforma-result { margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; background: none !important; }
+    .pi-doc { max-width: none; padding: 0; border: 0; background: none; }
+    /* The page footer is printed in the page margin on every page instead. */
+    .pi-footer { display: none; }
   }
 </style>
 <main class="portal-page"><section class="page-content">
@@ -56,37 +173,181 @@
         </select>
       </label>
       <label class="form-field proforma-check"><input type="checkbox" name="processing_requested" value="1" {% if form.processing_requested %}checked{% endif %}> <span>Data processing / image analysis (industry only)</span></label>
+
+      <div class="proforma-subhead">Study details<small>Printed on the proforma only. Leave blank if not known yet.</small></div>
+      <label class="form-field"><span>Study / service description</span><input name="study_description" maxlength="200" value="{{ arg('study_description') }}" placeholder="Defaults to the services estimated"></label>
+      <label class="form-field"><span>Proposed study date</span><input name="study_date" type="date" value="{{ arg('study_date', 10) }}"></label>
+
+      <div class="proforma-subhead">Bill to<small>Copy these from the user's registration or billing records. Blank fields are left out of the document.</small></div>
+      <label class="form-field"><span>Designation</span><input name="bill_designation" maxlength="150" value="{{ arg('bill_designation', 150) }}" placeholder="e.g. Associate Professor"></label>
+      <label class="form-field"><span>Department / Centre</span><input name="bill_department" maxlength="150" value="{{ arg('bill_department', 150) }}" placeholder="e.g. Molecular Biophysics Unit"></label>
+      <label class="form-field full"><span>Institution / Organisation</span><input name="bill_institution" maxlength="200" value="{{ arg('bill_institution') }}" placeholder="e.g. Indian Institute of Science"></label>
+      <label class="form-field full"><span>Billing address (street, building, area)</span><textarea name="bill_address" maxlength="400" rows="3" placeholder="One line per address line">{{ arg('bill_address', 400) }}</textarea></label>
+      <label class="form-field"><span>City</span><input name="bill_city" maxlength="100" value="{{ arg('bill_city', 100) }}" placeholder="e.g. Bengaluru"></label>
+      <label class="form-field"><span>State</span><input name="bill_state" maxlength="100" value="{{ arg('bill_state', 100) }}" placeholder="e.g. Karnataka"></label>
+      <label class="form-field"><span>PIN code</span><input name="bill_pin" maxlength="12" value="{{ arg('bill_pin', 12) }}" placeholder="e.g. 560012"></label>
+      <label class="form-field"><span>Country</span><input name="bill_country" maxlength="100" value="{{ arg('bill_country', 100) }}" placeholder="e.g. India"></label>
+      <label class="form-field"><span>Official email</span><input name="bill_email" type="email" maxlength="150" value="{{ arg('bill_email', 150) }}"></label>
+      <label class="form-field"><span>GSTIN (if any)</span><input name="bill_gstin" maxlength="20" value="{{ arg('bill_gstin', 20) }}" placeholder="Organisation's GSTIN, where applicable"></label>
+
       <div class="form-actions"><button class="button" type="submit"><i class="fa-solid fa-calculator" aria-hidden="true"></i> Calculate estimate</button>{% if estimate or error %}<a class="button button--secondary" href="{{ url_for('admin.proforma_estimate') }}">Clear</a>{% endif %}</div>
     </form>
     {% if error %}<div class="alert" role="alert">{{ error }}</div>{% endif %}
   </section>
 
   {% if estimate %}
+  {%- set category_display = {'internal': 'Internal (IISc)', 'academic': 'External Academic', 'industry': 'Industry'} -%}
+  {%- set issue_date = now.strftime('%d %B %Y') -%}
+  {%- set document_id = 'ACCEM/PI/' ~ now.strftime('%Y') ~ '/' ~ now.strftime('%m%d-%H%M%S') -%}
+  {%- set study_date = arg('study_date', 10) -%}
+  {%- set facility_grids = estimate.grid_source == 'facility' -%}
+  {%- set grid_type_label = 'Gold / carbon-coated / graphene-oxide' if form.grid_type == 'gold_carbon_graphene' else 'Holey carbon' -%}
+  {%- if estimate.number_of_slots -%}
+    {%- set default_study = 'Cryo-EM grid freezing, screening and data collection' ~ (' with data processing / image analysis' if estimate.processing_applied else '') -%}
+  {%- else -%}
+    {%- set default_study = 'Cryo-EM grid freezing' -%}
+  {%- endif -%}
+  {%- set address_lines = [] -%}
+  {%- for line in arg('bill_address', 400).splitlines() if line.strip() -%}{%- set _ = address_lines.append(line.strip()) -%}{%- endfor -%}
+  {%- set city_line = [arg('bill_city', 100), arg('bill_state', 100)]|select|join(', ') -%}
+  {%- set city_line = (city_line ~ (' - ' if city_line and arg('bill_pin', 12) else '') ~ arg('bill_pin', 12))|trim -%}
   <section class="data-panel proforma-result" aria-labelledby="proforma-heading">
-    <h2 id="proforma-heading">Proforma invoice (estimate)</h2>
-    <div class="proforma-meta">
-      <div><small>User</small><strong>{{ form.user_name }}</strong></div>
-      <div><small>Category</small><strong>{{ category_labels[estimate.user_category] }}</strong></div>
-      <div><small>Samples</small><strong>{{ estimate.number_of_samples }}</strong></div>
-      <div><small>Grids</small><strong>{{ estimate.number_of_grids }}</strong></div>
-      <div><small>Slots</small><strong>{{ estimate.number_of_slots }}</strong></div>
-      <div><small>Date</small><strong>{{ today.strftime('%d %b %Y') }}</strong></div>
+    <div class="proforma-toolbar no-print">
+      <p>Approximate value to complete the study: <strong>{{ format_inr(estimate.grand_total) }}</strong>{% if estimate.number_of_samples > 1 %} (about {{ format_inr(estimate.per_sample) }} per sample){% endif %}</p>
+      <button class="button button--secondary" type="button" onclick="window.print()"><i class="fa-solid fa-print" aria-hidden="true"></i> Print / save as PDF</button>
     </div>
-    <p class="proforma-headline">Approximate value to complete the study: <strong>{{ format_inr(estimate.grand_total) }}</strong>{% if estimate.number_of_samples > 1 %} <span>(about {{ format_inr(estimate.per_sample) }} per sample)</span>{% endif %}</p>
-    <table class="proforma-table">
-      <thead><tr><th>Item</th><th>Quantity</th><th class="amount">Amount</th></tr></thead>
-      <tbody>
-        {% for label, qty, amount in estimate.lines %}<tr><td>{{ label }}</td><td>{{ qty }}</td><td class="amount">{{ format_inr(amount) }}</td></tr>{% endfor %}
-      </tbody>
-      <tfoot>
-        <tr><td colspan="2">Subtotal</td><td class="amount">{{ format_inr(estimate.subtotal) }}</td></tr>
-        <tr><td colspan="2">{% if estimate.gst_rate %}GST ({{ (estimate.gst_rate * 100)|int }}%){% else %}GST (not applicable to internal users){% endif %}</td><td class="amount">{{ format_inr(estimate.gst) }}</td></tr>
-        <tr class="proforma-total"><td colspan="2">Estimated total</td><td class="amount">{{ format_inr(estimate.grand_total) }}</td></tr>
-      </tfoot>
-    </table>
-    {% if form.processing_requested and not estimate.processing_applied %}<p class="proforma-note">Data processing is offered to industry users only{% if estimate.number_of_slots == 0 %} and needs at least one microscope slot{% endif %}, so it is not included.</p>{% endif %}
-    <p class="proforma-note">This is an approximate estimate, not a final bill. Actual charges depend on the grids, slots and services used and are issued on the charge sheet after each booking.</p>
-    <div class="form-actions no-print"><button class="button button--secondary" type="button" onclick="window.print()"><i class="fa-solid fa-print" aria-hidden="true"></i> Print / save as PDF</button></div>
+    {% if form.processing_requested and not estimate.processing_applied %}<p class="proforma-note no-print">Data processing is offered to industry users only{% if estimate.number_of_slots == 0 %} and needs at least one microscope slot{% endif %}, so it is not included.</p>{% endif %}
+
+    <article class="pi-doc" aria-labelledby="proforma-heading">
+      <header class="pi-header">
+        <img src="{{ url_for('static', filename='images/iisc_logo-128w.webp') }}" width="128" height="128" alt="Indian Institute of Science">
+        <div class="pi-header__text">
+          <div class="pi-header__centre">ADVANCED CENTRE FOR CRYO ELECTRON MICROSCOPY (ACCEM)</div>
+          <div class="pi-header__inst">INDIAN INSTITUTE OF SCIENCE (IISc), BENGALURU</div>
+        </div>
+      </header>
+      <h2 class="pi-title" id="proforma-heading">PROFORMA INVOICE</h2>
+
+      <div class="pi-meta">
+        <div><span class="pi-label">Document ID</span><strong>{{ document_id }}</strong></div>
+        <div><span class="pi-label">Document status</span><span class="pi-status">ESTIMATE ONLY</span></div>
+        <div><span class="pi-label">Issue date</span><strong>{{ issue_date }}</strong></div>
+      </div>
+
+      <div class="pi-columns">
+        <section class="pi-section" aria-label="Bill to">
+          <h2>Bill To</h2>
+          <div class="pi-section__body">
+            <p class="pi-party">{{ form.user_name }}</p>
+            <p class="pi-address">
+              {% if arg('bill_designation', 150) %}<span>{{ arg('bill_designation', 150) }}</span>{% endif %}
+              {% if arg('bill_department', 150) %}<span>{{ arg('bill_department', 150) }}</span>{% endif %}
+              {% if arg('bill_institution') %}<span>{{ arg('bill_institution') }}</span>{% endif %}
+              {% for line in address_lines %}<span>{{ line }}</span>{% endfor %}
+              {% if city_line %}<span>{{ city_line }}</span>{% endif %}
+              {% if arg('bill_country', 100) %}<span>{{ arg('bill_country', 100) }}</span>{% endif %}
+            </p>
+            <table class="pi-kv pi-party-meta">
+              <tr><th scope="row">Email</th><td>{% if arg('bill_email', 150) %}{{ arg('bill_email', 150) }}{% else %}<span class="pi-placeholder">Not provided</span>{% endif %}</td></tr>
+              <tr><th scope="row">User category</th><td>{{ category_display.get(estimate.user_category, category_labels[estimate.user_category]) }}</td></tr>
+              {% if arg('bill_gstin', 20) %}<tr><th scope="row">GSTIN</th><td>{{ arg('bill_gstin', 20) }}</td></tr>{% endif %}
+            </table>
+          </div>
+        </section>
+
+        <section class="pi-section" aria-label="Study and service details">
+          <h2>Study / Service Details</h2>
+          <div class="pi-section__body">
+            <table class="pi-kv">
+              <tr><th scope="row">Study / service</th><td>{{ arg('study_description') or default_study }}</td></tr>
+              <tr><th scope="row">Number of samples</th><td>{{ estimate.number_of_samples }}</td></tr>
+              <tr><th scope="row">Number of grids</th><td>{{ estimate.number_of_grids }}</td></tr>
+              <tr><th scope="row">Grids provided by</th><td>{% if facility_grids %}ACCEM facility ({{ grid_type_label }}){% else %}User / lab{% endif %}</td></tr>
+              <tr><th scope="row">Microscope allocation</th><td>{% if estimate.number_of_slots %}{{ estimate.number_of_slots }} slot{{ 's' if estimate.number_of_slots != 1 }} of 24 hours{% else %}None (grid freezing only){% endif %}</td></tr>
+              <tr><th scope="row">Proposed study date</th><td>{% if study_date %}{{ study_date[8:10] }}-{{ study_date[5:7] }}-{{ study_date[0:4] }}{% else %}<span class="pi-placeholder">To be scheduled</span>{% endif %}</td></tr>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <section class="pi-section pi-section--flow" aria-label="Itemised charges">
+        <h2>Itemised Charges</h2>
+        <table class="pi-charges">
+          <colgroup><col style="width:50%"><col style="width:16%"><col style="width:16%"><col style="width:18%"></colgroup>
+          <thead><tr><th scope="col">Description of Services</th><th scope="col" class="qty">Quantity</th><th scope="col" class="num">Rate (₹)</th><th scope="col" class="num">Amount (₹)</th></tr></thead>
+          <tbody>
+            {% for label, qty, amount in estimate.lines %}
+            {%- set count = (qty.split()[0]|int) if qty.split() else 0 -%}
+            {%- set is_slot = 'slot' in qty -%}
+            {%- set is_service = 'service' in qty -%}
+            {%- set is_handling = label.startswith('Handling charge') -%}
+            {%- set unit = ('slot' if count == 1 else 'slots') if is_slot else (('service' if count == 1 else 'services') if is_service else ('grid' if count == 1 else 'grids')) -%}
+            <tr>
+              <td>{{ label }}
+                {%- if label == 'Grid with C-clip and base ring' %}<small>{{ grid_type_label }} grid; C-clip and base ring are charged together with the grid.</small>
+                {%- elif label == 'Grid charge' %}<small>User-provided grids: no grid purchase charge.</small>
+                {%- elif is_handling and count and amount %}<small>Prorated at ₹{{ money(amount / count * 4) }} per 4 grids.</small>
+                {%- elif is_slot %}<small>24-hour microscope slots; screening and data collection are charged at the same slot rate.</small>
+                {%- endif %}</td>
+              <td class="qty">{{ count }} {{ unit }}</td>
+              <td class="num">{% if amount and count %}{{ money(amount / count) }}{% elif 'included' in label %}Included{% else %}—{% endif %}</td>
+              <td class="num">{{ money(amount) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot>
+            <tr><td colspan="3">Subtotal</td><td class="num">{{ money(estimate.subtotal) }}</td></tr>
+            <tr><td colspan="3">{% if estimate.gst_rate %}GST @ {{ (estimate.gst_rate * 100)|int }}%{% else %}GST (not applicable to internal users){% endif %}</td><td class="num">{{ money(estimate.gst) }}</td></tr>
+            <tr class="pi-total"><td colspan="3">Estimated Total (₹)</td><td class="num">{{ money(estimate.grand_total) }}</td></tr>
+          </tfoot>
+        </table>
+      </section>
+
+      <section class="pi-section" aria-label="Bank details for electronic transfer">
+        <h2>Bank Details for Electronic Transfer</h2>
+        <table class="pi-bank">
+          <tr><th scope="row">Bank</th><td>STATE BANK OF INDIA</td></tr>
+          <tr><th scope="row">Beneficiary</th><td>INDIAN INSTITUTE OF SCIENCE, BANGALORE</td></tr>
+          <tr><th scope="row">Branch</th><td>INDIAN INSTITUTE OF SCIENCE, SCIENCE INSTITUTE POST OFFICE, BANGALORE - 560012</td></tr>
+          <tr><th scope="row">Account Number</th><td>31728098170</td></tr>
+          <tr><th scope="row">Account Type</th><td>Savings Bank Account</td></tr>
+          <tr><th scope="row">RTGS / IFSC</th><td>SBIN0002215</td></tr>
+          <tr><th scope="row">SWIFT</th><td>SBININBB425</td></tr>
+          <tr><th scope="row">MICR</th><td>560002020</td></tr>
+          <tr><th scope="row">PAN</th><td>AAATI1501J</td></tr>
+          <tr><th scope="row">GSTIN</th><td>29AAATI1501J2ZV</td></tr>
+          <tr><th scope="row">Bank Contact Numbers</th><td>080-23600567 / 080-23604525 / 080-23600165</td></tr>
+        </table>
+      </section>
+
+      <section class="pi-section" aria-label="Payment instructions">
+        <h2>Payment Instructions</h2>
+        <div class="pi-section__body">
+          <ol class="pi-list">
+            <li>Payment should be made through NEFT / RTGS to the bank account details provided.</li>
+            <li>After completing the payment, the user must share the transaction details with ACCEM for tax invoice generation.</li>
+            <li>While sharing payment details, the user must provide complete billing information, including name, institution, department, address and GSTIN, wherever applicable.</li>
+            <li>The tax invoice will be processed after payment confirmation and verification of the billing details.</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="pi-section" aria-label="Terms and conditions">
+        <h2>Terms and Conditions</h2>
+        <div class="pi-section__body">
+          <ul class="pi-list">
+            <li>This is a proforma estimate and not a tax invoice.</li>
+            <li>Final charges will be based on the actual grids, microscope slots and services utilised.</li>
+            <li>Any additional grids, slots, consumables or services beyond those listed will be charged separately as per the applicable ACCEM charge sheet.</li>
+            <li>Payment should be made to the institutional bank account specified in this document.</li>
+            <li>The payer must share transaction details and the required billing information for tax invoice processing.</li>
+            <li>Applicable GST will be charged according to the user category and prevailing regulations.</li>
+          </ul>
+        </div>
+      </section>
+
+      <footer class="pi-footer">SYSTEM-GENERATED DOCUMENT &nbsp;|&nbsp; ADVANCED CENTRE FOR CRYO ELECTRON MICROSCOPY (ACCEM) &nbsp;|&nbsp; IISc BENGALURU</footer>
+    </article>
   </section>
   {% endif %}
 </section></main>

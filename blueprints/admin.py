@@ -496,6 +496,8 @@ def proforma_estimate():
         category_labels=dict(_PROFORMA_CATEGORIES),
         format_inr=format_inr,
         today=today_ist(),
+        # Issue time for the printed document's ID and date (display only).
+        now=now_ist(),
     )
 
 
