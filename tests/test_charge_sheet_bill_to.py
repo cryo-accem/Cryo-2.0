@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import database
 from billing_address import (
-    address_lines, bill_to_from_form, build_address_book, missing_bill_to,
-    suggested_bill_to,
+    address_lines, bill_to_from_form, billing_contact_lines, build_address_book,
+    missing_bill_to, stored_bill_to, suggested_bill_to,
 )
 from main import create_app
 
@@ -17,8 +17,21 @@ ADDRESS = {
     "bill_to_designation": "Associate Professor",
     "bill_to_department": "Solid State and Structural Chemistry Unit",
     "bill_to_institute": "Indian Institute of Science",
-    "bill_to_city": "Bangalore 560012",
+    "bill_to_address": "C V Raman Road",
+    "bill_to_city": "Bangalore",
+    "bill_to_pin": "560012",
+    "bill_to_state": "Karnataka",
+    "bill_to_country": "India",
+    "bill_to_gstin": "",
+    "bill_to_email": "mondal@iisc.ac.in",
 }
+EXTERNAL = dict(
+    ADDRESS,
+    bill_to_institute="National Institute of Example Sciences",
+    bill_to_address="Plot 12, Knowledge Park",
+    bill_to_city="Hyderabad", bill_to_pin="500032", bill_to_state="Telangana",
+    bill_to_gstin="36aaaaa0000a1z5", bill_to_email="accounts@example.ac.in",
+)
 
 
 class AddressHelperTests(unittest.TestCase):
@@ -26,20 +39,57 @@ class AddressHelperTests(unittest.TestCase):
         self.assertEqual(address_lines(dict(ADDRESS)), [
             "Prof. Abhishek Mondal,", "Associate Professor,",
             "Solid State and Structural Chemistry Unit,",
-            "Indian Institute of Science,", "Bangalore 560012.",
+            "Indian Institute of Science,", "C V Raman Road,", "Bangalore - 560012,",
+            "Karnataka, India.",
         ])
+
+    def test_gstin_and_billing_email_print_under_the_address(self):
+        row = bill_to_from_form(EXTERNAL)
+        self.assertEqual(row["bill_to_gstin"], "36AAAAA0000A1Z5")
+        self.assertEqual(billing_contact_lines(row), [
+            ("GSTIN", "36AAAAA0000A1Z5"), ("Email", "accounts@example.ac.in"),
+        ])
+        # No GSTIN: only the email is printed.
+        self.assertEqual(billing_contact_lines(ADDRESS), [("Email", "mondal@iisc.ac.in")])
+
+    def test_old_city_and_pin_entries_are_split(self):
+        old = {key: value for key, value in ADDRESS.items() if key in {
+            "bill_to_name", "bill_to_designation", "bill_to_department", "bill_to_institute"}}
+        old["bill_to_city"] = "Bangalore 560012"
+        stored = stored_bill_to(old)
+        self.assertEqual((stored["bill_to_city"], stored["bill_to_pin"]), ("Bangalore", "560012"))
 
     def test_legacy_internal_rows_fall_back_to_pi_and_iisc(self):
         lines = address_lines({"origin": "Internal", "pi_name": "A Mondal", "user_name": "U"})
-        self.assertEqual(lines, ["A Mondal,", "Indian Institute of Science,", "Bangalore 560012."])
+        self.assertEqual(lines, [
+            "A Mondal,", "Indian Institute of Science,", "Bangalore - 560012,", "Karnataka, India.",
+        ])
 
     def test_required_details(self):
         internal = {"origin": "Internal"}
         self.assertEqual(missing_bill_to(ADDRESS, internal), [])
         partial = dict(ADDRESS, bill_to_designation="", bill_to_department="")
-        self.assertEqual(missing_bill_to(partial, internal), ["Designation", "Department / Unit"])
+        self.assertEqual(missing_bill_to(partial, internal), ["Designation", "Department / Centre"])
         # A company has no designation/department requirement.
         self.assertEqual(missing_bill_to(partial, {"origin": "Industry"}), [])
+        # IISc users are billed by debit head: street address and email are optional.
+        self.assertEqual(missing_bill_to(dict(ADDRESS, bill_to_address="", bill_to_email=""), internal), [])
+        external = {"origin": "External"}
+        self.assertEqual(
+            missing_bill_to(dict(EXTERNAL, bill_to_address="", bill_to_email=""), external),
+            ["Address (building, street, area)", "Billing email (tax invoice is sent here)"],
+        )
+        self.assertEqual(
+            missing_bill_to(dict(EXTERNAL, bill_to_email="not-an-email", bill_to_gstin="123"), external),
+            ["Billing email (enter a valid email address)", "GSTIN (15 characters, e.g. 29AAATI1501J2ZV)"],
+        )
+
+    def test_internal_suggestion_fills_iisc_address_and_pi_email(self):
+        suggestion = suggested_bill_to({"origin": "Internal", "pi_name": "A Mondal",
+                                        "pi_email": "pi@iisc.ac.in", "email": "student@iisc.ac.in"})
+        self.assertEqual(suggestion["bill_to_pin"], "560012")
+        self.assertEqual(suggestion["bill_to_state"], "Karnataka")
+        self.assertEqual(suggestion["bill_to_email"], "pi@iisc.ac.in")
 
     def test_address_is_remembered_per_pi(self):
         older = dict(ADDRESS, pi_name="Abhishek  Mondal", origin="Internal")
@@ -126,7 +176,7 @@ class SendChargeSheetBillToTests(unittest.TestCase):
         self.assertEqual(address_lines(captured)[0], "Prof. Abhishek Mondal,")
         stored = self._stored()
         for column, value in ADDRESS.items():
-            self.assertEqual(stored[column], value)
+            self.assertEqual(stored[column] or "", value)
         # The next history page pre-fills the saved address.
         html = self.client.get("/admin/history").get_data(as_text=True)
         self.assertIn('value="Solid State and Structural Chemistry Unit"', html)

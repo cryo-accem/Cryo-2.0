@@ -969,6 +969,12 @@ def _add_completion_columns(cur, table: str):
         "bill_to_department": "TEXT",
         "bill_to_institute": "TEXT",
         "bill_to_city": "TEXT",
+        "bill_to_address": "TEXT",
+        "bill_to_pin": "TEXT",
+        "bill_to_state": "TEXT",
+        "bill_to_country": "TEXT",
+        "bill_to_gstin": "TEXT",
+        "bill_to_email": "TEXT",
     }
     if not _is_sqlite_url():
         payment_columns = {
@@ -990,6 +996,12 @@ def _add_completion_columns(cur, table: str):
             "bill_to_department": "VARCHAR(150)",
             "bill_to_institute": "VARCHAR(150)",
             "bill_to_city": "VARCHAR(150)",
+            "bill_to_address": "VARCHAR(255)",
+            "bill_to_pin": "VARCHAR(12)",
+            "bill_to_state": "VARCHAR(100)",
+            "bill_to_country": "VARCHAR(100)",
+            "bill_to_gstin": "VARCHAR(15)",
+            "bill_to_email": "VARCHAR(150)",
         }
 
     for column, column_type in payment_columns.items():

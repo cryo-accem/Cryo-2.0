@@ -1,5 +1,5 @@
 from decimal import Decimal
-from billing_address import address_lines
+from billing_address import address_lines, billing_contact_lines
 from io import BytesIO
 import json
 import os
@@ -263,9 +263,10 @@ def _to_block(row):
     """The PI's address, as on the manual sheets, then the user it is for."""
     # _paragraph() escapes the text, so the values are inserted raw here.
     address = "<br/>".join(address_lines(row))
+    contact = "".join(f"<br/>{label}: {value}" for label, value in billing_contact_lines(row))
     user = str(row.get("user_name") or "")
     email = str(row.get("email") or "")
-    return f"<b>{address}</b><br/>User: {user} ({email})"
+    return f"<b>{address}</b>{contact}<br/>User: {user} ({email})"
 
 
 def _billing_lines(row, service):

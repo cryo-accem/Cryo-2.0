@@ -42,11 +42,13 @@
 
   {% macro bill_to_inputs(slot, combined=False) %}
   {% set is_industry = slot.origin|lower in ['industry', 'industrial', 'external industry'] %}
+  {% set is_internal = slot.origin|lower == 'internal' %}
   <details class="bill-to"{% if combined or slot.bill_to_missing %} open{% endif %}>
     <summary><i class="fa-solid fa-user" aria-hidden="true"></i> To (PI billing address){% if not combined and slot.bill_to_missing %} <span class="bill-to__needed">details needed</span>{% endif %}</summary>
-    <p class="bill-to__hint">Printed in the "To" block exactly as F&amp;A expects. Saved and reused for this PI's next bookings.</p>
-    {% for column, label, placeholder, industry_required in bill_to_fields %}
-    <label>{{ label }}<input name="{{ column }}" value="{{ slot.bill_to[column] if slot.bill_to else '' }}" placeholder="{{ placeholder }}" maxlength="150" autocomplete="off"{% if combined %} data-bill-to-input{% endif %}{% if industry_required or not (is_industry or combined) %} required{% endif %}></label>
+    <p class="bill-to__hint">Printed in the "To" block exactly as F&amp;A expects; IAC raises the tax invoice to this address. Saved and reused for this PI's next bookings.</p>
+    {% for column, label, placeholder, requirement, max_length in bill_to_fields %}
+    {% set required = requirement == 'all' or (not combined and ((requirement == 'non_industry' and not is_industry) or (requirement == 'external' and not is_internal))) %}
+    <label>{{ label }}<input name="{{ column }}"{% if column == 'bill_to_email' %} type="email"{% endif %} value="{{ slot.bill_to[column] if slot.bill_to else '' }}" placeholder="{{ placeholder }}" maxlength="{{ max_length }}" autocomplete="off"{% if combined %} data-bill-to-input{% endif %}{% if required %} required{% endif %}></label>
     {% endfor %}
   </details>
   {% endmacro %}
